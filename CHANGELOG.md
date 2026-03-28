@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.3...chrome-devtools-axi-v0.1.4) (2026-03-28)
+
+
+### Bug Fixes
+
+* enable codex hooks in config.toml ([1c7a38a](https://github.com/kunchenguid/chrome-devtools-axi/commit/1c7a38a6684edab81acf6ffcc831270792f7f191))
+
 ## [0.1.3](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.2...chrome-devtools-axi-v0.1.3) (2026-03-28)
 
 
