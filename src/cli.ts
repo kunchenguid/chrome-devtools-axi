@@ -5,9 +5,14 @@ import { countRefs, extractTitle, truncateSnapshot } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 
 const HELP = `usage: chrome-devtools-axi <command> [args]
-commands[12]:
-  open <url>, snapshot, click @<uid>, fill @<uid> <text>, type <text>,
-  press <key>, scroll <dir>, back, wait <ms|text>, eval <js>, start, stop
+commands[33]:
+  open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
+  type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
+  hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
+  upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
+  resize <w> <h>, emulate, console, console-get <id>, network,
+  network-get [id], lighthouse, perf-start, perf-stop,
+  perf-insight <set> <name>, heap <path>, start, stop
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -23,6 +28,22 @@ flags:
 examples:
   chrome-devtools-axi open https://example.com
   chrome-devtools-axi open https://example.com --full`,
+
+  screenshot: `usage: chrome-devtools-axi screenshot <path> [--uid @<uid>] [--full-page] [--format png|jpeg|webp]
+Save a screenshot to a file.
+
+args:
+  <path>  File path to save the screenshot (required)
+
+flags:
+  --uid @<uid>    Capture a specific element instead of the full viewport
+  --full-page     Capture the entire scrollable page
+  --format <fmt>  Image format: png (default), jpeg, or webp
+
+examples:
+  chrome-devtools-axi screenshot ./page.png
+  chrome-devtools-axi screenshot ./element.png --uid @3
+  chrome-devtools-axi screenshot ./full.png --full-page --format jpeg`,
 
   snapshot: `usage: chrome-devtools-axi snapshot [--full]
 Capture the current page accessibility snapshot.
@@ -142,10 +163,402 @@ Stop the bridge server and close the browser.
 
 examples:
   chrome-devtools-axi stop`,
+
+  // Page management
+  pages: `usage: chrome-devtools-axi pages
+List all open pages/tabs in the browser.
+
+examples:
+  chrome-devtools-axi pages`,
+
+  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--full]
+Open a new tab and navigate to a URL.
+
+args:
+  <url>  URL to open (required)
+
+flags:
+  --background  Open in background without bringing to front
+  --full        Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi newpage https://example.com
+  chrome-devtools-axi newpage https://example.com --background`,
+
+  selectpage: `usage: chrome-devtools-axi selectpage <id> [--full]
+Switch to a tab by page ID.
+
+args:
+  <id>  Page ID from the pages command (required)
+
+flags:
+  --full  Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi selectpage 1`,
+
+  closepage: `usage: chrome-devtools-axi closepage <id>
+Close a tab by page ID. The last open page cannot be closed.
+
+args:
+  <id>  Page ID from the pages command (required)
+
+examples:
+  chrome-devtools-axi closepage 2`,
+
+  resize: `usage: chrome-devtools-axi resize <width> <height>
+Resize the browser viewport.
+
+args:
+  <width>   Width in pixels (required)
+  <height>  Height in pixels (required)
+
+examples:
+  chrome-devtools-axi resize 1280 720
+  chrome-devtools-axi resize 390 844`,
+
+  // Interaction
+  hover: `usage: chrome-devtools-axi hover @<uid> [--full]
+Hover over an element to trigger hover states.
+
+args:
+  @<uid>  Element ref from snapshot (required)
+
+flags:
+  --full  Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi hover @5`,
+
+  drag: `usage: chrome-devtools-axi drag @<from> @<to> [--full]
+Drag an element onto another element.
+
+args:
+  @<from>  Element to drag (required)
+  @<to>    Element to drop onto (required)
+
+flags:
+  --full  Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi drag @3 @7`,
+
+  fillform: `usage: chrome-devtools-axi fillform @<uid>=<value>... [--full]
+Fill multiple form fields at once.
+
+args:
+  @<uid>=<value>  One or more field entries (required)
+
+flags:
+  --full  Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi fillform @1="hello" @2="world"
+  chrome-devtools-axi fillform @3="user@email.com" @4="password123"`,
+
+  dialog: `usage: chrome-devtools-axi dialog <accept|dismiss> [text]
+Handle a browser dialog (alert, confirm, prompt).
+
+args:
+  <action>  accept or dismiss (required)
+  [text]    Optional text to enter into a prompt dialog
+
+examples:
+  chrome-devtools-axi dialog accept
+  chrome-devtools-axi dialog dismiss
+  chrome-devtools-axi dialog accept "confirmed"`,
+
+  upload: `usage: chrome-devtools-axi upload @<uid> <path> [--full]
+Upload a file through a file input element.
+
+args:
+  @<uid>  File input element ref from snapshot (required)
+  <path>  Local file path to upload (required)
+
+flags:
+  --full  Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi upload @5 ./photo.jpg`,
+
+  // Emulation
+  emulate: `usage: chrome-devtools-axi emulate [flags]
+Emulate device features on the selected page.
+
+flags:
+  --viewport <spec>          Viewport like "390x844x3,mobile,touch"
+  --color-scheme <value>     dark | light | auto
+  --network <condition>      Offline | Slow 3G | Fast 3G | Slow 4G | Fast 4G
+  --cpu <rate>               CPU throttling rate 1-20
+  --geolocation <lat>x<lon>  Geolocation like "37.7749x-122.4194"
+  --user-agent <string>      Custom user agent string
+
+examples:
+  chrome-devtools-axi emulate --viewport "390x844x3,mobile" --color-scheme dark
+  chrome-devtools-axi emulate --network "Slow 3G" --cpu 4`,
+
+  // DevTools debugging
+  console: `usage: chrome-devtools-axi console [--type <type>] [--limit <n>] [--page <n>]
+List console messages for the current page.
+
+flags:
+  --type <type>  Filter by message type (error, warn, log, etc.)
+  --limit <n>    Maximum messages to return
+  --page <n>     Page number (0-based)
+
+examples:
+  chrome-devtools-axi console
+  chrome-devtools-axi console --type error --limit 50`,
+
+  "console-get": `usage: chrome-devtools-axi console-get <id>
+Get a specific console message by ID.
+
+args:
+  <id>  Message ID from the console command (required)
+
+examples:
+  chrome-devtools-axi console-get 3`,
+
+  network: `usage: chrome-devtools-axi network [--type <type>] [--limit <n>] [--page <n>]
+List network requests for the current page.
+
+flags:
+  --type <type>  Filter by resource type (fetch, xhr, document, etc.)
+  --limit <n>    Maximum requests to return
+  --page <n>     Page number (0-based)
+
+examples:
+  chrome-devtools-axi network
+  chrome-devtools-axi network --type fetch --limit 50`,
+
+  "network-get": `usage: chrome-devtools-axi network-get [id] [--response-file <path>] [--request-file <path>]
+Get a specific network request. If id is omitted, gets the selected request.
+
+args:
+  [id]  Request ID from the network command (optional)
+
+flags:
+  --response-file <path>  Save response body to file
+  --request-file <path>   Save request body to file
+
+examples:
+  chrome-devtools-axi network-get 42
+  chrome-devtools-axi network-get 42 --response-file ./response.json`,
+
+  // Performance
+  lighthouse: `usage: chrome-devtools-axi lighthouse [--device <device>] [--mode <mode>] [--output-dir <path>]
+Run a Lighthouse audit for accessibility, SEO, and best practices.
+
+flags:
+  --device <device>      desktop (default) or mobile
+  --mode <mode>          navigation (default) or snapshot
+  --output-dir <path>    Directory for reports
+
+examples:
+  chrome-devtools-axi lighthouse
+  chrome-devtools-axi lighthouse --device mobile --output-dir ./reports`,
+
+  "perf-start": `usage: chrome-devtools-axi perf-start [--no-reload] [--no-auto-stop] [--file <path>]
+Start a performance trace recording.
+
+flags:
+  --no-reload     Don't reload the page when starting
+  --no-auto-stop  Don't automatically stop the trace
+  --file <path>   Save raw trace data to file
+
+examples:
+  chrome-devtools-axi perf-start
+  chrome-devtools-axi perf-start --no-reload --file trace.json.gz`,
+
+  "perf-stop": `usage: chrome-devtools-axi perf-stop [--file <path>]
+Stop the active performance trace recording.
+
+flags:
+  --file <path>  Save raw trace data to file
+
+examples:
+  chrome-devtools-axi perf-stop
+  chrome-devtools-axi perf-stop --file trace.json.gz`,
+
+  "perf-insight": `usage: chrome-devtools-axi perf-insight <set-id> <insight-name>
+Analyze a specific performance insight from a trace.
+
+args:
+  <set-id>        Insight set ID from trace results (required)
+  <insight-name>  Insight name, e.g. "DocumentLatency" (required)
+
+examples:
+  chrome-devtools-axi perf-insight set1 DocumentLatency
+  chrome-devtools-axi perf-insight set1 LCPBreakdown`,
+
+  heap: `usage: chrome-devtools-axi heap <path>
+Capture a heap snapshot for memory leak debugging.
+
+args:
+  <path>  File path to save the .heapsnapshot file (required)
+
+examples:
+  chrome-devtools-axi heap ./snapshot.heapsnapshot`,
 };
 
 export function getCommandHelp(command: string): string | null {
   return COMMAND_HELP[command] ?? null;
+}
+
+export interface ScreenshotArgs {
+  filePath: string | null;
+  uid: string | undefined;
+  fullPage: boolean;
+  format: string | undefined;
+}
+
+export function parseScreenshotArgs(args: string[]): ScreenshotArgs {
+  let filePath: string | null = null;
+  let uid: string | undefined;
+  let fullPage = false;
+  let format: string | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--uid" && i + 1 < args.length) {
+      const raw = args[++i];
+      uid = raw.startsWith("@") ? raw.slice(1) : raw;
+    } else if (a === "--full-page") {
+      fullPage = true;
+    } else if (a === "--format" && i + 1 < args.length) {
+      format = args[++i];
+    } else if (!a.startsWith("--")) {
+      filePath = a;
+    }
+  }
+
+  return { filePath, uid, fullPage, format };
+}
+
+export function formatScreenshotOutput(filePath: string): string {
+  return encode({ screenshot: filePath });
+}
+
+/** Parse MCP list_pages markdown into structured data. */
+export function parsePagesList(text: string): { id: number; url: string; selected: boolean }[] {
+  const pages: { id: number; url: string; selected: boolean }[] = [];
+  for (const line of text.split("\n")) {
+    const m = line.match(/^(\d+):\s+(\S+)(\s+\[selected\])?/);
+    if (m) {
+      pages.push({ id: parseInt(m[1], 10), url: m[2], selected: !!m[3] });
+    }
+  }
+  return pages;
+}
+
+/** Format raw MCP text result as AXI output: labeled block + truncation + suggestions. */
+export function formatMcpResult(label: string, text: string, suggestions: string[]): string {
+  const blocks: string[] = [];
+  const tr = truncateSnapshot(text, false, 2000);
+  blocks.push(`${label}:\n${tr.text.trimEnd()}`);
+  if (tr.truncated) {
+    blocks[0] += `\n    ... (truncated, ${tr.totalLength} chars total)`;
+  }
+  if (suggestions.length > 0) {
+    blocks.push(renderHelp(suggestions));
+  }
+  return renderOutput(blocks);
+}
+
+export function parseFillFormArgs(args: string[]): { entries: { uid: string; value: string }[] } {
+  const entries: { uid: string; value: string }[] = [];
+  for (const arg of args) {
+    if (arg === "--full") continue;
+    const match = arg.match(/^@([^=]+)=(.+)$/);
+    if (!match) continue;
+    const uid = match[1];
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    entries.push({ uid, value });
+  }
+  return { entries };
+}
+
+export interface EmulateArgs {
+  viewport?: string;
+  colorScheme?: string;
+  networkConditions?: string;
+  cpuThrottlingRate?: number;
+  geolocation?: string;
+  userAgent?: string;
+}
+
+export function parseEmulateArgs(args: string[]): EmulateArgs {
+  const result: EmulateArgs = {};
+  let i = 0;
+  while (i < args.length) {
+    switch (args[i]) {
+      case "--viewport": result.viewport = args[++i]; break;
+      case "--color-scheme": result.colorScheme = args[++i]; break;
+      case "--network": result.networkConditions = args[++i]; break;
+      case "--cpu": result.cpuThrottlingRate = parseInt(args[++i], 10); break;
+      case "--geolocation": result.geolocation = args[++i]; break;
+      case "--user-agent": result.userAgent = args[++i]; break;
+    }
+    i++;
+  }
+  return JSON.parse(JSON.stringify(result));
+}
+
+export function parseConsoleArgs(args: string[]): { types?: string[]; pageSize?: number; pageIdx?: number } {
+  const result: { types?: string[]; pageSize?: number; pageIdx?: number } = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--type" && i + 1 < args.length) { result.types = [args[++i]]; }
+    else if (args[i] === "--limit" && i + 1 < args.length) { result.pageSize = parseInt(args[++i], 10); }
+    else if (args[i] === "--page" && i + 1 < args.length) { result.pageIdx = parseInt(args[++i], 10); }
+  }
+  return result;
+}
+
+export function parseNetworkArgs(args: string[]): { resourceTypes?: string[]; pageSize?: number; pageIdx?: number } {
+  const result: { resourceTypes?: string[]; pageSize?: number; pageIdx?: number } = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--type" && i + 1 < args.length) { result.resourceTypes = [args[++i]]; }
+    else if (args[i] === "--limit" && i + 1 < args.length) { result.pageSize = parseInt(args[++i], 10); }
+    else if (args[i] === "--page" && i + 1 < args.length) { result.pageIdx = parseInt(args[++i], 10); }
+  }
+  return result;
+}
+
+export function parseNetworkGetArgs(args: string[]): { reqid?: number; responseFilePath?: string; requestFilePath?: string } {
+  const result: { reqid?: number; responseFilePath?: string; requestFilePath?: string } = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--response-file" && i + 1 < args.length) { result.responseFilePath = args[++i]; }
+    else if (args[i] === "--request-file" && i + 1 < args.length) { result.requestFilePath = args[++i]; }
+    else if (!args[i].startsWith("--")) { result.reqid = parseInt(args[i], 10); }
+  }
+  return result;
+}
+
+export function parseLighthouseArgs(args: string[]): { device?: string; mode?: string; outputDirPath?: string } {
+  const result: { device?: string; mode?: string; outputDirPath?: string } = {};
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case "--device": result.device = args[++i]; break;
+      case "--mode": result.mode = args[++i]; break;
+      case "--output-dir": result.outputDirPath = args[++i]; break;
+    }
+  }
+  return result;
+}
+
+export function parsePerfStartArgs(args: string[]): { reload?: boolean; autoStop?: boolean; filePath?: string } {
+  const result: { reload?: boolean; autoStop?: boolean; filePath?: string } = {};
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case "--no-reload": result.reload = false; break;
+      case "--no-auto-stop": result.autoStop = false; break;
+      case "--file": result.filePath = args[++i]; break;
+    }
+  }
+  return result;
 }
 
 function renderHelp(lines: string[]): string {
@@ -216,9 +629,14 @@ function formatPageOutput(snapshot: string, command: string, url?: string, full 
   return renderOutput(blocks);
 }
 
-/** Strip the `## Latest page snapshot` header that chrome-devtools-mcp prepends. */
+/** Strip everything before the actual accessibility tree (MCP may prepend status lines and headers). */
 function stripSnapshotHeader(text: string): string {
-  return text.replace(/^##\s+Latest page snapshot\s*\n/, "");
+  // Find the first line that looks like a tree node (uid= or RootWebArea)
+  const lines = text.split("\n");
+  const treeStart = lines.findIndex((l) => /\bRootWebArea\b|\buid=/.test(l));
+  if (treeStart > 0) return lines.slice(treeStart).join("\n");
+  // Fallback: strip known headers
+  return text.replace(/^[\s\S]*?##\s+Latest page snapshot\s*\n/, "");
 }
 
 /** Strip leading @ from uid ref. */
@@ -264,6 +682,23 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
 async function handleSnapshot(full: boolean): Promise<string> {
   const snapshot = stripSnapshotHeader(await callTool("take_snapshot"));
   return formatPageOutput(snapshot, "snapshot", undefined, full);
+}
+
+async function handleScreenshot(args: string[]): Promise<string> {
+  const parsed = parseScreenshotArgs(args);
+  if (!parsed.filePath) {
+    throw new CdpError("Missing file path", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi screenshot ./page.png` to save a screenshot",
+    ]);
+  }
+
+  const toolArgs: Record<string, unknown> = { filePath: parsed.filePath };
+  if (parsed.uid) toolArgs.uid = parsed.uid;
+  if (parsed.fullPage) toolArgs.fullPage = true;
+  if (parsed.format) toolArgs.format = parsed.format;
+
+  await callTool("take_screenshot", toolArgs);
+  return formatScreenshotOutput(parsed.filePath);
 }
 
 async function handleClick(args: string[], full: boolean): Promise<string> {
@@ -366,6 +801,22 @@ async function handleWait(args: string[]): Promise<string> {
   return renderOutput(blocks);
 }
 
+/** Wrap JS input in an arrow function for MCP evaluate_script. */
+function wrapJsExpression(js: string): string {
+  return `() => (${js.trim()})`;
+}
+
+/** Extract the actual value from MCP evaluate_script response. */
+function parseEvalResult(output: string): string {
+  // MCP wraps results in: "Script ran on page and returned:\n```json\n<value>\n```"
+  const jsonBlock = output.match(/```json\n([\s\S]*?)\n```/);
+  if (jsonBlock) return jsonBlock[1].trim();
+  // Fallback: strip the preamble if present
+  const preamble = "Script ran on page and returned:";
+  if (output.includes(preamble)) return output.slice(output.indexOf(preamble) + preamble.length).trim();
+  return output.trim();
+}
+
 async function handleEval(args: string[]): Promise<string> {
   const js = args.join(" ");
   if (!js) {
@@ -374,10 +825,10 @@ async function handleEval(args: string[]): Promise<string> {
     ]);
   }
 
-  const output = await callTool("evaluate_script", { function: js });
+  const output = await callTool("evaluate_script", { function: wrapJsExpression(js) });
 
   const blocks: string[] = [];
-  blocks.push(encode({ result: output.trim() }));
+  blocks.push(encode({ result: parseEvalResult(output) }));
   const suggestions = getSuggestions({ command: "eval" });
   if (suggestions.length > 0) blocks.push(renderHelp(suggestions));
   return renderOutput(blocks);
@@ -397,6 +848,286 @@ async function handleStop(): Promise<string> {
   return formatStopOutput(wasStopped);
 }
 
+// --- Page management handlers ---
+
+async function handlePages(): Promise<string> {
+  const result = await callTool("list_pages");
+  const pages = parsePagesList(result);
+  if (pages.length === 0) {
+    return "pages: 0 pages open";
+  }
+  const blocks: string[] = [];
+  const header = `pages[${pages.length}]{id,url,selected}:`;
+  const rows = pages.map((p) => `  ${p.id},${p.url},${p.selected}`);
+  blocks.push(`${header}\n${rows.join("\n")}`);
+  blocks.push(renderHelp([
+    "Run `chrome-devtools-axi selectpage <id>` to switch tabs",
+    "Run `chrome-devtools-axi newpage <url>` to open a new tab",
+  ]));
+  return renderOutput(blocks);
+}
+
+async function handleNewPage(args: string[], full: boolean): Promise<string> {
+  const url = args.filter((a) => !a.startsWith("--"))[0];
+  if (!url) {
+    throw new CdpError("Missing URL", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi newpage https://example.com` to open a new tab",
+    ]);
+  }
+  const background = args.includes("--background");
+  const toolArgs: Record<string, unknown> = { url };
+  if (background) toolArgs.background = true;
+  await callTool("new_page", toolArgs);
+  const snapshot = stripSnapshotHeader(await callTool("take_snapshot"));
+  return formatPageOutput(snapshot, "newpage", url, full);
+}
+
+async function handleSelectPage(args: string[], full: boolean): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new CdpError("Missing page ID", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi selectpage <id>` — get ID from `pages` command",
+    ]);
+  }
+  const pageId = parseInt(id, 10);
+  if (isNaN(pageId)) {
+    throw new CdpError(`Invalid page ID: ${id}`, "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi pages` to list available page IDs",
+    ]);
+  }
+  await callTool("select_page", { pageId });
+  const snapshot = stripSnapshotHeader(await callTool("take_snapshot"));
+  return formatPageOutput(snapshot, "selectpage", undefined, full);
+}
+
+async function handleClosePage(args: string[]): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new CdpError("Missing page ID", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi closepage <id>` — get ID from `pages` command",
+    ]);
+  }
+  const pageId = parseInt(id, 10);
+  if (isNaN(pageId)) {
+    throw new CdpError(`Invalid page ID: ${id}`, "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi pages` to list available page IDs",
+    ]);
+  }
+  // Check page count before closing — last page can't be closed
+  const beforeResult = await callTool("list_pages");
+  const pagesBefore = parsePagesList(beforeResult);
+  if (pagesBefore.length <= 1) {
+    const blocks = [encode({ status: "cannot close the last open page (no-op)" })];
+    blocks.push(renderHelp([
+      "Run `chrome-devtools-axi newpage <url>` to open another tab first",
+      "Run `chrome-devtools-axi stop` to shut down the browser entirely",
+    ]));
+    return renderOutput(blocks);
+  }
+  await callTool("close_page", { pageId });
+  return encode({ status: "closed", pageId });
+}
+
+async function handleResize(args: string[]): Promise<string> {
+  const [widthStr, heightStr] = args;
+  if (!widthStr || !heightStr) {
+    throw new CdpError("Missing width and/or height", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi resize 1280 720` to resize the viewport",
+    ]);
+  }
+  const width = parseInt(widthStr, 10);
+  const height = parseInt(heightStr, 10);
+  if (isNaN(width) || isNaN(height)) {
+    throw new CdpError("Width and height must be numbers", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi resize 1280 720` to resize the viewport",
+    ]);
+  }
+  await callTool("resize_page", { width, height });
+  return encode({ resized: { width, height } });
+}
+
+// --- Interaction handlers ---
+
+async function handleHover(args: string[], full: boolean): Promise<string> {
+  const uid = args[0];
+  if (!uid) {
+    throw new CdpError("Missing element ref", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi hover @<uid>` — get uid from snapshot",
+    ]);
+  }
+  const snapshot = await callWithSnapshot("hover", { uid: parseUid(uid) });
+  return formatPageOutput(snapshot, "hover", undefined, full);
+}
+
+async function handleDrag(args: string[], full: boolean): Promise<string> {
+  const from = args[0];
+  const to = args[1];
+  if (!from || !to) {
+    throw new CdpError("Missing element refs", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi drag @<from> @<to>` — get uids from snapshot",
+    ]);
+  }
+  const snapshot = await callWithSnapshot("drag", { from_uid: parseUid(from), to_uid: parseUid(to) });
+  return formatPageOutput(snapshot, "drag", undefined, full);
+}
+
+async function handleFillForm(args: string[], full: boolean): Promise<string> {
+  const { entries } = parseFillFormArgs(args);
+  if (entries.length === 0) {
+    throw new CdpError("No valid field entries", "VALIDATION_ERROR", [
+      'Run `chrome-devtools-axi fillform @1="hello" @2="world"` to fill multiple fields',
+    ]);
+  }
+  const snapshot = await callWithSnapshot("fill_form", { elements: entries });
+  return formatPageOutput(snapshot, "fillform", undefined, full);
+}
+
+async function handleDialog(args: string[]): Promise<string> {
+  const action = args[0];
+  if (!action || (action !== "accept" && action !== "dismiss")) {
+    throw new CdpError("Missing or invalid action", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi dialog accept` or `chrome-devtools-axi dialog dismiss`",
+    ]);
+  }
+  const params: Record<string, unknown> = { action };
+  const promptText = args.slice(1).join(" ");
+  if (promptText) params.promptText = promptText;
+  await callTool("handle_dialog", params);
+  return encode({ dialog: action });
+}
+
+async function handleUpload(args: string[], full: boolean): Promise<string> {
+  const uid = args[0];
+  const filePath = args[1];
+  if (!uid) {
+    throw new CdpError("Missing element ref", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi upload @<uid> <path>` — get uid from snapshot",
+    ]);
+  }
+  if (!filePath) {
+    throw new CdpError("Missing file path", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi upload @<uid> /path/to/file` to upload a file",
+    ]);
+  }
+  const snapshot = await callWithSnapshot("upload_file", { uid: parseUid(uid), filePath });
+  return formatPageOutput(snapshot, "upload", undefined, full);
+}
+
+// --- Emulation handler ---
+
+async function handleEmulate(args: string[]): Promise<string> {
+  const parsed = parseEmulateArgs(args);
+  const mcpArgs: Record<string, unknown> = {};
+  if (parsed.viewport !== undefined) mcpArgs.viewport = parsed.viewport;
+  if (parsed.colorScheme !== undefined) mcpArgs.colorScheme = parsed.colorScheme;
+  if (parsed.networkConditions !== undefined) mcpArgs.networkConditions = parsed.networkConditions;
+  if (parsed.cpuThrottlingRate !== undefined) mcpArgs.cpuThrottlingRate = parsed.cpuThrottlingRate;
+  if (parsed.geolocation !== undefined) mcpArgs.geolocation = parsed.geolocation;
+  if (parsed.userAgent !== undefined) mcpArgs.userAgent = parsed.userAgent;
+  await callTool("emulate", mcpArgs);
+  return encode({ emulated: parsed });
+}
+
+// --- DevTools debugging handlers ---
+
+async function handleConsole(args: string[]): Promise<string> {
+  const parsed = parseConsoleArgs(args);
+  const mcpArgs: Record<string, unknown> = {};
+  if (parsed.types) mcpArgs.types = parsed.types;
+  if (parsed.pageSize !== undefined) mcpArgs.pageSize = parsed.pageSize;
+  if (parsed.pageIdx !== undefined) mcpArgs.pageIdx = parsed.pageIdx;
+  const result = await callTool("list_console_messages", mcpArgs);
+  return formatMcpResult("console", result, [
+    "Run `chrome-devtools-axi console-get <id>` to see a specific message",
+    "Run `chrome-devtools-axi console --type error` to filter by type",
+  ]);
+}
+
+async function handleConsoleGet(args: string[]): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new CdpError("Missing console message id", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi console-get <id>` — get id from `chrome-devtools-axi console`",
+    ]);
+  }
+  const result = await callTool("get_console_message", { msgid: parseInt(id, 10) });
+  return formatMcpResult("message", result, []);
+}
+
+async function handleNetwork(args: string[]): Promise<string> {
+  const parsed = parseNetworkArgs(args);
+  const mcpArgs: Record<string, unknown> = {};
+  if (parsed.resourceTypes) mcpArgs.resourceTypes = parsed.resourceTypes;
+  if (parsed.pageSize !== undefined) mcpArgs.pageSize = parsed.pageSize;
+  if (parsed.pageIdx !== undefined) mcpArgs.pageIdx = parsed.pageIdx;
+  const result = await callTool("list_network_requests", mcpArgs);
+  return formatMcpResult("network", result, [
+    "Run `chrome-devtools-axi network-get <id>` to see request details",
+    "Run `chrome-devtools-axi network --type fetch` to filter by type",
+  ]);
+}
+
+async function handleNetworkGet(args: string[]): Promise<string> {
+  const parsed = parseNetworkGetArgs(args);
+  const mcpArgs: Record<string, unknown> = {};
+  if (parsed.reqid !== undefined) mcpArgs.reqid = parsed.reqid;
+  if (parsed.responseFilePath) mcpArgs.responseFilePath = parsed.responseFilePath;
+  if (parsed.requestFilePath) mcpArgs.requestFilePath = parsed.requestFilePath;
+  const result = await callTool("get_network_request", mcpArgs);
+  return formatMcpResult("request", result, []);
+}
+
+// --- Performance handlers ---
+
+async function handleLighthouse(args: string[]): Promise<string> {
+  const opts = parseLighthouseArgs(args);
+  const result = await callTool("lighthouse_audit", opts);
+  return formatMcpResult("lighthouse", result, []);
+}
+
+async function handlePerfStart(args: string[]): Promise<string> {
+  const opts = parsePerfStartArgs(args);
+  const toolArgs: Record<string, unknown> = {};
+  if (opts.reload !== undefined) toolArgs.reload = opts.reload;
+  if (opts.autoStop !== undefined) toolArgs.autoStop = opts.autoStop;
+  if (opts.filePath !== undefined) toolArgs.filePath = opts.filePath;
+  await callTool("performance_start_trace", toolArgs);
+  return encode({ trace: "started", ...opts });
+}
+
+async function handlePerfStop(args: string[]): Promise<string> {
+  const toolArgs: Record<string, unknown> = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--file") toolArgs.filePath = args[++i];
+  }
+  const result = await callTool("performance_stop_trace", toolArgs);
+  return formatMcpResult("trace", result, [
+    "Run `chrome-devtools-axi perf-insight <set-id> <insight-name>` to analyze insights",
+  ]);
+}
+
+async function handlePerfInsight(args: string[]): Promise<string> {
+  const [setId, insightName] = args;
+  if (!setId || !insightName) {
+    throw new CdpError("Missing required arguments", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi perf-insight <set-id> <insight-name>` to analyze an insight",
+    ]);
+  }
+  const result = await callTool("performance_analyze_insight", { insightSetId: setId, insightName });
+  return formatMcpResult("insight", result, []);
+}
+
+async function handleHeap(args: string[]): Promise<string> {
+  const filePath = args[0];
+  if (!filePath) {
+    throw new CdpError("Missing file path", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi heap ./snapshot.heapsnapshot` to take a heap snapshot",
+    ]);
+  }
+  await callTool("take_memory_snapshot", { filePath });
+  return encode({ heap: filePath });
+}
+
 async function handleHome(full: boolean): Promise<string> {
   const result = await getSessionStatus();
   if (!result) {
@@ -414,11 +1145,6 @@ export async function main(argv: string[]): Promise<void> {
 
   const args = [...argv];
 
-  if (args.includes("--help") || args.includes("-h")) {
-    process.stdout.write(HELP);
-    return;
-  }
-
   const full = args.includes("--full");
   const filteredArgs = args.filter((a) => a !== "--full");
   const command = filteredArgs[0] ?? "";
@@ -433,6 +1159,12 @@ export async function main(argv: string[]): Promise<void> {
     }
   }
 
+  // Global help: `chrome-devtools-axi --help`
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stdout.write(HELP);
+    return;
+  }
+
   try {
     let output: string;
 
@@ -442,6 +1174,9 @@ export async function main(argv: string[]): Promise<void> {
         break;
       case "snapshot":
         output = await handleSnapshot(full);
+        break;
+      case "screenshot":
+        output = await handleScreenshot(commandArgs);
         break;
       case "click":
         output = await handleClick(commandArgs, full);
@@ -466,6 +1201,66 @@ export async function main(argv: string[]): Promise<void> {
         break;
       case "eval":
         output = await handleEval(commandArgs);
+        break;
+      case "hover":
+        output = await handleHover(commandArgs, full);
+        break;
+      case "drag":
+        output = await handleDrag(commandArgs, full);
+        break;
+      case "fillform":
+        output = await handleFillForm(commandArgs, full);
+        break;
+      case "dialog":
+        output = await handleDialog(commandArgs);
+        break;
+      case "upload":
+        output = await handleUpload(commandArgs, full);
+        break;
+      case "pages":
+        output = await handlePages();
+        break;
+      case "newpage":
+        output = await handleNewPage(commandArgs, full);
+        break;
+      case "selectpage":
+        output = await handleSelectPage(commandArgs, full);
+        break;
+      case "closepage":
+        output = await handleClosePage(commandArgs);
+        break;
+      case "resize":
+        output = await handleResize(commandArgs);
+        break;
+      case "emulate":
+        output = await handleEmulate(commandArgs);
+        break;
+      case "console":
+        output = await handleConsole(commandArgs);
+        break;
+      case "console-get":
+        output = await handleConsoleGet(commandArgs);
+        break;
+      case "network":
+        output = await handleNetwork(commandArgs);
+        break;
+      case "network-get":
+        output = await handleNetworkGet(commandArgs);
+        break;
+      case "lighthouse":
+        output = await handleLighthouse(commandArgs);
+        break;
+      case "perf-start":
+        output = await handlePerfStart(commandArgs);
+        break;
+      case "perf-stop":
+        output = await handlePerfStop(commandArgs);
+        break;
+      case "perf-insight":
+        output = await handlePerfInsight(commandArgs);
+        break;
+      case "heap":
+        output = await handleHeap(commandArgs);
         break;
       case "start":
         output = await handleStart();
