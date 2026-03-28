@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.2...chrome-devtools-axi-v0.1.3) (2026-03-28)
+
+
+### Bug Fixes
+
+* small correction in README ([73c4780](https://github.com/kunchenguid/chrome-devtools-axi/commit/73c47806e56b3c1cc256e8c15bc88224637ebadd))
+
 ## [0.1.2](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.1...chrome-devtools-axi-v0.1.2) (2026-03-28)
 
 
