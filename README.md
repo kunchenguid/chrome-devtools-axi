@@ -4,6 +4,7 @@
 [![Release](https://github.com/kunchenguid/chrome-devtools-axi/actions/workflows/release-please.yml/badge.svg)](https://github.com/kunchenguid/chrome-devtools-axi/actions/workflows/release-please.yml)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)
 [![X](https://img.shields.io/badge/X-@kunchenguid-black?logo=x)](https://x.com/kunchenguid)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/BW4aJuQhTf)
 
 <h3 align="center">Highly agent-ergonomic browser automation</h3>
 
