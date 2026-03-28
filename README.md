@@ -38,10 +38,10 @@ snapshot:
 
 ## Install
 
-**npm**
+**Tell your agent:**
 
-```sh
-npm install -g chrome-devtools-axi
+```
+Execute `npm install -g chrome-devtools-axi` and run the command for browser automation.
 ```
 
 **From source**
@@ -78,28 +78,103 @@ npm link
 
 ## CLI Reference
 
-| Command              | Description                         |
-| -------------------- | ----------------------------------- |
-| `open <url>`         | Navigate to URL and snapshot        |
-| `snapshot`           | Capture current page state          |
-| `click @<uid>`       | Click an element by ref             |
-| `fill @<uid> <text>` | Fill a form field                   |
-| `type <text>`        | Type text at current focus          |
-| `press <key>`        | Press a keyboard key                |
-| `scroll <dir>`       | Scroll: up, down, top, bottom       |
-| `back`               | Navigate back                       |
-| `wait <ms\|text>`    | Wait for time or text to appear     |
-| `eval <js>`          | Evaluate JavaScript in page context |
-| `start`              | Start the bridge server             |
-| `stop`               | Stop the bridge server              |
+### Navigation
+
+| Command           | Description                         |
+| ----------------- | ----------------------------------- |
+| `open <url>`      | Navigate to URL and snapshot        |
+| `snapshot`        | Capture current page state          |
+| `screenshot <p>`  | Save a screenshot to a file         |
+| `scroll <dir>`    | Scroll: up, down, top, bottom       |
+| `back`            | Navigate back                       |
+| `wait <ms\|text>` | Wait for time or text to appear     |
+| `eval <js>`       | Evaluate JavaScript in page context |
+
+### Interaction
+
+| Command                    | Description                    |
+| -------------------------- | ------------------------------ |
+| `click @<uid>`             | Click an element by ref        |
+| `fill @<uid> <text>`       | Fill a form field              |
+| `type <text>`              | Type text at current focus     |
+| `press <key>`              | Press a keyboard key           |
+| `hover @<uid>`             | Hover over an element          |
+| `drag @<from> @<to>`       | Drag an element onto another   |
+| `fillform @<uid>=<val>...` | Fill multiple form fields      |
+| `dialog <accept\|dismiss>` | Handle a browser dialog        |
+| `upload @<uid> <path>`     | Upload a file through an input |
+
+### Page Management
+
+| Command           | Description                 |
+| ----------------- | --------------------------- |
+| `pages`           | List all open tabs          |
+| `newpage <url>`   | Open a new tab              |
+| `selectpage <id>` | Switch to a tab by ID       |
+| `closepage <id>`  | Close a tab by ID           |
+| `resize <w> <h>`  | Resize the browser viewport |
+
+### Emulation
+
+| Command   | Description                     |
+| --------- | ------------------------------- |
+| `emulate` | Emulate device/network/viewport |
+
+### DevTools Debugging
+
+| Command            | Description                    |
+| ------------------ | ------------------------------ |
+| `console`          | List console messages          |
+| `console-get <id>` | Get a specific console message |
+| `network`          | List network requests          |
+| `network-get [id]` | Get a specific network request |
+
+### Performance
+
+| Command                     | Description                   |
+| --------------------------- | ----------------------------- |
+| `lighthouse`                | Run a Lighthouse audit        |
+| `perf-start`                | Start a performance trace     |
+| `perf-stop`                 | Stop the performance trace    |
+| `perf-insight <set> <name>` | Analyze a performance insight |
+| `heap <path>`               | Capture a heap snapshot       |
+
+### Bridge
+
+| Command | Description             |
+| ------- | ----------------------- |
+| `start` | Start the bridge server |
+| `stop`  | Stop the bridge server  |
 
 Running with no command is equivalent to `snapshot`.
 
 ### Flags
 
-| Flag     | Description            |
-| -------- | ---------------------- |
-| `--help` | Show usage information |
+| Flag                        | Description                                 |
+| --------------------------- | ------------------------------------------- |
+| `--help`                    | Show usage information                      |
+| `--full`                    | Show complete snapshot without truncation   |
+| `--background`              | Open new page in background (newpage)       |
+| `--uid @<uid>`              | Target a specific element (screenshot)      |
+| `--full-page`               | Capture entire scrollable page (screenshot) |
+| `--format <fmt>`            | Image format: png, jpeg, webp (screenshot)  |
+| `--viewport <spec>`         | Viewport like "390x844x3,mobile" (emulate)  |
+| `--color-scheme <value>`    | dark, light, or auto (emulate)              |
+| `--network <condition>`     | Network throttle: Slow 3G, etc. (emulate)   |
+| `--cpu <rate>`              | CPU throttling rate 1-20 (emulate)          |
+| `--geolocation <lat>x<lon>` | Set geolocation (emulate)                   |
+| `--user-agent <string>`     | Custom user agent (emulate)                 |
+| `--type <type>`             | Filter by type (console, network)           |
+| `--limit <n>`               | Max items to return (console, network)      |
+| `--page <n>`                | Pagination (console, network)               |
+| `--device <device>`         | desktop or mobile (lighthouse)              |
+| `--mode <mode>`             | navigation or snapshot (lighthouse)         |
+| `--output-dir <path>`       | Directory for reports (lighthouse)          |
+| `--no-reload`               | Skip page reload (perf-start)               |
+| `--no-auto-stop`            | Disable auto-stop (perf-start)              |
+| `--file <path>`             | Save trace data to file (perf-start/stop)   |
+| `--response-file <path>`    | Save response body (network-get)            |
+| `--request-file <path>`     | Save request body (network-get)             |
 
 ## Configuration
 
