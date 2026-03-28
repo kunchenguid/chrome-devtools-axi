@@ -30,6 +30,22 @@ export function extractTitle(snapshot: string): string {
   return "";
 }
 
+export interface TruncationResult {
+  text: string;
+  truncated: boolean;
+  totalLength: number;
+}
+
+export function truncateSnapshot(snapshot: string, full: boolean, limit = 4000): TruncationResult {
+  const totalLength = snapshot.length;
+  if (full || totalLength <= limit) {
+    return { text: snapshot, truncated: false, totalLength };
+  }
+  const cut = snapshot.lastIndexOf("\n", limit);
+  const text = cut > 0 ? snapshot.slice(0, cut) : snapshot.slice(0, limit);
+  return { text, truncated: true, totalLength };
+}
+
 const INPUT_TYPES = ["textbox", "searchbox", "input", "combobox", "textarea"];
 
 /** Check if a ref type is an input/form field. */

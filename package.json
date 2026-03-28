@@ -29,7 +29,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/bin/chrome-devtools-axi.js",
     "dev": "tsx bin/chrome-devtools-axi.ts",
     "test": "vitest run",
     "test:watch": "vitest",

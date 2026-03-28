@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { countRefs, extractRefs, extractTitle, isInputType } from "../src/snapshot.js";
+import { countRefs, extractRefs, extractTitle, isInputType, truncateSnapshot } from "../src/snapshot.js";
 
 describe("countRefs", () => {
   it("counts uid= occurrences", () => {
@@ -51,5 +51,38 @@ describe("isInputType", () => {
   it("rejects non-input types", () => {
     expect(isInputType("button")).toBe(false);
     expect(isInputType("link")).toBe(false);
+  });
+});
+
+describe("truncateSnapshot", () => {
+  it("returns snapshot unchanged when under limit", () => {
+    const snapshot = 'RootWebArea "Short"\n  uid=1 button "OK"';
+    const result = truncateSnapshot(snapshot, false, 4000);
+    expect(result.text).toBe(snapshot);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("truncates at last newline before limit", () => {
+    const lines = Array.from({ length: 200 }, (_, i) => `  uid=${i} button "Btn ${i}"`);
+    const snapshot = `RootWebArea "Big"\n${lines.join("\n")}`;
+    const result = truncateSnapshot(snapshot, false, 200);
+    expect(result.truncated).toBe(true);
+    expect(result.text.length).toBeLessThanOrEqual(200);
+    expect(result.text).not.toMatch(/\n$/);
+    expect(result.totalLength).toBe(snapshot.length);
+  });
+
+  it("returns full snapshot when full=true regardless of limit", () => {
+    const lines = Array.from({ length: 200 }, (_, i) => `  uid=${i} button "Btn ${i}"`);
+    const snapshot = `RootWebArea "Big"\n${lines.join("\n")}`;
+    const result = truncateSnapshot(snapshot, true, 200);
+    expect(result.text).toBe(snapshot);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("reports accurate totalLength", () => {
+    const snapshot = "x".repeat(5000);
+    const result = truncateSnapshot(snapshot, false, 100);
+    expect(result.totalLength).toBe(5000);
   });
 });

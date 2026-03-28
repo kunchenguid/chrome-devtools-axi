@@ -140,7 +140,6 @@ export async function ensureBridge(): Promise<number> {
   }
 
   // Start a new bridge
-  console.error("[chrome-devtools-axi] Starting browser...");
 
   const bridgeScript = resolve(import.meta.dirname, "bridge.js");
   // Try .ts first (dev mode), fall back to .js (built)
@@ -150,13 +149,11 @@ export async function ensureBridge(): Promise<number> {
   const runner = script.endsWith(".ts") ? "tsx" : "node";
 
   const child = spawn(runner === "tsx" ? "npx" : "node", runner === "tsx" ? ["tsx", script] : [script], {
-    stdio: ["pipe", "pipe", "inherit"],
+    stdio: "ignore",
     env: { ...process.env, CHROME_DEVTOOLS_AXI_PORT: String(port) },
     detached: true,
   });
   child.unref();
-  // Detach stdin so parent can exit
-  child.stdin?.end();
 
   // Poll for health (max 30s — Chrome launch can be slow)
   const deadline = Date.now() + 30_000;
@@ -227,13 +224,36 @@ function mapError(message: string): CdpError {
 /**
  * Stop the bridge process.
  */
-export async function stopBridge(): Promise<void> {
+/**
+ * Get session status without starting the bridge.
+ * Returns null if bridge is not running.
+ */
+export async function getSessionStatus(): Promise<string | null> {
+  const pidInfo = readPidFile();
+  if (!pidInfo || !isProcessAlive(pidInfo.pid)) {
+    return null;
+  }
+  if (!(await checkBridgeHealth(pidInfo.port))) {
+    return null;
+  }
+  try {
+    const resp = await httpPost(pidInfo.port, "/call", { name: "take_snapshot", args: {} }, 5000);
+    const data = JSON.parse(resp);
+    if (data.error) return null;
+    return data.result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function stopBridge(): Promise<boolean> {
   const pidInfo = readPidFile();
   if (!pidInfo) {
-    return;
+    return false;
   }
   if (isProcessAlive(pidInfo.pid)) {
     process.kill(pidInfo.pid, "SIGTERM");
+    return true;
   }
-  // PID file is cleaned up by the bridge on shutdown
+  return false;
 }
