@@ -1,13 +1,15 @@
 import { encode } from "@toon-format/toon";
 import { CdpError, callTool, ensureBridge, getSessionSnapshotIfRunning, stopBridge } from "./client.js";
 import { installHooks } from "./hooks.js";
+import { readStdin, runScript } from "./run.js";
 import { countRefs, extractTitle, truncateSnapshot } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 
 const HELP = `usage: chrome-devtools-axi <command> [args]
-commands[33]:
+commands[34]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
+  run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
@@ -151,6 +153,49 @@ args:
 examples:
   chrome-devtools-axi eval "document.title"
   chrome-devtools-axi eval "document.querySelectorAll('a').length"`,
+
+  run: `usage: chrome-devtools-axi run <<'EOF'
+  ...script...
+  EOF
+
+Execute a JavaScript script from stdin against the current browser session.
+The script gets a global \`page\` object. Only the script's stdout is returned.
+Pipe a script via heredoc or stdin — no file path needed.
+
+script API (available as global \`page\`):
+  await page.open(url)              Navigate, returns { url, status }
+  await page.eval(jsOrFn)           Evaluate JS in the page, returns the value
+  await page.snapshot()             Get the accessibility tree as text
+  await page.wait(ms)               Wait by duration
+  await page.wait(selector)         Wait for CSS selector (30s timeout)
+  await page.wait(selector, ms)     Wait for CSS selector with timeout
+  await page.click("@uid")          Click an element by ref
+  await page.click(selector)        Click via CSS selector
+  await page.fill("@uid", text)     Fill a form field by ref
+  await page.fill(selector, text)   Fill via CSS selector
+  await page.type(text)             Type at the focused element
+  await page.press(key)             Press a keyboard key
+  await page.back()                 Navigate back
+
+click and fill accept either @uid refs (from snapshot) or CSS selectors.
+
+examples:
+  chrome-devtools-axi run <<'EOF'
+  await page.open("https://example.com");
+  console.log(await page.eval(() => document.title));
+  EOF
+
+  chrome-devtools-axi run <<'EOF'
+  await page.open("https://en.wikipedia.org/wiki/Ada_Lovelace");
+  await page.click("a[href='/wiki/Charles_Babbage']");
+  await page.wait(".mw-page-title-main");
+  console.log(await page.eval(() => document.title));
+  EOF
+
+  chrome-devtools-axi run <<'EOF'
+  const { status } = await page.open("https://httpbin.org/status/404");
+  console.log("status:", status);
+  EOF`,
 
   start: `usage: chrome-devtools-axi start
 Start the bridge server (launches headless Chrome).
@@ -1151,11 +1196,31 @@ async function handleHeap(args: string[]): Promise<string> {
   return encode({ heap: filePath });
 }
 
+async function handleRun(): Promise<string | undefined> {
+  if (process.stdin.isTTY) {
+    throw new CdpError("No script provided on stdin", "VALIDATION_ERROR", [
+      "Pipe a script: chrome-devtools-axi run <<'EOF'\\n...\\nEOF",
+    ]);
+  }
+  const content = await readStdin();
+  if (!content.trim()) {
+    throw new CdpError("Empty script on stdin", "VALIDATION_ERROR", [
+      "Pipe a script: chrome-devtools-axi run <<'EOF'\\n...\\nEOF",
+    ]);
+  }
+  const result = await runScript(content, callTool);
+  return result.stdout || undefined;
+}
+
 async function handleHome(full: boolean): Promise<string> {
   const result = await getSessionSnapshotIfRunning();
   if (!result) {
     const blocks = [encode({ browser: "no active session" })];
-    blocks.push(renderHelp(["Run `chrome-devtools-axi open <url>` to start browsing"]));
+    blocks.push(renderHelp([
+      "Run `chrome-devtools-axi open <url>` to start browsing",
+      "Run `chrome-devtools-axi run <<'EOF'\\n...\\nEOF` to execute a multi-step script",
+      "Run `chrome-devtools-axi run --help` for the script API",
+    ]));
     return renderOutput(blocks);
   }
   const snapshot = stripSnapshotHeader(result);
@@ -1225,6 +1290,14 @@ export async function main(argv: string[]): Promise<void> {
       case "eval":
         output = await handleEval(commandArgs);
         break;
+      case "run": {
+        const runOutput = await handleRun();
+        if (runOutput !== undefined) {
+          // Script already printed its output; write it raw (no trailing newline added)
+          process.stdout.write(runOutput);
+        }
+        return;
+      }
       case "hover":
         output = await handleHover(commandArgs, full);
         break;
