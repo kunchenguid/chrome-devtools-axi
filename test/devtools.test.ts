@@ -60,6 +60,11 @@ describe("parseConsoleArgs", () => {
     const result = parseConsoleArgs(["--type", "warning", "--limit", "25", "--page", "1"]);
     expect(result).toEqual({ types: ["warning"], pageSize: 25, pageIdx: 1 });
   });
+
+  it("omits invalid numeric flags", () => {
+    const result = parseConsoleArgs(["--limit", "many", "--page", "later"]);
+    expect(result).toEqual({});
+  });
 });
 
 describe("parseNetworkArgs", () => {
@@ -76,6 +81,11 @@ describe("parseNetworkArgs", () => {
   it("parses --limit flag", () => {
     const result = parseNetworkArgs(["--limit", "100"]);
     expect(result).toEqual({ pageSize: 100 });
+  });
+
+  it("omits invalid numeric flags", () => {
+    const result = parseNetworkArgs(["--limit", "many", "--page", "later"]);
+    expect(result).toEqual({});
   });
 });
 
@@ -103,5 +113,10 @@ describe("parseNetworkGetArgs", () => {
   it("parses both file flags without id", () => {
     const result = parseNetworkGetArgs(["--response-file", "/tmp/resp", "--request-file", "/tmp/req"]);
     expect(result).toEqual({ responseFilePath: "/tmp/resp", requestFilePath: "/tmp/req" });
+  });
+
+  it("omits an invalid request id while keeping file flags", () => {
+    const result = parseNetworkGetArgs(["oops", "--response-file", "./resp.json"]);
+    expect(result).toEqual({ responseFilePath: "./resp.json" });
   });
 });

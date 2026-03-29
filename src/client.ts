@@ -4,9 +4,10 @@
 
 import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import { request } from "node:http";
+import { resolveBridgeScript } from "./bridge.js";
 
 const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
 const PID_FILE = join(STATE_DIR, "bridge.pid");
@@ -137,11 +138,16 @@ export async function ensureBridge(): Promise<number> {
     if (await checkBridgeHealth(pidInfo.port)) {
       return pidInfo.port;
     }
+    try {
+      process.kill(pidInfo.pid, "SIGTERM");
+    } catch {
+      // Best effort — if shutdown fails, the startup poll below will time out.
+    }
   }
 
   // Start a new bridge
 
-  const bridgeScript = resolve(import.meta.dirname, "bridge.js");
+  const bridgeScript = resolveBridgeScript(import.meta.dirname);
   // Try .ts first (dev mode), fall back to .js (built)
   const script = existsSync(bridgeScript.replace(/\.js$/, ".ts"))
     ? bridgeScript.replace(/\.js$/, ".ts")
@@ -186,11 +192,11 @@ export async function callTool(name: string, args: Record<string, unknown> = {})
     return data.result ?? "";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    throw mapError(message);
+    throw mapErrorMessage(message);
   }
 }
 
-function mapError(message: string): CdpError {
+export function mapErrorMessage(message: string): CdpError {
   if (message.includes("ECONNREFUSED") || message.includes("ECONNRESET")) {
     return new CdpError("Bridge is not running", "BRIDGE_NOT_READY", [
       "Run `chrome-devtools-axi open <url>` — the bridge starts automatically",
@@ -222,13 +228,10 @@ function mapError(message: string): CdpError {
 }
 
 /**
- * Stop the bridge process.
+ * Get the current page snapshot without starting the bridge.
+ * Returns null if the bridge is not running or healthy.
  */
-/**
- * Get session status without starting the bridge.
- * Returns null if bridge is not running.
- */
-export async function getSessionStatus(): Promise<string | null> {
+export async function getSessionSnapshotIfRunning(): Promise<string | null> {
   const pidInfo = readPidFile();
   if (!pidInfo || !isProcessAlive(pidInfo.pid)) {
     return null;
@@ -246,7 +249,10 @@ export async function getSessionStatus(): Promise<string | null> {
   }
 }
 
-export async function stopBridge(): Promise<boolean> {
+/**
+ * Stop the bridge process.
+ */
+export function stopBridge(): boolean {
   const pidInfo = readPidFile();
   if (!pidInfo) {
     return false;

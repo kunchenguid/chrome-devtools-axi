@@ -1,5 +1,5 @@
 import { encode } from "@toon-format/toon";
-import { CdpError, callTool, ensureBridge, getSessionStatus, stopBridge } from "./client.js";
+import { CdpError, callTool, ensureBridge, getSessionSnapshotIfRunning, stopBridge } from "./client.js";
 import { installHooks } from "./hooks.js";
 import { countRefs, extractTitle, truncateSnapshot } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
@@ -481,7 +481,13 @@ export function parseFillFormArgs(args: string[]): { entries: { uid: string; val
   return { entries };
 }
 
-export interface EmulateArgs {
+function parseOptionalInteger(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+export interface EmulateArgs extends Record<string, unknown> {
   viewport?: string;
   colorScheme?: string;
   networkConditions?: string;
@@ -498,21 +504,33 @@ export function parseEmulateArgs(args: string[]): EmulateArgs {
       case "--viewport": result.viewport = args[++i]; break;
       case "--color-scheme": result.colorScheme = args[++i]; break;
       case "--network": result.networkConditions = args[++i]; break;
-      case "--cpu": result.cpuThrottlingRate = parseInt(args[++i], 10); break;
+      case "--cpu": {
+        const cpuThrottlingRate = parseOptionalInteger(args[++i]);
+        if (cpuThrottlingRate !== undefined) {
+          result.cpuThrottlingRate = cpuThrottlingRate;
+        }
+        break;
+      }
       case "--geolocation": result.geolocation = args[++i]; break;
       case "--user-agent": result.userAgent = args[++i]; break;
     }
     i++;
   }
-  return JSON.parse(JSON.stringify(result));
+  return result;
 }
 
 export function parseConsoleArgs(args: string[]): { types?: string[]; pageSize?: number; pageIdx?: number } {
   const result: { types?: string[]; pageSize?: number; pageIdx?: number } = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--type" && i + 1 < args.length) { result.types = [args[++i]]; }
-    else if (args[i] === "--limit" && i + 1 < args.length) { result.pageSize = parseInt(args[++i], 10); }
-    else if (args[i] === "--page" && i + 1 < args.length) { result.pageIdx = parseInt(args[++i], 10); }
+    else if (args[i] === "--limit" && i + 1 < args.length) {
+      const pageSize = parseOptionalInteger(args[++i]);
+      if (pageSize !== undefined) result.pageSize = pageSize;
+    }
+    else if (args[i] === "--page" && i + 1 < args.length) {
+      const pageIdx = parseOptionalInteger(args[++i]);
+      if (pageIdx !== undefined) result.pageIdx = pageIdx;
+    }
   }
   return result;
 }
@@ -521,8 +539,14 @@ export function parseNetworkArgs(args: string[]): { resourceTypes?: string[]; pa
   const result: { resourceTypes?: string[]; pageSize?: number; pageIdx?: number } = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--type" && i + 1 < args.length) { result.resourceTypes = [args[++i]]; }
-    else if (args[i] === "--limit" && i + 1 < args.length) { result.pageSize = parseInt(args[++i], 10); }
-    else if (args[i] === "--page" && i + 1 < args.length) { result.pageIdx = parseInt(args[++i], 10); }
+    else if (args[i] === "--limit" && i + 1 < args.length) {
+      const pageSize = parseOptionalInteger(args[++i]);
+      if (pageSize !== undefined) result.pageSize = pageSize;
+    }
+    else if (args[i] === "--page" && i + 1 < args.length) {
+      const pageIdx = parseOptionalInteger(args[++i]);
+      if (pageIdx !== undefined) result.pageIdx = pageIdx;
+    }
   }
   return result;
 }
@@ -532,7 +556,10 @@ export function parseNetworkGetArgs(args: string[]): { reqid?: number; responseF
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--response-file" && i + 1 < args.length) { result.responseFilePath = args[++i]; }
     else if (args[i] === "--request-file" && i + 1 < args.length) { result.requestFilePath = args[++i]; }
-    else if (!args[i].startsWith("--")) { result.reqid = parseInt(args[i], 10); }
+    else if (!args[i].startsWith("--")) {
+      const reqid = parseOptionalInteger(args[i]);
+      if (reqid !== undefined) result.reqid = reqid;
+    }
   }
   return result;
 }
@@ -644,6 +671,12 @@ function parseUid(arg: string): string {
   return arg.startsWith("@") ? arg.slice(1) : arg;
 }
 
+function isRecoverableOpenError(error: unknown): error is CdpError {
+  if (!(error instanceof CdpError)) return false;
+  if (error.code !== "BROWSER_ERROR") return false;
+  return /not connected|session (?:closed|not found)|no page/i.test(error.message);
+}
+
 /**
  * Call a tool with includeSnapshot:true and extract the snapshot.
  * Falls back to a separate take_snapshot() if parsing fails.
@@ -674,7 +707,14 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  await callTool("navigate_page", { type: "url", url });
+  try {
+    await callTool("navigate_page", { type: "url", url });
+  } catch (error) {
+    if (!isRecoverableOpenError(error)) {
+      throw error;
+    }
+    await callTool("new_page", { url });
+  }
   const snapshot = stripSnapshotHeader(await callTool("take_snapshot"));
   return formatPageOutput(snapshot, "open", url, full);
 }
@@ -1017,14 +1057,7 @@ async function handleUpload(args: string[], full: boolean): Promise<string> {
 
 async function handleEmulate(args: string[]): Promise<string> {
   const parsed = parseEmulateArgs(args);
-  const mcpArgs: Record<string, unknown> = {};
-  if (parsed.viewport !== undefined) mcpArgs.viewport = parsed.viewport;
-  if (parsed.colorScheme !== undefined) mcpArgs.colorScheme = parsed.colorScheme;
-  if (parsed.networkConditions !== undefined) mcpArgs.networkConditions = parsed.networkConditions;
-  if (parsed.cpuThrottlingRate !== undefined) mcpArgs.cpuThrottlingRate = parsed.cpuThrottlingRate;
-  if (parsed.geolocation !== undefined) mcpArgs.geolocation = parsed.geolocation;
-  if (parsed.userAgent !== undefined) mcpArgs.userAgent = parsed.userAgent;
-  await callTool("emulate", mcpArgs);
+  await callTool("emulate", parsed);
   return encode({ emulated: parsed });
 }
 
@@ -1032,11 +1065,7 @@ async function handleEmulate(args: string[]): Promise<string> {
 
 async function handleConsole(args: string[]): Promise<string> {
   const parsed = parseConsoleArgs(args);
-  const mcpArgs: Record<string, unknown> = {};
-  if (parsed.types) mcpArgs.types = parsed.types;
-  if (parsed.pageSize !== undefined) mcpArgs.pageSize = parsed.pageSize;
-  if (parsed.pageIdx !== undefined) mcpArgs.pageIdx = parsed.pageIdx;
-  const result = await callTool("list_console_messages", mcpArgs);
+  const result = await callTool("list_console_messages", parsed);
   return formatMcpResult("console", result, [
     "Run `chrome-devtools-axi console-get <id>` to see a specific message",
     "Run `chrome-devtools-axi console --type error` to filter by type",
@@ -1050,17 +1079,19 @@ async function handleConsoleGet(args: string[]): Promise<string> {
       "Run `chrome-devtools-axi console-get <id>` — get id from `chrome-devtools-axi console`",
     ]);
   }
-  const result = await callTool("get_console_message", { msgid: parseInt(id, 10) });
+  const msgid = parseOptionalInteger(id);
+  if (msgid === undefined) {
+    throw new CdpError(`Invalid console message id: ${id}`, "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi console` to list available message ids",
+    ]);
+  }
+  const result = await callTool("get_console_message", { msgid });
   return formatMcpResult("message", result, []);
 }
 
 async function handleNetwork(args: string[]): Promise<string> {
   const parsed = parseNetworkArgs(args);
-  const mcpArgs: Record<string, unknown> = {};
-  if (parsed.resourceTypes) mcpArgs.resourceTypes = parsed.resourceTypes;
-  if (parsed.pageSize !== undefined) mcpArgs.pageSize = parsed.pageSize;
-  if (parsed.pageIdx !== undefined) mcpArgs.pageIdx = parsed.pageIdx;
-  const result = await callTool("list_network_requests", mcpArgs);
+  const result = await callTool("list_network_requests", parsed);
   return formatMcpResult("network", result, [
     "Run `chrome-devtools-axi network-get <id>` to see request details",
     "Run `chrome-devtools-axi network --type fetch` to filter by type",
@@ -1069,11 +1100,7 @@ async function handleNetwork(args: string[]): Promise<string> {
 
 async function handleNetworkGet(args: string[]): Promise<string> {
   const parsed = parseNetworkGetArgs(args);
-  const mcpArgs: Record<string, unknown> = {};
-  if (parsed.reqid !== undefined) mcpArgs.reqid = parsed.reqid;
-  if (parsed.responseFilePath) mcpArgs.responseFilePath = parsed.responseFilePath;
-  if (parsed.requestFilePath) mcpArgs.requestFilePath = parsed.requestFilePath;
-  const result = await callTool("get_network_request", mcpArgs);
+  const result = await callTool("get_network_request", parsed);
   return formatMcpResult("request", result, []);
 }
 
@@ -1087,11 +1114,7 @@ async function handleLighthouse(args: string[]): Promise<string> {
 
 async function handlePerfStart(args: string[]): Promise<string> {
   const opts = parsePerfStartArgs(args);
-  const toolArgs: Record<string, unknown> = {};
-  if (opts.reload !== undefined) toolArgs.reload = opts.reload;
-  if (opts.autoStop !== undefined) toolArgs.autoStop = opts.autoStop;
-  if (opts.filePath !== undefined) toolArgs.filePath = opts.filePath;
-  await callTool("performance_start_trace", toolArgs);
+  await callTool("performance_start_trace", opts);
   return encode({ trace: "started", ...opts });
 }
 
@@ -1129,7 +1152,7 @@ async function handleHeap(args: string[]): Promise<string> {
 }
 
 async function handleHome(full: boolean): Promise<string> {
-  const result = await getSessionStatus();
+  const result = await getSessionSnapshotIfRunning();
   if (!result) {
     const blocks = [encode({ browser: "no active session" })];
     blocks.push(renderHelp(["Run `chrome-devtools-axi open <url>` to start browsing"]));

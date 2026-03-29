@@ -42,4 +42,9 @@ describe("parseEmulateArgs", () => {
     const result = parseEmulateArgs(["--geolocation", "37.7749x-122.4194"]);
     expect(result).toEqual({ geolocation: "37.7749x-122.4194" });
   });
+
+  it("omits an invalid cpu throttling rate", () => {
+    const result = parseEmulateArgs(["--cpu", "fast"]);
+    expect(result).toEqual({});
+  });
 });
