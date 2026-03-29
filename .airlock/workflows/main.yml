@@ -1,0 +1,66 @@
+# Airlock workflow configuration
+# Documentation: https://github.com/airlock-hq/airlock
+
+name: Main Pipeline
+
+on:
+  push:
+    branches: ['**']
+
+jobs:
+  rebase:
+    name: Rebase
+    steps:
+      - name: rebase
+        uses: airlock-hq/airlock/defaults/rebase@main
+
+  critique:
+    name: Critique
+    needs: rebase
+    steps:
+      - name: critique
+        uses: airlock-hq/airlock/defaults/critique@main
+
+  test:
+    name: Test
+    needs: rebase
+    steps:
+      - name: test
+        uses: airlock-hq/airlock/defaults/test@main
+
+  gate:
+    name: Review Gate
+    needs: [critique, test]
+    steps:
+      - name: review
+        uses: airlock-hq/airlock/defaults/gate@main
+        env:
+          # Change to never, low, medium, or high to control when human approval is required.
+          AIRLOCK_RISK_THRESHOLD: medium
+
+  describe:
+    name: Describe
+    needs: gate
+    steps:
+      - name: describe
+        uses: airlock-hq/airlock/defaults/describe@main
+
+  document:
+    name: Document
+    needs: gate
+    steps:
+      - name: document
+        uses: airlock-hq/airlock/defaults/document@main
+        apply-patch: true
+
+  deploy:
+    name: Lint & Push
+    needs: [describe, document]
+    steps:
+      - name: lint
+        uses: airlock-hq/airlock/defaults/lint@main
+        apply-patch: true
+      - name: push
+        uses: airlock-hq/airlock/defaults/push@main
+      - name: create-pr
+        uses: airlock-hq/airlock/defaults/create-pr@main

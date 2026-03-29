@@ -80,6 +80,7 @@ Execute `npm i -g chrome-devtools-axi` and run `chrome-devtools-axi` for browser
 | `back`            | Navigate back                       |
 | `wait <ms\|text>` | Wait for time or text to appear     |
 | `eval <js>`       | Evaluate JavaScript in page context |
+| `run`             | Execute a multi-step script from stdin |
 
 ### Interaction
 

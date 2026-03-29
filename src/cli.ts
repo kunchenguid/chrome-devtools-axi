@@ -1,13 +1,21 @@
 import { encode } from "@toon-format/toon";
-import { CdpError, callTool, ensureBridge, getSessionSnapshotIfRunning, stopBridge } from "./client.js";
+import {
+  CdpError,
+  callTool,
+  ensureBridge,
+  getSessionSnapshotIfRunning,
+  stopBridge,
+} from "./client.js";
 import { installHooks } from "./hooks.js";
+import { readStdin, runScript } from "./run.js";
 import { countRefs, extractTitle, truncateSnapshot } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 
 const HELP = `usage: chrome-devtools-axi <command> [args]
-commands[33]:
+commands[34]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
+  run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
@@ -151,6 +159,49 @@ args:
 examples:
   chrome-devtools-axi eval "document.title"
   chrome-devtools-axi eval "document.querySelectorAll('a').length"`,
+
+  run: `usage: chrome-devtools-axi run <<'EOF'
+  ...script...
+  EOF
+
+Execute a JavaScript script from stdin against the current browser session.
+The script gets a global \`page\` object. Only the script's stdout is returned.
+Pipe a script via heredoc or stdin — no file path needed.
+
+script API (available as global \`page\`):
+  await page.open(url)              Navigate, returns { url, status }
+  await page.eval(jsOrFn)           Evaluate JS in the page, returns the value
+  await page.snapshot()             Get the accessibility tree as text
+  await page.wait(ms)               Wait by duration
+  await page.wait(selector)         Wait for CSS selector (30s timeout)
+  await page.wait(selector, ms)     Wait for CSS selector with timeout
+  await page.click("@uid")          Click an element by ref
+  await page.click(selector)        Click via CSS selector
+  await page.fill("@uid", text)     Fill a form field by ref
+  await page.fill(selector, text)   Fill via CSS selector
+  await page.type(text)             Type at the focused element
+  await page.press(key)             Press a keyboard key
+  await page.back()                 Navigate back
+
+click and fill accept either @uid refs (from snapshot) or CSS selectors.
+
+examples:
+  chrome-devtools-axi run <<'EOF'
+  await page.open("https://example.com");
+  console.log(await page.eval(() => document.title));
+  EOF
+
+  chrome-devtools-axi run <<'EOF'
+  await page.open("https://en.wikipedia.org/wiki/Ada_Lovelace");
+  await page.click("a[href='/wiki/Charles_Babbage']");
+  await page.wait(".mw-page-title-main");
+  console.log(await page.eval(() => document.title));
+  EOF
+
+  chrome-devtools-axi run <<'EOF'
+  const { status } = await page.open("https://httpbin.org/status/404");
+  console.log("status:", status);
+  EOF`,
 
   start: `usage: chrome-devtools-axi start
 Start the bridge server (launches headless Chrome).
@@ -440,7 +491,9 @@ export function formatScreenshotOutput(filePath: string): string {
 }
 
 /** Parse MCP list_pages markdown into structured data. */
-export function parsePagesList(text: string): { id: number; url: string; selected: boolean }[] {
+export function parsePagesList(
+  text: string,
+): { id: number; url: string; selected: boolean }[] {
   const pages: { id: number; url: string; selected: boolean }[] = [];
   for (const line of text.split("\n")) {
     const m = line.match(/^(\d+):\s+(\S+)(\s+\[selected\])?/);
@@ -452,7 +505,11 @@ export function parsePagesList(text: string): { id: number; url: string; selecte
 }
 
 /** Format raw MCP text result as AXI output: labeled block + truncation + suggestions. */
-export function formatMcpResult(label: string, text: string, suggestions: string[]): string {
+export function formatMcpResult(
+  label: string,
+  text: string,
+  suggestions: string[],
+): string {
   const blocks: string[] = [];
   const tr = truncateSnapshot(text, false, 2000);
   blocks.push(`${label}:\n${tr.text.trimEnd()}`);
@@ -465,7 +522,9 @@ export function formatMcpResult(label: string, text: string, suggestions: string
   return renderOutput(blocks);
 }
 
-export function parseFillFormArgs(args: string[]): { entries: { uid: string; value: string }[] } {
+export function parseFillFormArgs(args: string[]): {
+  entries: { uid: string; value: string }[];
+} {
   const entries: { uid: string; value: string }[] = [];
   for (const arg of args) {
     if (arg === "--full") continue;
@@ -473,7 +532,10 @@ export function parseFillFormArgs(args: string[]): { entries: { uid: string; val
     if (!match) continue;
     const uid = match[1];
     let value = match[2];
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
       value = value.slice(1, -1);
     }
     entries.push({ uid, value });
@@ -501,9 +563,15 @@ export function parseEmulateArgs(args: string[]): EmulateArgs {
   let i = 0;
   while (i < args.length) {
     switch (args[i]) {
-      case "--viewport": result.viewport = args[++i]; break;
-      case "--color-scheme": result.colorScheme = args[++i]; break;
-      case "--network": result.networkConditions = args[++i]; break;
+      case "--viewport":
+        result.viewport = args[++i];
+        break;
+      case "--color-scheme":
+        result.colorScheme = args[++i];
+        break;
+      case "--network":
+        result.networkConditions = args[++i];
+        break;
       case "--cpu": {
         const cpuThrottlingRate = parseOptionalInteger(args[++i]);
         if (cpuThrottlingRate !== undefined) {
@@ -511,23 +579,31 @@ export function parseEmulateArgs(args: string[]): EmulateArgs {
         }
         break;
       }
-      case "--geolocation": result.geolocation = args[++i]; break;
-      case "--user-agent": result.userAgent = args[++i]; break;
+      case "--geolocation":
+        result.geolocation = args[++i];
+        break;
+      case "--user-agent":
+        result.userAgent = args[++i];
+        break;
     }
     i++;
   }
   return result;
 }
 
-export function parseConsoleArgs(args: string[]): { types?: string[]; pageSize?: number; pageIdx?: number } {
+export function parseConsoleArgs(args: string[]): {
+  types?: string[];
+  pageSize?: number;
+  pageIdx?: number;
+} {
   const result: { types?: string[]; pageSize?: number; pageIdx?: number } = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--type" && i + 1 < args.length) { result.types = [args[++i]]; }
-    else if (args[i] === "--limit" && i + 1 < args.length) {
+    if (args[i] === "--type" && i + 1 < args.length) {
+      result.types = [args[++i]];
+    } else if (args[i] === "--limit" && i + 1 < args.length) {
       const pageSize = parseOptionalInteger(args[++i]);
       if (pageSize !== undefined) result.pageSize = pageSize;
-    }
-    else if (args[i] === "--page" && i + 1 < args.length) {
+    } else if (args[i] === "--page" && i + 1 < args.length) {
       const pageIdx = parseOptionalInteger(args[++i]);
       if (pageIdx !== undefined) result.pageIdx = pageIdx;
     }
@@ -535,15 +611,23 @@ export function parseConsoleArgs(args: string[]): { types?: string[]; pageSize?:
   return result;
 }
 
-export function parseNetworkArgs(args: string[]): { resourceTypes?: string[]; pageSize?: number; pageIdx?: number } {
-  const result: { resourceTypes?: string[]; pageSize?: number; pageIdx?: number } = {};
+export function parseNetworkArgs(args: string[]): {
+  resourceTypes?: string[];
+  pageSize?: number;
+  pageIdx?: number;
+} {
+  const result: {
+    resourceTypes?: string[];
+    pageSize?: number;
+    pageIdx?: number;
+  } = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--type" && i + 1 < args.length) { result.resourceTypes = [args[++i]]; }
-    else if (args[i] === "--limit" && i + 1 < args.length) {
+    if (args[i] === "--type" && i + 1 < args.length) {
+      result.resourceTypes = [args[++i]];
+    } else if (args[i] === "--limit" && i + 1 < args.length) {
       const pageSize = parseOptionalInteger(args[++i]);
       if (pageSize !== undefined) result.pageSize = pageSize;
-    }
-    else if (args[i] === "--page" && i + 1 < args.length) {
+    } else if (args[i] === "--page" && i + 1 < args.length) {
       const pageIdx = parseOptionalInteger(args[++i]);
       if (pageIdx !== undefined) result.pageIdx = pageIdx;
     }
@@ -551,12 +635,22 @@ export function parseNetworkArgs(args: string[]): { resourceTypes?: string[]; pa
   return result;
 }
 
-export function parseNetworkGetArgs(args: string[]): { reqid?: number; responseFilePath?: string; requestFilePath?: string } {
-  const result: { reqid?: number; responseFilePath?: string; requestFilePath?: string } = {};
+export function parseNetworkGetArgs(args: string[]): {
+  reqid?: number;
+  responseFilePath?: string;
+  requestFilePath?: string;
+} {
+  const result: {
+    reqid?: number;
+    responseFilePath?: string;
+    requestFilePath?: string;
+  } = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--response-file" && i + 1 < args.length) { result.responseFilePath = args[++i]; }
-    else if (args[i] === "--request-file" && i + 1 < args.length) { result.requestFilePath = args[++i]; }
-    else if (!args[i].startsWith("--")) {
+    if (args[i] === "--response-file" && i + 1 < args.length) {
+      result.responseFilePath = args[++i];
+    } else if (args[i] === "--request-file" && i + 1 < args.length) {
+      result.requestFilePath = args[++i];
+    } else if (!args[i].startsWith("--")) {
       const reqid = parseOptionalInteger(args[i]);
       if (reqid !== undefined) result.reqid = reqid;
     }
@@ -564,25 +658,46 @@ export function parseNetworkGetArgs(args: string[]): { reqid?: number; responseF
   return result;
 }
 
-export function parseLighthouseArgs(args: string[]): { device?: string; mode?: string; outputDirPath?: string } {
+export function parseLighthouseArgs(args: string[]): {
+  device?: string;
+  mode?: string;
+  outputDirPath?: string;
+} {
   const result: { device?: string; mode?: string; outputDirPath?: string } = {};
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case "--device": result.device = args[++i]; break;
-      case "--mode": result.mode = args[++i]; break;
-      case "--output-dir": result.outputDirPath = args[++i]; break;
+      case "--device":
+        result.device = args[++i];
+        break;
+      case "--mode":
+        result.mode = args[++i];
+        break;
+      case "--output-dir":
+        result.outputDirPath = args[++i];
+        break;
     }
   }
   return result;
 }
 
-export function parsePerfStartArgs(args: string[]): { reload?: boolean; autoStop?: boolean; filePath?: string } {
-  const result: { reload?: boolean; autoStop?: boolean; filePath?: string } = {};
+export function parsePerfStartArgs(args: string[]): {
+  reload?: boolean;
+  autoStop?: boolean;
+  filePath?: string;
+} {
+  const result: { reload?: boolean; autoStop?: boolean; filePath?: string } =
+    {};
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case "--no-reload": result.reload = false; break;
-      case "--no-auto-stop": result.autoStop = false; break;
-      case "--file": result.filePath = args[++i]; break;
+      case "--no-reload":
+        result.reload = false;
+        break;
+      case "--no-auto-stop":
+        result.autoStop = false;
+        break;
+      case "--file":
+        result.filePath = args[++i];
+        break;
     }
   }
   return result;
@@ -594,7 +709,11 @@ function renderHelp(lines: string[]): string {
   return `help[${lines.length}]:\n${indented}`;
 }
 
-function renderError(message: string, code: string, suggestions: string[] = []): string {
+function renderError(
+  message: string,
+  code: string,
+  suggestions: string[] = [],
+): string {
   const blocks = [encode({ error: message, code })];
   if (suggestions.length > 0) {
     blocks.push(renderHelp(suggestions));
@@ -619,11 +738,18 @@ function parseSnapshotFromResponse(response: string): string | null {
   const trimmed = after.replace(/^\s*\n/, "");
   // Snapshot ends at the next ## heading or end of text
   const nextHeading = trimmed.indexOf("\n## ");
-  return nextHeading === -1 ? trimmed.trimEnd() : trimmed.slice(0, nextHeading).trimEnd();
+  return nextHeading === -1
+    ? trimmed.trimEnd()
+    : trimmed.slice(0, nextHeading).trimEnd();
 }
 
 /** Format page metadata (TOON) + raw snapshot + suggestions. */
-function formatPageOutput(snapshot: string, command: string, url?: string, full = false): string {
+function formatPageOutput(
+  snapshot: string,
+  command: string,
+  url?: string,
+  full = false,
+): string {
   const title = extractTitle(snapshot);
   const refs = countRefs(snapshot);
 
@@ -647,7 +773,9 @@ function formatPageOutput(snapshot: string, command: string, url?: string, full 
   // Contextual suggestions
   const suggestions = getSuggestions({ command, url, snapshot });
   if (tr.truncated) {
-    suggestions.push(`Run \`chrome-devtools-axi ${command}${url ? " " + url : ""} --full\` to see complete snapshot`);
+    suggestions.push(
+      `Run \`chrome-devtools-axi ${command}${url ? " " + url : ""} --full\` to see complete snapshot`,
+    );
   }
   if (suggestions.length > 0) {
     blocks.push(renderHelp(suggestions));
@@ -674,7 +802,9 @@ function parseUid(arg: string): string {
 function isRecoverableOpenError(error: unknown): error is CdpError {
   if (!(error instanceof CdpError)) return false;
   if (error.code !== "BROWSER_ERROR") return false;
-  return /not connected|session (?:closed|not found)|no page/i.test(error.message);
+  return /not connected|session (?:closed|not found)|no page/i.test(
+    error.message,
+  );
 }
 
 /**
@@ -767,7 +897,10 @@ async function handleFill(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  const snapshot = await callWithSnapshot("fill", { uid: parseUid(uid), value });
+  const snapshot = await callWithSnapshot("fill", {
+    uid: parseUid(uid),
+    value,
+  });
   return formatPageOutput(snapshot, "fill", undefined, full);
 }
 
@@ -819,10 +952,14 @@ async function handleBack(full: boolean): Promise<string> {
 async function handleWait(args: string[]): Promise<string> {
   const target = args[0];
   if (!target) {
-    throw new CdpError("Missing wait target (milliseconds or text)", "VALIDATION_ERROR", [
-      "Run `chrome-devtools-axi wait 2000` to wait 2 seconds",
-      'Run `chrome-devtools-axi wait "Submit"` to wait for text to appear',
-    ]);
+    throw new CdpError(
+      "Missing wait target (milliseconds or text)",
+      "VALIDATION_ERROR",
+      [
+        "Run `chrome-devtools-axi wait 2000` to wait 2 seconds",
+        'Run `chrome-devtools-axi wait "Submit"` to wait for text to appear',
+      ],
+    );
   }
 
   const isNumeric = /^\d+$/.test(target);
@@ -853,7 +990,8 @@ function parseEvalResult(output: string): string {
   if (jsonBlock) return jsonBlock[1].trim();
   // Fallback: strip the preamble if present
   const preamble = "Script ran on page and returned:";
-  if (output.includes(preamble)) return output.slice(output.indexOf(preamble) + preamble.length).trim();
+  if (output.includes(preamble))
+    return output.slice(output.indexOf(preamble) + preamble.length).trim();
   return output.trim();
 }
 
@@ -865,7 +1003,9 @@ async function handleEval(args: string[]): Promise<string> {
     ]);
   }
 
-  const output = await callTool("evaluate_script", { function: wrapJsExpression(js) });
+  const output = await callTool("evaluate_script", {
+    function: wrapJsExpression(js),
+  });
 
   const blocks: string[] = [];
   blocks.push(encode({ result: parseEvalResult(output) }));
@@ -900,10 +1040,12 @@ async function handlePages(): Promise<string> {
   const header = `pages[${pages.length}]{id,url,selected}:`;
   const rows = pages.map((p) => `  ${p.id},${p.url},${p.selected}`);
   blocks.push(`${header}\n${rows.join("\n")}`);
-  blocks.push(renderHelp([
-    "Run `chrome-devtools-axi selectpage <id>` to switch tabs",
-    "Run `chrome-devtools-axi newpage <url>` to open a new tab",
-  ]));
+  blocks.push(
+    renderHelp([
+      "Run `chrome-devtools-axi selectpage <id>` to switch tabs",
+      "Run `chrome-devtools-axi newpage <url>` to open a new tab",
+    ]),
+  );
   return renderOutput(blocks);
 }
 
@@ -922,7 +1064,10 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
   return formatPageOutput(snapshot, "newpage", url, full);
 }
 
-async function handleSelectPage(args: string[], full: boolean): Promise<string> {
+async function handleSelectPage(
+  args: string[],
+  full: boolean,
+): Promise<string> {
   const id = args[0];
   if (!id) {
     throw new CdpError("Missing page ID", "VALIDATION_ERROR", [
@@ -957,11 +1102,15 @@ async function handleClosePage(args: string[]): Promise<string> {
   const beforeResult = await callTool("list_pages");
   const pagesBefore = parsePagesList(beforeResult);
   if (pagesBefore.length <= 1) {
-    const blocks = [encode({ status: "cannot close the last open page (no-op)" })];
-    blocks.push(renderHelp([
-      "Run `chrome-devtools-axi newpage <url>` to open another tab first",
-      "Run `chrome-devtools-axi stop` to shut down the browser entirely",
-    ]));
+    const blocks = [
+      encode({ status: "cannot close the last open page (no-op)" }),
+    ];
+    blocks.push(
+      renderHelp([
+        "Run `chrome-devtools-axi newpage <url>` to open another tab first",
+        "Run `chrome-devtools-axi stop` to shut down the browser entirely",
+      ]),
+    );
     return renderOutput(blocks);
   }
   await callTool("close_page", { pageId });
@@ -1007,7 +1156,10 @@ async function handleDrag(args: string[], full: boolean): Promise<string> {
       "Run `chrome-devtools-axi drag @<from> @<to>` — get uids from snapshot",
     ]);
   }
-  const snapshot = await callWithSnapshot("drag", { from_uid: parseUid(from), to_uid: parseUid(to) });
+  const snapshot = await callWithSnapshot("drag", {
+    from_uid: parseUid(from),
+    to_uid: parseUid(to),
+  });
   return formatPageOutput(snapshot, "drag", undefined, full);
 }
 
@@ -1049,7 +1201,10 @@ async function handleUpload(args: string[], full: boolean): Promise<string> {
       "Run `chrome-devtools-axi upload @<uid> /path/to/file` to upload a file",
     ]);
   }
-  const snapshot = await callWithSnapshot("upload_file", { uid: parseUid(uid), filePath });
+  const snapshot = await callWithSnapshot("upload_file", {
+    uid: parseUid(uid),
+    filePath,
+  });
   return formatPageOutput(snapshot, "upload", undefined, full);
 }
 
@@ -1081,9 +1236,11 @@ async function handleConsoleGet(args: string[]): Promise<string> {
   }
   const msgid = parseOptionalInteger(id);
   if (msgid === undefined) {
-    throw new CdpError(`Invalid console message id: ${id}`, "VALIDATION_ERROR", [
-      "Run `chrome-devtools-axi console` to list available message ids",
-    ]);
+    throw new CdpError(
+      `Invalid console message id: ${id}`,
+      "VALIDATION_ERROR",
+      ["Run `chrome-devtools-axi console` to list available message ids"],
+    );
   }
   const result = await callTool("get_console_message", { msgid });
   return formatMcpResult("message", result, []);
@@ -1136,7 +1293,10 @@ async function handlePerfInsight(args: string[]): Promise<string> {
       "Run `chrome-devtools-axi perf-insight <set-id> <insight-name>` to analyze an insight",
     ]);
   }
-  const result = await callTool("performance_analyze_insight", { insightSetId: setId, insightName });
+  const result = await callTool("performance_analyze_insight", {
+    insightSetId: setId,
+    insightName,
+  });
   return formatMcpResult("insight", result, []);
 }
 
@@ -1151,11 +1311,33 @@ async function handleHeap(args: string[]): Promise<string> {
   return encode({ heap: filePath });
 }
 
+async function handleRun(): Promise<string | undefined> {
+  if (process.stdin.isTTY) {
+    throw new CdpError("No script provided on stdin", "VALIDATION_ERROR", [
+      "Pipe a script: chrome-devtools-axi run <<'EOF'\\n...\\nEOF",
+    ]);
+  }
+  const content = await readStdin();
+  if (!content.trim()) {
+    throw new CdpError("Empty script on stdin", "VALIDATION_ERROR", [
+      "Pipe a script: chrome-devtools-axi run <<'EOF'\\n...\\nEOF",
+    ]);
+  }
+  const result = await runScript(content, callTool);
+  return result.stdout || undefined;
+}
+
 async function handleHome(full: boolean): Promise<string> {
   const result = await getSessionSnapshotIfRunning();
   if (!result) {
     const blocks = [encode({ browser: "no active session" })];
-    blocks.push(renderHelp(["Run `chrome-devtools-axi open <url>` to start browsing"]));
+    blocks.push(
+      renderHelp([
+        "Run `chrome-devtools-axi open <url>` to start browsing",
+        "Run `chrome-devtools-axi run <<'EOF'\\n...\\nEOF` to execute a multi-step script",
+        "Run `chrome-devtools-axi run --help` for the script API",
+      ]),
+    );
     return renderOutput(blocks);
   }
   const snapshot = stripSnapshotHeader(result);
@@ -1164,7 +1346,11 @@ async function handleHome(full: boolean): Promise<string> {
 
 export async function main(argv: string[]): Promise<void> {
   // Best-effort hook installation on every invocation
-  try { installHooks(); } catch { /* silent */ }
+  try {
+    installHooks();
+  } catch {
+    /* silent */
+  }
 
   const args = [...argv];
 
@@ -1174,7 +1360,10 @@ export async function main(argv: string[]): Promise<void> {
   const commandArgs = filteredArgs.slice(1);
 
   // Per-subcommand help: `chrome-devtools-axi open --help`
-  if (command && (commandArgs.includes("--help") || commandArgs.includes("-h"))) {
+  if (
+    command &&
+    (commandArgs.includes("--help") || commandArgs.includes("-h"))
+  ) {
     const help = getCommandHelp(command);
     if (help) {
       process.stdout.write(help + "\n");
@@ -1225,6 +1414,14 @@ export async function main(argv: string[]): Promise<void> {
       case "eval":
         output = await handleEval(commandArgs);
         break;
+      case "run": {
+        const runOutput = await handleRun();
+        if (runOutput !== undefined) {
+          // Script already printed its output; write it raw (no trailing newline added)
+          process.stdout.write(runOutput);
+        }
+        return;
+      }
       case "hover":
         output = await handleHover(commandArgs, full);
         break;
@@ -1308,7 +1505,9 @@ export async function main(argv: string[]): Promise<void> {
     process.stdout.write(output + "\n");
   } catch (err) {
     if (err instanceof CdpError) {
-      process.stdout.write(renderError(err.message, err.code, err.suggestions) + "\n");
+      process.stdout.write(
+        renderError(err.message, err.code, err.suggestions) + "\n",
+      );
     } else {
       const message = err instanceof Error ? err.message : String(err);
       process.stdout.write(renderError(message, "UNKNOWN") + "\n");
