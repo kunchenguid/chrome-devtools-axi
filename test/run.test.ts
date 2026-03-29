@@ -24,10 +24,16 @@ vi.mock("../src/client.js", () => ({
 
 import { main, getCommandHelp } from "../src/cli.js";
 import { CdpError } from "../src/client.js";
-import { createPageHelper, isUidRef, parseEvalOutput, runScript } from "../src/run.js";
+import {
+  createPageHelper,
+  isUidRef,
+  parseEvalOutput,
+  runScript,
+} from "../src/run.js";
 
 /** Mock response for the evaluate_script call that page.open() makes to read url+status. */
-const OPEN_INFO_RESPONSE = 'Script ran on page and returned:\n```json\n{"url":"https://example.com","status":200}\n```';
+const OPEN_INFO_RESPONSE =
+  'Script ran on page and returned:\n```json\n{"url":"https://example.com","status":200}\n```';
 
 afterEach(() => {
   callTool.mockReset();
@@ -40,9 +46,13 @@ afterEach(() => {
 describe("no-args output", () => {
   it("mentions run in the no-session output", async () => {
     const { getSessionSnapshotIfRunning } = await import("../src/client.js");
-    (getSessionSnapshotIfRunning as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    (
+      getSessionSnapshotIfRunning as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce(null);
 
-    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
     await main([]);
 
     const output = String(write.mock.calls[0]?.[0]);
@@ -78,7 +88,7 @@ describe("parseEvalOutput", () => {
   });
 
   it("extracts numeric value", () => {
-    const output = 'Script ran on page and returned:\n```json\n42\n```';
+    const output = "Script ran on page and returned:\n```json\n42\n```";
     expect(parseEvalOutput(output)).toBe(42);
   });
 
@@ -88,7 +98,7 @@ describe("parseEvalOutput", () => {
   });
 
   it("extracts null", () => {
-    const output = 'Script ran on page and returned:\n```json\nnull\n```';
+    const output = "Script ran on page and returned:\n```json\nnull\n```";
     expect(parseEvalOutput(output)).toBeNull();
   });
 
@@ -109,8 +119,13 @@ describe("createPageHelper", () => {
     const page = createPageHelper(callTool);
     const result = await page.open("https://example.com");
 
-    expect(callTool).toHaveBeenCalledWith("navigate_page", { type: "url", url: "https://example.com" });
-    expect(callTool).toHaveBeenCalledWith("new_page", { url: "https://example.com" });
+    expect(callTool).toHaveBeenCalledWith("navigate_page", {
+      type: "url",
+      url: "https://example.com",
+    });
+    expect(callTool).toHaveBeenCalledWith("new_page", {
+      url: "https://example.com",
+    });
     expect(result).toEqual({ url: "https://example.com", status: 200 });
   });
 
@@ -122,23 +137,32 @@ describe("createPageHelper", () => {
     const page = createPageHelper(callTool);
     const result = await page.open("https://example.com");
 
-    expect(callTool).toHaveBeenCalledWith("navigate_page", { type: "url", url: "https://example.com" });
+    expect(callTool).toHaveBeenCalledWith("navigate_page", {
+      type: "url",
+      url: "https://example.com",
+    });
     expect(result.url).toBe("https://example.com");
     expect(result.status).toBe(200);
   });
 
   it("page.eval with string expression", async () => {
-    callTool.mockResolvedValueOnce('Script ran on page and returned:\n```json\n"Example Domain"\n```');
+    callTool.mockResolvedValueOnce(
+      'Script ran on page and returned:\n```json\n"Example Domain"\n```',
+    );
 
     const page = createPageHelper(callTool);
     const result = await page.eval("document.title");
 
-    expect(callTool).toHaveBeenCalledWith("evaluate_script", { function: "() => (document.title)" });
+    expect(callTool).toHaveBeenCalledWith("evaluate_script", {
+      function: "() => (document.title)",
+    });
     expect(result).toBe("Example Domain");
   });
 
   it("page.eval with function", async () => {
-    callTool.mockResolvedValueOnce('Script ran on page and returned:\n```json\n3\n```');
+    callTool.mockResolvedValueOnce(
+      "Script ran on page and returned:\n```json\n3\n```",
+    );
 
     const page = createPageHelper(callTool);
     const result = await page.eval(() => 1 + 2);
@@ -294,13 +318,19 @@ describe("createPageHelper", () => {
 
 describe("runScript", () => {
   it("captures script console.log output", async () => {
-    const result = await runScript(`console.log("hello from script");`, callTool);
+    const result = await runScript(
+      `console.log("hello from script");`,
+      callTool,
+    );
 
     expect(result.stdout).toBe("hello from script\n");
   });
 
   it("captures multiple console.log lines", async () => {
-    const result = await runScript(`console.log("line1"); console.log("line2");`, callTool);
+    const result = await runScript(
+      `console.log("line1"); console.log("line2");`,
+      callTool,
+    );
 
     expect(result.stdout).toBe("line1\nline2\n");
   });
@@ -309,13 +339,18 @@ describe("runScript", () => {
     callTool
       .mockResolvedValueOnce("") // navigate_page
       .mockResolvedValueOnce(OPEN_INFO_RESPONSE) // evaluate_script for url+status
-      .mockResolvedValueOnce('Script ran on page and returned:\n```json\n"Example Domain"\n```');
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n"Example Domain"\n```',
+      );
 
-    const result = await runScript(`
+    const result = await runScript(
+      `
 await page.open("https://example.com");
 const result = await page.eval("document.title");
 console.log(result);
-`, callTool);
+`,
+      callTool,
+    );
 
     expect(result.stdout).toBe("Example Domain\n");
   });
@@ -340,12 +375,20 @@ console.log(result);
 
 describe("run command validation", () => {
   it("errors when stdin is a TTY (no script piped)", async () => {
-    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+    });
 
     await main(["run"]);
 
-    Object.defineProperty(process.stdin, "isTTY", { value: undefined, configurable: true });
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: undefined,
+      configurable: true,
+    });
     const output = String(write.mock.calls[0]?.[0]);
     expect(output).toContain("No script provided");
     expect(output).toContain("VALIDATION_ERROR");
@@ -360,19 +403,25 @@ describe("page.open fallback", () => {
     callTool
       .mockRejectedValueOnce(new CdpError("session closed", "BROWSER_ERROR"))
       .mockResolvedValueOnce("")
-      .mockResolvedValueOnce('Script ran on page and returned:\n```json\n{"url":"https://test.com","status":200}\n```');
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"url":"https://test.com","status":200}\n```',
+      );
 
     const page = createPageHelper(callTool);
     await page.open("https://test.com");
 
-    expect(callTool).toHaveBeenCalledWith("new_page", { url: "https://test.com" });
+    expect(callTool).toHaveBeenCalledWith("new_page", {
+      url: "https://test.com",
+    });
   });
 
   it("does not fall back on non-recoverable errors", async () => {
     callTool.mockRejectedValueOnce(new CdpError("some other error", "TIMEOUT"));
 
     const page = createPageHelper(callTool);
-    await expect(page.open("https://test.com")).rejects.toThrow("some other error");
+    await expect(page.open("https://test.com")).rejects.toThrow(
+      "some other error",
+    );
   });
 });
 
@@ -397,16 +446,22 @@ describe("page.snapshot header stripping", () => {
 
 describe("page.eval variants", () => {
   it("wraps string expression in arrow function", async () => {
-    callTool.mockResolvedValueOnce('Script ran on page and returned:\n```json\ntrue\n```');
+    callTool.mockResolvedValueOnce(
+      "Script ran on page and returned:\n```json\ntrue\n```",
+    );
 
     const page = createPageHelper(callTool);
     await page.eval("true");
 
-    expect(callTool).toHaveBeenCalledWith("evaluate_script", { function: "() => (true)" });
+    expect(callTool).toHaveBeenCalledWith("evaluate_script", {
+      function: "() => (true)",
+    });
   });
 
   it("serializes function argument", async () => {
-    callTool.mockResolvedValueOnce('Script ran on page and returned:\n```json\n[]\n```');
+    callTool.mockResolvedValueOnce(
+      "Script ran on page and returned:\n```json\n[]\n```",
+    );
 
     const page = createPageHelper(callTool);
     await page.eval(() => []);
@@ -446,7 +501,9 @@ describe("page.open return value", () => {
   it("returns url and status from navigation", async () => {
     callTool
       .mockResolvedValueOnce("") // navigate_page
-      .mockResolvedValueOnce('Script ran on page and returned:\n```json\n{"url":"https://example.com/","status":200}\n```');
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"url":"https://example.com/","status":200}\n```',
+      );
 
     const page = createPageHelper(callTool);
     const result = await page.open("https://example.com");
@@ -458,7 +515,9 @@ describe("page.open return value", () => {
   it("returns 404 status", async () => {
     callTool
       .mockResolvedValueOnce("")
-      .mockResolvedValueOnce('Script ran on page and returned:\n```json\n{"url":"https://httpbin.org/status/404","status":404}\n```');
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"url":"https://httpbin.org/status/404","status":404}\n```',
+      );
 
     const page = createPageHelper(callTool);
     const result = await page.open("https://httpbin.org/status/404");
@@ -469,7 +528,9 @@ describe("page.open return value", () => {
   it("returns null status when performance API unavailable", async () => {
     callTool
       .mockResolvedValueOnce("")
-      .mockResolvedValueOnce('Script ran on page and returned:\n```json\n{"url":"https://example.com","status":null}\n```');
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"url":"https://example.com","status":null}\n```',
+      );
 
     const page = createPageHelper(callTool);
     const result = await page.open("https://example.com");

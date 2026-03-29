@@ -10,7 +10,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CdpError } from "./client.js";
 
-type CallTool = (name: string, args?: Record<string, unknown>) => Promise<string>;
+type CallTool = (
+  name: string,
+  args?: Record<string, unknown>,
+) => Promise<string>;
 
 // --- Value parsing ---
 
@@ -27,7 +30,11 @@ export function parseEvalOutput(output: string): unknown {
   const preamble = "Script ran on page and returned:";
   if (output.includes(preamble)) {
     const raw = output.slice(output.indexOf(preamble) + preamble.length).trim();
-    try { return JSON.parse(raw); } catch { return raw; }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
   }
   return output.trim();
 }
@@ -49,7 +56,9 @@ function parseUid(ref: string): string {
 function isRecoverableOpenError(error: unknown): boolean {
   if (!(error instanceof CdpError)) return false;
   if (error.code !== "BROWSER_ERROR") return false;
-  return /not connected|session (?:closed|not found)|no page/i.test(error.message);
+  return /not connected|session (?:closed|not found)|no page/i.test(
+    error.message,
+  );
 }
 
 // --- Selector detection ---
@@ -113,7 +122,9 @@ export function createPageHelper(callTool: CallTool): PageHelper {
       };
     },
 
-    async eval(jsOrFn: string | ((...args: unknown[]) => unknown)): Promise<unknown> {
+    async eval(
+      jsOrFn: string | ((...args: unknown[]) => unknown),
+    ): Promise<unknown> {
       const fn =
         typeof jsOrFn === "function"
           ? String(jsOrFn)
@@ -257,7 +268,12 @@ export async function runScript(
       (globalThis as Record<string, unknown>).page = prevPage;
     }
     // Clean up temp file
-    try { unlinkSync(tmpFile); rmdirSync(tmpDir); } catch { /* best effort */ }
+    try {
+      unlinkSync(tmpFile);
+      rmdirSync(tmpDir);
+    } catch {
+      /* best effort */
+    }
   }
 
   const stdout = lines.length > 0 ? lines.join("\n") + "\n" : "";
