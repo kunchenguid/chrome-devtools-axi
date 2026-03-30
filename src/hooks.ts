@@ -167,6 +167,7 @@ export function computeCodexConfigUpdate(content: string): [string, boolean] {
 export function installHooks(): void {
   try {
     const execPath = resolve(process.argv[1]);
+    if (!execPath.includes("chrome-devtools-axi")) return;
 
     for (const target of getHookTargets()) {
       try {
