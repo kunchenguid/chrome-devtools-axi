@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.6](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.5...chrome-devtools-axi-v0.1.6) (2026-03-30)
+
+
+### Features
+
+* **run-cmd:** add script runner command ([#7](https://github.com/kunchenguid/chrome-devtools-axi/issues/7)) ([5361cc2](https://github.com/kunchenguid/chrome-devtools-axi/commit/5361cc2d512beea2061b7511c9638308feb5abd2))
+
+
+### Bug Fixes
+
+* **hooks:** guard installHooks against unrelated execPath ([61c64e7](https://github.com/kunchenguid/chrome-devtools-axi/commit/61c64e7ffe6abcdaab0ee07487d019a494ac6bbe))
+
 ## [0.1.5](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.4...chrome-devtools-axi-v0.1.5) (2026-03-29)
 
 
