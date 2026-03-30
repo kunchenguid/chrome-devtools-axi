@@ -30,15 +30,12 @@ describe("getSuggestions", () => {
     expect(suggestions.some((s) => s.includes("Submit"))).toBe(true);
   });
 
-  it("returns at most 3 suggestions", () => {
+  it("always includes eval tip", () => {
     const snapshot = `RootWebArea "Page"
   uid=1 textbox "Search"
   uid=2 button "Go"
-  uid=3 link "Home"
-  uid=4 link "About"
-  uid=5 link "Contact"
-  uid=6 link "Help"`;
+  uid=3 link "Home"`;
     const suggestions = getSuggestions({ command: "snapshot", snapshot });
-    expect(suggestions.length).toBeLessThanOrEqual(3);
+    expect(suggestions.some((s) => s.includes("eval"))).toBe(true);
   });
 });

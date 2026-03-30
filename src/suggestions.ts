@@ -42,7 +42,7 @@ export function getSuggestions(ctx: SuggestionContext): string[] {
   }
 
   // Suggest clicking buttons
-  if (buttons.length > 0 && lines.length < 2) {
+  if (buttons.length > 0) {
     const btn = ctx.command === "fill"
       ? buttons.find((r) => !/submit|search|go|send|login|sign|ok/i.test(r.label)) ?? buttons[0]
       : buttons[0];
@@ -55,7 +55,7 @@ export function getSuggestions(ctx: SuggestionContext): string[] {
   }
 
   // Suggest clicking links
-  if (links.length > 0 && lines.length < 2) {
+  if (links.length > 0) {
     const link = links[0];
     lines.push(
       `Run \`chrome-devtools-axi click @${link.ref}\` to click the "${link.label}" link`,
@@ -63,9 +63,14 @@ export function getSuggestions(ctx: SuggestionContext): string[] {
   }
 
   // Suggest scrolling if page has many elements
-  if (refs.length > 5 && lines.length < 3) {
+  if (refs.length > 5) {
     lines.push("Run `chrome-devtools-axi scroll down` to scroll down");
   }
 
-  return lines.slice(0, 3);
+  // Teach eval syntax — use IIFE for multi-statement logic
+  lines.push(
+    "Use `chrome-devtools-axi eval <expr>` for JS expressions. For multi-statement code, wrap in an IIFE: `eval \"(() => { ...; return result })()\"`",
+  );
+
+  return lines;
 }
