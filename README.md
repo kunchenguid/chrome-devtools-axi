@@ -6,7 +6,7 @@
   <a href="https://github.com/kunchenguid/chrome-devtools-axi/actions/workflows/release-please.yml"><img alt="Release" src="https://img.shields.io/github/actions/workflow/status/kunchenguid/chrome-devtools-axi/release-please.yml?style=flat-square&label=Release" /></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue?style=flat-square" /></a>
   <a href="https://x.com/kunchenguid"><img alt="X" src="https://img.shields.io/badge/X-@kunchenguid-black?style=flat-square" /></a>
-  <a href="https://discord.gg/BW4aJuQhTf"><img alt="Discord" src="https://img.shields.io/discord/1439901831038763092?style=flat-square&label=discord" /></a>
+  <a href="https://discord.gg/Wsy2NpnZDu"><img alt="Discord" src="https://img.shields.io/discord/1439901831038763092?style=flat-square&label=discord" /></a>
 </p>
 
 <h3 align="center">The most agent-ergonomic browser automation</h3>
@@ -71,16 +71,16 @@ Execute `npm i -g chrome-devtools-axi` and run `chrome-devtools-axi` for browser
 
 ### Navigation
 
-| Command           | Description                         |
-| ----------------- | ----------------------------------- |
-| `open <url>`      | Navigate to URL and snapshot        |
-| `snapshot`        | Capture current page state          |
-| `screenshot <p>`  | Save a screenshot to a file         |
-| `scroll <dir>`    | Scroll: up, down, top, bottom       |
-| `back`            | Navigate back                       |
-| `wait <ms\|text>` | Wait for time or text to appear     |
+| Command           | Description                                  |
+| ----------------- | -------------------------------------------- |
+| `open <url>`      | Navigate to URL and snapshot                 |
+| `snapshot`        | Capture current page state                   |
+| `screenshot <p>`  | Save a screenshot to a file                  |
+| `scroll <dir>`    | Scroll: up, down, top, bottom                |
+| `back`            | Navigate back                                |
+| `wait <ms\|text>` | Wait for time or text to appear              |
 | `eval <js>`       | Evaluate a JavaScript expression or function |
-| `run`             | Execute a multi-step script from stdin |
+| `run`             | Execute a multi-step script from stdin       |
 
 `eval` wraps plain input as `() => (<expr>)` before sending it to DevTools. For multi-statement logic, pass an arrow function, `function`, or IIFE yourself.
 
