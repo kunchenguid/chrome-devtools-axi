@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.7...chrome-devtools-axi-v0.1.8) (2026-03-30)
+
+
+### Bug Fixes
+
+* **bridge:** handle exit and orphan cleanup ([#11](https://github.com/kunchenguid/chrome-devtools-axi/issues/11)) ([ea32d9b](https://github.com/kunchenguid/chrome-devtools-axi/commit/ea32d9b7fdc3f25da26e235e9f3677e5cbeee410))
+
 ## [0.1.7](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.6...chrome-devtools-axi-v0.1.7) (2026-03-30)
 
 
