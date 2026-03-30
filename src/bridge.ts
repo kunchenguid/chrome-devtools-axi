@@ -227,13 +227,28 @@ export async function runBridge(port = DEFAULT_PORT): Promise<void> {
     writeReadySignal();
   });
 
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     removePidFile();
     await closeServer(server);
     await client.close();
     await transport.close();
     process.exit(0);
   };
+
+  // Kill our entire process group on exit so chrome-devtools-mcp children
+  // don't survive as orphans. The bridge is spawned with detached:true,
+  // making it a process group leader — all children share our PGID.
+  process.on("exit", () => {
+    removePidFile();
+    try {
+      process.kill(-process.pid, "SIGTERM");
+    } catch {
+      // Already dead or not a group leader
+    }
+  });
 
   process.on("SIGTERM", () => {
     void shutdown();
