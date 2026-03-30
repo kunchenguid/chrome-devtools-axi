@@ -43,9 +43,12 @@ export function getSuggestions(ctx: SuggestionContext): string[] {
 
   // Suggest clicking buttons
   if (buttons.length > 0) {
-    const btn = ctx.command === "fill"
-      ? buttons.find((r) => !/submit|search|go|send|login|sign|ok/i.test(r.label)) ?? buttons[0]
-      : buttons[0];
+    const btn =
+      ctx.command === "fill"
+        ? (buttons.find(
+            (r) => !/submit|search|go|send|login|sign|ok/i.test(r.label),
+          ) ?? buttons[0])
+        : buttons[0];
     if (btn && !lines.some((l) => l.includes(`@${btn.ref}`))) {
       const label = btn.label ? `"${btn.label}" ` : "";
       lines.push(
@@ -69,7 +72,7 @@ export function getSuggestions(ctx: SuggestionContext): string[] {
 
   // Teach eval syntax — use IIFE for multi-statement logic
   lines.push(
-    "Use `chrome-devtools-axi eval <expr>` for JS expressions. For multi-statement code, wrap in an IIFE: `eval \"(() => { ...; return result })()\"`",
+    'Use `chrome-devtools-axi eval <expr>` for JS expressions. For multi-statement code, wrap in an IIFE: `eval "(() => { ...; return result })()"`',
   );
 
   return lines;

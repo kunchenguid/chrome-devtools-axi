@@ -987,7 +987,11 @@ async function handleWait(args: string[]): Promise<string> {
 /** Wrap plain JS expressions for MCP evaluate_script, but pass functions through unchanged. */
 export function wrapJsExpression(js: string): string {
   const trimmed = js.trim();
-  if (/^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(trimmed)) {
+  if (
+    /^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(
+      trimmed,
+    )
+  ) {
     return trimmed;
   }
   return `() => (${trimmed})`;
