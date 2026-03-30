@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.6...chrome-devtools-axi-v0.1.7) (2026-03-30)
+
+
+### Bug Fixes
+
+* **cli:** support function input in eval ([#9](https://github.com/kunchenguid/chrome-devtools-axi/issues/9)) ([cb37c3d](https://github.com/kunchenguid/chrome-devtools-axi/commit/cb37c3d9c04ed98ade1fa053574dbb2be18fcf98))
+
 ## [0.1.6](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.5...chrome-devtools-axi-v0.1.6) (2026-03-30)
 
 
