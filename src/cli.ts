@@ -987,7 +987,7 @@ async function handleWait(args: string[]): Promise<string> {
 /** Wrap JS input in an arrow function for MCP evaluate_script. */
 export function wrapJsExpression(js: string): string {
   const trimmed = js.trim();
-  if (trimmed.startsWith("() =>") || trimmed.startsWith("function")) {
+  if (/^(async\s+)?(\(.*?\)\s*=>|function[\s*(])/.test(trimmed)) {
     return trimmed;
   }
   return `() => (${trimmed})`;
