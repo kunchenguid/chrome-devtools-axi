@@ -79,8 +79,15 @@ Execute `npm i -g chrome-devtools-axi` and run `chrome-devtools-axi` for browser
 | `scroll <dir>`    | Scroll: up, down, top, bottom       |
 | `back`            | Navigate back                       |
 | `wait <ms\|text>` | Wait for time or text to appear     |
-| `eval <js>`       | Evaluate JavaScript in page context |
+| `eval <js>`       | Evaluate a JavaScript expression or function |
 | `run`             | Execute a multi-step script from stdin |
+
+`eval` wraps plain input as `() => (<expr>)` before sending it to DevTools. For multi-statement logic, pass an arrow function, `function`, or IIFE yourself.
+
+```sh
+chrome-devtools-axi eval "document.title"
+chrome-devtools-axi eval "(() => { const rows = [...document.querySelectorAll('tr')]; return rows.map((row) => row.textContent) })()"
+```
 
 ### Interaction
 

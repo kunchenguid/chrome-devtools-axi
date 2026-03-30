@@ -984,7 +984,7 @@ async function handleWait(args: string[]): Promise<string> {
   return renderOutput(blocks);
 }
 
-/** Wrap JS input in an arrow function for MCP evaluate_script. */
+/** Wrap plain JS expressions for MCP evaluate_script, but pass functions through unchanged. */
 export function wrapJsExpression(js: string): string {
   const trimmed = js.trim();
   if (/^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(trimmed)) {
