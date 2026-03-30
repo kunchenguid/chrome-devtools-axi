@@ -12,12 +12,20 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
-const DEFAULT_PORT = Number.parseInt(process.env.CHROME_DEVTOOLS_AXI_PORT ?? "9224", 10);
+const DEFAULT_PORT = Number.parseInt(
+  process.env.CHROME_DEVTOOLS_AXI_PORT ?? "9224",
+  10,
+);
 const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
 const PID_FILE = join(STATE_DIR, "bridge.pid");
 
@@ -38,11 +46,16 @@ interface BridgeToolDescription {
 
 export interface BridgeClient {
   listTools(): Promise<{ tools: BridgeToolDescription[] }>;
-  callTool(request: { name: string; arguments: Record<string, unknown> }): Promise<unknown>;
+  callTool(request: {
+    name: string;
+    arguments: Record<string, unknown>;
+  }): Promise<unknown>;
   close(): Promise<void>;
 }
 
-export async function isBridgeClientConnected(client: BridgeClient): Promise<boolean> {
+export async function isBridgeClientConnected(
+  client: BridgeClient,
+): Promise<boolean> {
   try {
     await client.listTools();
     return true;
@@ -76,7 +89,12 @@ export function extractToolText(content: BridgeContentBlock[]): string {
 }
 
 function getToolContent(result: unknown): BridgeContentBlock[] {
-  if (!result || typeof result !== "object" || !("content" in result) || !Array.isArray(result.content)) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    !("content" in result) ||
+    !Array.isArray(result.content)
+  ) {
     return [];
   }
   return result.content as BridgeContentBlock[];
@@ -95,14 +113,21 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
   if (payload.args === undefined) {
     return { name: payload.name, args: {} };
   }
-  if (payload.args === null || typeof payload.args !== "object" || Array.isArray(payload.args)) {
+  if (
+    payload.args === null ||
+    typeof payload.args !== "object" ||
+    Array.isArray(payload.args)
+  ) {
     throw new Error("Invalid bridge request payload");
   }
   return { name: payload.name, args: payload.args as Record<string, unknown> };
 }
 
 export function resolveBridgeScript(importMetaDir: string): string {
-  const builtScript = resolve(importMetaDir, "../bin/chrome-devtools-axi-bridge.js");
+  const builtScript = resolve(
+    importMetaDir,
+    "../bin/chrome-devtools-axi-bridge.js",
+  );
   const sourceScript = builtScript.replace(/\.js$/, ".ts");
   return existsSync(sourceScript) ? sourceScript : builtScript;
 }
@@ -115,12 +140,19 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
   return body;
 }
 
-function writeJson(res: ServerResponse, statusCode: number, payload: unknown): void {
+function writeJson(
+  res: ServerResponse,
+  statusCode: number,
+  payload: unknown,
+): void {
   res.statusCode = statusCode;
   res.end(JSON.stringify(payload));
 }
 
-async function handleToolsRequest(client: BridgeClient, res: ServerResponse): Promise<void> {
+async function handleToolsRequest(
+  client: BridgeClient,
+  res: ServerResponse,
+): Promise<void> {
   const result = await client.listTools();
   writeJson(
     res,
@@ -139,7 +171,10 @@ async function handleCallRequest(
 ): Promise<void> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
-  const result = await client.callTool({ name: payload.name, arguments: payload.args });
+  const result = await client.callTool({
+    name: payload.name,
+    arguments: payload.args,
+  });
   writeJson(res, 200, { result: extractToolText(getToolContent(result)) });
 }
 
