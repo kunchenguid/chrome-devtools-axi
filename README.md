@@ -152,7 +152,7 @@ Running with no command is equivalent to `snapshot`.
 | Flag                        | Description                                 |
 | --------------------------- | ------------------------------------------- |
 | `--help`                    | Show usage information                      |
-| `--full`                    | Show complete snapshot without truncation   |
+| `--full`                    | Show complete output without truncation     |
 | `--background`              | Open new page in background (newpage)       |
 | `--uid @<uid>`              | Target a specific element (screenshot)      |
 | `--full-page`               | Capture entire scrollable page (screenshot) |
