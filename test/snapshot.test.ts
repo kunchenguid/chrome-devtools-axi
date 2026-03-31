@@ -141,4 +141,13 @@ describe("truncateText", () => {
     const result = truncateText(text, 1000);
     expect(result.totalLength).toBe(20000);
   });
+
+  it("skips truncation when result would be longer than original", () => {
+    // Text barely over the limit — marker overhead would make it longer
+    const text = "x".repeat(120);
+    const result = truncateText(text, 100);
+    expect(result.text).toBe(text);
+    expect(result.truncated).toBe(true);
+    expect(result.totalLength).toBe(120);
+  });
 });

@@ -56,7 +56,9 @@ export function truncateSnapshot(
  */
 export function truncateText(text: string, limit = 8000): TruncationResult {
   const totalLength = text.length;
-  if (totalLength <= limit) {
+  // The omission marker adds ~50 chars of overhead; skip truncation when
+  // the text is short enough that truncating would produce a longer result.
+  if (totalLength <= limit + 50) {
     return { text, truncated: false, totalLength };
   }
   const headBudget = Math.floor(limit * 0.4);
