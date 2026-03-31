@@ -42,6 +42,14 @@ echo ""
 
 errors=0
 
+# Step 0: Ensure dependencies are installed
+if [ ! -d "node_modules" ]; then
+  echo "==> npm install (dependencies missing)"
+  npm install --ignore-scripts 2>&1
+  echo "    Dependencies installed."
+  echo ""
+fi
+
 # Step 1: Auto-fix formatting with Prettier
 echo "==> Prettier --write (auto-fix)"
 if npx prettier --write "${ts_files[@]}" 2>&1; then
