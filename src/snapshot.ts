@@ -36,7 +36,11 @@ export interface TruncationResult {
   totalLength: number;
 }
 
-export function truncateSnapshot(snapshot: string, full: boolean, limit = 4000): TruncationResult {
+export function truncateSnapshot(
+  snapshot: string,
+  full: boolean,
+  limit = 16000,
+): TruncationResult {
   const totalLength = snapshot.length;
   if (full || totalLength <= limit) {
     return { text: snapshot, truncated: false, totalLength };
@@ -44,6 +48,30 @@ export function truncateSnapshot(snapshot: string, full: boolean, limit = 4000):
   const cut = snapshot.lastIndexOf("\n", limit);
   const text = cut > 0 ? snapshot.slice(0, cut) : snapshot.slice(0, limit);
   return { text, truncated: true, totalLength };
+}
+
+/**
+ * Truncate arbitrary text keeping both head and tail so recent/trailing data is preserved.
+ * Used for eval output where the end of the result is often as important as the beginning.
+ */
+export function truncateText(text: string, limit = 8000): TruncationResult {
+  const totalLength = text.length;
+  if (totalLength <= limit) {
+    return { text, truncated: false, totalLength };
+  }
+  const headBudget = Math.floor(limit * 0.4);
+  const tailBudget = limit - headBudget;
+  // Cut at line boundaries when possible
+  const headCut = text.lastIndexOf("\n", headBudget);
+  const head = headCut > 0 ? text.slice(0, headCut) : text.slice(0, headBudget);
+  const tailStart = text.indexOf("\n", totalLength - tailBudget);
+  const tail =
+    tailStart > 0 && tailStart < totalLength
+      ? text.slice(tailStart + 1)
+      : text.slice(totalLength - tailBudget);
+  const omitted = totalLength - head.length - tail.length;
+  const result = `${head}\n\n... (${omitted} chars omitted, ${totalLength} total) ...\n\n${tail}`;
+  return { text: result, truncated: true, totalLength };
 }
 
 const INPUT_TYPES = ["textbox", "searchbox", "input", "combobox", "textarea"];
