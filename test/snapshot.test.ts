@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { countRefs, extractRefs, extractTitle, isInputType, truncateSnapshot } from "../src/snapshot.js";
+import { countRefs, extractRefs, extractTitle, isInputType, truncateSnapshot, truncateText } from "../src/snapshot.js";
 
 describe("countRefs", () => {
   it("counts uid= occurrences", () => {
@@ -84,5 +84,42 @@ describe("truncateSnapshot", () => {
     const snapshot = "x".repeat(5000);
     const result = truncateSnapshot(snapshot, false, 100);
     expect(result.totalLength).toBe(5000);
+  });
+});
+
+describe("truncateText", () => {
+  it("returns text unchanged when under limit", () => {
+    const text = "short text here";
+    const result = truncateText(text, 8000);
+    expect(result.text).toBe(text);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("keeps head and tail when over limit", () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i}: ${"x".repeat(50)}`);
+    const text = lines.join("\n");
+    const result = truncateText(text, 500);
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain("line 0:");
+    expect(result.text).toContain("line 99:");
+    expect(result.text).toContain("chars omitted");
+    expect(result.totalLength).toBe(text.length);
+  });
+
+  it("preserves tail content for grading visibility", () => {
+    const head = "Year 1901\tAlice\nYear 1902\tBob\n";
+    const middle = Array.from({ length: 100 }, (_, i) => `Year ${1903 + i}\tPerson${i}`).join("\n");
+    const tail = "\nYear 2023\tRecent Winner\nYear 2024\tLatest Winner";
+    const text = head + middle + tail;
+    const result = truncateText(text, 500);
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain("Year 2024");
+    expect(result.text).toContain("Latest Winner");
+  });
+
+  it("reports accurate totalLength", () => {
+    const text = "x".repeat(20000);
+    const result = truncateText(text, 1000);
+    expect(result.totalLength).toBe(20000);
   });
 });

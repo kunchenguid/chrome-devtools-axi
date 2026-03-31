@@ -8,7 +8,7 @@ import {
 } from "./client.js";
 import { installHooks } from "./hooks.js";
 import { readStdin, runScript } from "./run.js";
-import { countRefs, extractTitle, truncateSnapshot } from "./snapshot.js";
+import { countRefs, extractTitle, truncateSnapshot, truncateText } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 
 const HELP = `usage: chrome-devtools-axi <command> [args]
@@ -768,7 +768,7 @@ function formatPageOutput(
   page.refs = refs;
   blocks.push(encode({ page }));
 
-  // Raw snapshot (not TOON-encoded — already token-efficient tree format)
+  // Truncate snapshot
   const tr = truncateSnapshot(snapshot, full);
   let snapshotBlock = `snapshot:\n${tr.text.trimEnd()}`;
   if (tr.truncated) {
@@ -1009,7 +1009,7 @@ function parseEvalResult(output: string): string {
   return output.trim();
 }
 
-async function handleEval(args: string[]): Promise<string> {
+async function handleEval(args: string[], full: boolean): Promise<string> {
   const js = args.join(" ");
   if (!js) {
     throw new CdpError("Missing JavaScript expression", "VALIDATION_ERROR", [
@@ -1022,8 +1022,15 @@ async function handleEval(args: string[]): Promise<string> {
   });
 
   const blocks: string[] = [];
-  blocks.push(encode({ result: parseEvalResult(output) }));
+  const raw = parseEvalResult(output);
+  const tr = full ? { text: raw, truncated: false, totalLength: raw.length } : truncateText(raw);
+  blocks.push(encode({ result: tr.text }));
   const suggestions = getSuggestions({ command: "eval" });
+  if (tr.truncated) {
+    suggestions.push(
+      "Result was truncated — re-run with --full flag, or use .slice() / filter in your JS expression",
+    );
+  }
   if (suggestions.length > 0) blocks.push(renderHelp(suggestions));
   return renderOutput(blocks);
 }
@@ -1426,7 +1433,7 @@ export async function main(argv: string[]): Promise<void> {
         output = await handleWait(commandArgs);
         break;
       case "eval":
-        output = await handleEval(commandArgs);
+        output = await handleEval(commandArgs, full);
         break;
       case "run": {
         const runOutput = await handleRun();
