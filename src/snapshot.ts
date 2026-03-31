@@ -64,7 +64,7 @@ export function truncateText(text: string, limit = 8000): TruncationResult {
   // The omission marker adds overhead; skip truncation when
   // the text is short enough that truncating would produce a longer result.
   if (totalLength <= limit + MARKER_OVERHEAD) {
-    return { text, truncated: true, totalLength };
+    return { text, truncated: false, totalLength };
   }
   const headBudget = Math.floor(limit * 0.4);
   const tailBudget = limit - headBudget;
