@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.9](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.8...chrome-devtools-axi-v0.1.9) (2026-03-31)
+
+
+### Bug Fixes
+
+* **snapshot:** improve truncation handling ([#13](https://github.com/kunchenguid/chrome-devtools-axi/issues/13)) ([7ebca68](https://github.com/kunchenguid/chrome-devtools-axi/commit/7ebca6867ff9bd950f63bc8fad7efc7913ccdcd5))
+* **snapshot:** skip truncation when marker adds overhead ([#15](https://github.com/kunchenguid/chrome-devtools-axi/issues/15)) ([5ae7d62](https://github.com/kunchenguid/chrome-devtools-axi/commit/5ae7d6230e7b9fab5ac83933c6f067202dcc7742))
+
 ## [0.1.8](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.7...chrome-devtools-axi-v0.1.8) (2026-03-30)
 
 
