@@ -8,7 +8,12 @@ import {
 } from "./client.js";
 import { installHooks } from "./hooks.js";
 import { readStdin, runScript } from "./run.js";
-import { countRefs, extractTitle, truncateSnapshot, truncateText } from "./snapshot.js";
+import {
+  countRefs,
+  extractTitle,
+  truncateSnapshot,
+  truncateText,
+} from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 
 const HELP = `usage: chrome-devtools-axi <command> [args]
@@ -1023,7 +1028,9 @@ async function handleEval(args: string[], full: boolean): Promise<string> {
 
   const blocks: string[] = [];
   const raw = parseEvalResult(output);
-  const tr = full ? { text: raw, truncated: false, totalLength: raw.length } : truncateText(raw);
+  const tr = full
+    ? { text: raw, truncated: false, totalLength: raw.length }
+    : truncateText(raw);
   blocks.push(encode({ result: tr.text }));
   const suggestions = getSuggestions({ command: "eval" });
   if (tr.truncated) {

@@ -36,7 +36,11 @@ export interface TruncationResult {
   totalLength: number;
 }
 
-export function truncateSnapshot(snapshot: string, full: boolean, limit = 16000): TruncationResult {
+export function truncateSnapshot(
+  snapshot: string,
+  full: boolean,
+  limit = 16000,
+): TruncationResult {
   const totalLength = snapshot.length;
   if (full || totalLength <= limit) {
     return { text: snapshot, truncated: false, totalLength };
