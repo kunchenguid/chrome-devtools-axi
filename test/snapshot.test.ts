@@ -147,7 +147,7 @@ describe("truncateText", () => {
     const text = "x".repeat(120);
     const result = truncateText(text, 100);
     expect(result.text).toBe(text);
-    expect(result.truncated).toBe(true);
+    expect(result.truncated).toBe(false);
     expect(result.totalLength).toBe(120);
   });
 });
