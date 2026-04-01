@@ -1362,8 +1362,6 @@ async function handleHome(full: boolean): Promise<string> {
     blocks.push(
       renderHelp([
         "Run `chrome-devtools-axi open <url>` to start browsing",
-        "Run `chrome-devtools-axi run <<'EOF'\\n...\\nEOF` to execute a multi-step script",
-        "Run `chrome-devtools-axi run --help` for the script API",
       ]),
     );
     return renderOutput(blocks);

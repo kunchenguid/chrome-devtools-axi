@@ -41,7 +41,7 @@ snapshot:
 **Tell your agent:**
 
 ```
-Execute `npm i -g chrome-devtools-axi` and run `chrome-devtools-axi` for browser automation.
+Execute `npx -y chrome-devtools-axi` to get browser automation tools.
 ```
 
 ## How It Works
