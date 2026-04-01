@@ -44,7 +44,7 @@ afterEach(() => {
 // --- 1. No-args output teaches `run` ---
 
 describe("no-args output", () => {
-  it("mentions run in the no-session output", async () => {
+  it("only suggests open in the no-session output", async () => {
     const { getSessionSnapshotIfRunning } = await import("../src/client.js");
     (
       getSessionSnapshotIfRunning as ReturnType<typeof vi.fn>
@@ -56,7 +56,11 @@ describe("no-args output", () => {
     await main([]);
 
     const output = String(write.mock.calls[0]?.[0]);
-    expect(output).toContain("run");
+    expect(output).toContain(
+      "Run `chrome-devtools-axi open <url>` to start browsing",
+    );
+    expect(output).toContain("help[1]:");
+    expect(output).not.toContain("chrome-devtools-axi run");
   });
 });
 
