@@ -39,7 +39,7 @@ describe("main", () => {
 
     expect(String(write.mock.calls[0]?.[0])).toContain("bin: ~/.local/bin/chrome-devtools-axi");
     expect(String(write.mock.calls[0]?.[0])).toContain(
-      "description: Control the current Chrome DevTools browser session with AXI-friendly TOON output",
+      "description: Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.",
     );
     expect(String(write.mock.calls[0]?.[0])).toContain("browser: no active session");
 
