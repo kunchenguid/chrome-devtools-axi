@@ -1360,9 +1360,7 @@ async function handleHome(full: boolean): Promise<string> {
   if (!result) {
     const blocks = [encode({ browser: "no active session" })];
     blocks.push(
-      renderHelp([
-        "Run `chrome-devtools-axi open <url>` to start browsing",
-      ]),
+      renderHelp(["Run `chrome-devtools-axi open <url>` to start browsing"]),
     );
     return renderOutput(blocks);
   }
