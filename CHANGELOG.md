@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.10...chrome-devtools-axi-v0.1.11) (2026-04-01)
+
+
+### Bug Fixes
+
+* **cli:** add metadata to home view ([#19](https://github.com/kunchenguid/chrome-devtools-axi/issues/19)) ([8900215](https://github.com/kunchenguid/chrome-devtools-axi/commit/8900215983f79915fc1d4527b620003a9b900f0b))
+
 ## [0.1.10](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.9...chrome-devtools-axi-v0.1.10) (2026-04-01)
 
 
