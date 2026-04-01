@@ -145,7 +145,9 @@ chrome-devtools-axi eval "(() => { const rows = [...document.querySelectorAll('t
 | `start` | Start the bridge server |
 | `stop`  | Stop the bridge server  |
 
-Running with no command is equivalent to `snapshot`.
+Running with no command shows the CLI home view. It prepends `bin` and
+`description` metadata, then includes the current snapshot when a browser
+session is active or the no-session status/help block when one is not.
 
 ### Flags
 
