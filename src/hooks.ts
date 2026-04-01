@@ -10,7 +10,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 interface HookEntry {
@@ -37,6 +37,24 @@ export interface HookTarget {
 }
 
 const HOOK_MARKER = "chrome-devtools-axi";
+
+export function shouldInstallHooksForExecPath(execPath: string): boolean {
+  const normalized = resolve(execPath);
+  const fileName = basename(normalized);
+
+  if (!normalized.includes(HOOK_MARKER)) {
+    return false;
+  }
+  if (normalized.endsWith(".ts")) {
+    return false;
+  }
+
+  return (
+    normalized.endsWith("/dist/bin/chrome-devtools-axi.js") ||
+    normalized.endsWith("\\dist\\bin\\chrome-devtools-axi.js") ||
+    fileName === "chrome-devtools-axi"
+  );
+}
 
 /**
  * Returns hook installation targets for supported agents.
@@ -175,7 +193,7 @@ export function computeCodexConfigUpdate(content: string): [string, boolean] {
 export function installHooks(): void {
   try {
     const execPath = resolve(process.argv[1]);
-    if (!execPath.includes("chrome-devtools-axi")) return;
+    if (!shouldInstallHooksForExecPath(execPath)) return;
 
     for (const target of getHookTargets()) {
       try {

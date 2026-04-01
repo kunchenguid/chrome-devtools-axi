@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { computeCodexConfigUpdate, computeHookUpdate, getHookTargets } from "../src/hooks.js";
+import {
+  computeCodexConfigUpdate,
+  computeHookUpdate,
+  getHookTargets,
+  shouldInstallHooksForExecPath,
+} from "../src/hooks.js";
 
 describe("computeHookUpdate", () => {
   it("installs hook when settings have no hooks", () => {
@@ -74,6 +79,45 @@ describe("computeHookUpdate", () => {
     const str = JSON.stringify(updated);
     expect(str).toContain("cleanup-tool run");
     expect(str).toContain("chrome-devtools-axi");
+  });
+
+  it("repairs hooks regardless of whether the exec path is production-eligible", () => {
+    const settings = {
+      hooks: {
+        SessionStart: [
+          {
+            matcher: "",
+            hooks: [{ type: "command" as const, command: "/usr/local/bin/chrome-devtools-axi", timeout: 10 }],
+          },
+        ],
+      },
+    };
+    const [updated, changed] = computeHookUpdate(
+      settings,
+      "/Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts",
+    );
+    expect(changed).toBe(true);
+    expect(JSON.stringify(updated)).toContain(
+      "/Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts",
+    );
+  });
+});
+
+describe("shouldInstallHooksForExecPath", () => {
+  it("rejects non-production TypeScript entrypoints", () => {
+    expect(
+      shouldInstallHooksForExecPath(
+        "/Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts",
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts packaged dist entrypoints", () => {
+    expect(
+      shouldInstallHooksForExecPath(
+        "/Users/kunchen/github/kunchenguid/chrome-devtools-axi/dist/bin/chrome-devtools-axi.js",
+      ),
+    ).toBe(true);
   });
 });
 
