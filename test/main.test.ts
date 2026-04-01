@@ -30,18 +30,42 @@ describe("main", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows bin and description in the no-args home view", async () => {
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    await main([]);
+
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      "bin: chrome-devtools-axi",
+    );
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      "description: Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.",
+    );
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      "browser: no active session",
+    );
+  });
+
   it("rejects an invalid console message id before calling MCP", async () => {
-    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
 
     await main(["console-get", "oops"]);
 
     expect(callTool).not.toHaveBeenCalled();
-    expect(String(write.mock.calls[0]?.[0])).toContain("Invalid console message id: oops");
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      "Invalid console message id: oops",
+    );
     expect(process.exitCode).toBe(1);
   });
 
   it("recovers open by creating a page when the browser is not yet connected", async () => {
-    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
 
     callTool
       .mockRejectedValueOnce(new CdpError("Not connected", "BROWSER_ERROR"))
@@ -56,7 +80,9 @@ describe("main", () => {
       ["take_snapshot"],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
-    expect(String(write.mock.calls[0]?.[0])).toContain('url: "https://airlockhq.com"');
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      'url: "https://airlockhq.com"',
+    );
     expect(process.exitCode).toBeUndefined();
   });
 });
