@@ -38,6 +38,10 @@ export interface HookTarget {
 
 const HOOK_MARKER = "chrome-devtools-axi";
 
+/**
+ * Only install hooks from packaged or installed entrypoints.
+ * Development TypeScript entrypoints should not self-register.
+ */
 export function shouldInstallHooksForExecPath(execPath: string): boolean {
   const normalized = resolve(execPath);
   const fileName = basename(normalized);

@@ -189,6 +189,12 @@ State is stored in `~/.chrome-devtools-axi/`:
 | ------------ | ---------------------------------- |
 | `bridge.pid` | PID and port of the running bridge |
 
+### Session Hooks
+
+On supported agents, the packaged CLI also installs a `SessionStart` hook in `~/.claude/settings.json` and `~/.codex/hooks.json`, and enables `codex_hooks` in `~/.codex/config.toml`.
+
+Development entrypoints such as `npm run dev` and `bin/chrome-devtools-axi.ts` do not modify those hook files.
+
 ## Development
 
 ```sh
