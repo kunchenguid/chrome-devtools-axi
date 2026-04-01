@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.10](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.9...chrome-devtools-axi-v0.1.10) (2026-04-01)
+
+
+### Bug Fixes
+
+* skip hook install for dev entrypoints ([#18](https://github.com/kunchenguid/chrome-devtools-axi/issues/18)) ([b12e043](https://github.com/kunchenguid/chrome-devtools-axi/commit/b12e043c731b66cf7246cb2fbd541dd70255bc39))
+* trim no-session help text ([#16](https://github.com/kunchenguid/chrome-devtools-axi/issues/16)) ([a6c9820](https://github.com/kunchenguid/chrome-devtools-axi/commit/a6c9820798a5b466d6920592c68c52b60bc7e6a6))
+
 ## [0.1.9](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.8...chrome-devtools-axi-v0.1.9) (2026-03-31)
 
 
