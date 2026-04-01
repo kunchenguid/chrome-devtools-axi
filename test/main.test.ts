@@ -30,6 +30,22 @@ describe("main", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows bin and description in the no-args home view", async () => {
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const originalArgv = process.argv;
+    process.argv = ["node", "/Users/kunchen/.local/bin/chrome-devtools-axi"];
+
+    await main([]);
+
+    expect(String(write.mock.calls[0]?.[0])).toContain("bin: ~/.local/bin/chrome-devtools-axi");
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      "description: Control the current Chrome DevTools browser session with AXI-friendly TOON output",
+    );
+    expect(String(write.mock.calls[0]?.[0])).toContain("browser: no active session");
+
+    process.argv = originalArgv;
+  });
+
   it("rejects an invalid console message id before calling MCP", async () => {
     const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
