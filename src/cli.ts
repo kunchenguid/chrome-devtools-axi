@@ -825,7 +825,9 @@ function renderUnknownCommand(command: string): string {
   );
 }
 
-function normalizeMainOptions(options: MainOptions | string[] | undefined): MainOptions {
+function normalizeMainOptions(
+  options: MainOptions | string[] | undefined,
+): MainOptions {
   if (Array.isArray(options)) {
     return { argv: options };
   }
@@ -1483,7 +1485,9 @@ function withFullFlag(
   };
 }
 
-function withoutFullFlag(handler: (args: string[]) => Promise<string>): CommandFn {
+function withoutFullFlag(
+  handler: (args: string[]) => Promise<string>,
+): CommandFn {
   return (args) => handler(splitFullFlag(args).args);
 }
 

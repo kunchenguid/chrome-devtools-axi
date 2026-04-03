@@ -60,7 +60,11 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function httpGet(port: number, path: string, timeoutMs = 2000): Promise<string> {
+function httpGet(
+  port: number,
+  path: string,
+  timeoutMs = 2000,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = request(
       { hostname: "127.0.0.1", port, path, method: "GET", timeout: timeoutMs },
@@ -79,7 +83,12 @@ function httpGet(port: number, path: string, timeoutMs = 2000): Promise<string> 
   });
 }
 
-function httpPost(port: number, path: string, body: unknown, timeoutMs = 120_000): Promise<string> {
+function httpPost(
+  port: number,
+  path: string,
+  body: unknown,
+  timeoutMs = 120_000,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = request(
@@ -89,7 +98,10 @@ function httpPost(port: number, path: string, body: unknown, timeoutMs = 120_000
         path,
         method: "POST",
         timeout: timeoutMs,
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
       },
       (res) => {
         let data = "";
@@ -131,7 +143,10 @@ function sleep(ms: number): Promise<void> {
  * Ensure the bridge is running, starting it if needed. Returns the port.
  */
 export async function ensureBridge(): Promise<number> {
-  const port = parseInt(process.env.CHROME_DEVTOOLS_AXI_PORT ?? String(DEFAULT_PORT), 10);
+  const port = parseInt(
+    process.env.CHROME_DEVTOOLS_AXI_PORT ?? String(DEFAULT_PORT),
+    10,
+  );
 
   // Check existing bridge via PID file
   const pidInfo = readPidFile();
@@ -155,11 +170,15 @@ export async function ensureBridge(): Promise<number> {
     : bridgeScript;
   const runner = script.endsWith(".ts") ? "tsx" : "node";
 
-  const child = spawn(runner === "tsx" ? "npx" : "node", runner === "tsx" ? ["tsx", script] : [script], {
-    stdio: "ignore",
-    env: { ...process.env, CHROME_DEVTOOLS_AXI_PORT: String(port) },
-    detached: true,
-  });
+  const child = spawn(
+    runner === "tsx" ? "npx" : "node",
+    runner === "tsx" ? ["tsx", script] : [script],
+    {
+      stdio: "ignore",
+      env: { ...process.env, CHROME_DEVTOOLS_AXI_PORT: String(port) },
+      detached: true,
+    },
+  );
   child.unref();
 
   // Poll for health (max 30s — Chrome launch can be slow)
@@ -171,17 +190,18 @@ export async function ensureBridge(): Promise<number> {
     await sleep(500);
   }
 
-  throw new CdpError(
-    "Bridge failed to start within 30s",
-    "BRIDGE_NOT_READY",
-    ["Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help"],
-  );
+  throw new CdpError("Bridge failed to start within 30s", "BRIDGE_NOT_READY", [
+    "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
+  ]);
 }
 
 /**
  * Call an MCP tool via the bridge. Returns the text result.
  */
-export async function callTool(name: string, args: Record<string, unknown> = {}): Promise<string> {
+export async function callTool(
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<string> {
   const port = await ensureBridge();
 
   try {
@@ -203,8 +223,10 @@ export function mapErrorMessage(message: string): CdpError {
       "Run `chrome-devtools-axi open <url>` — the bridge starts automatically",
     ]);
   }
-  if ((message.includes("uid") || message.includes("element")) &&
-      (message.includes("not found") || message.includes("invalid"))) {
+  if (
+    (message.includes("uid") || message.includes("element")) &&
+    (message.includes("not found") || message.includes("invalid"))
+  ) {
     return new CdpError(message, "REF_NOT_FOUND", [
       "Run `chrome-devtools-axi snapshot` to see available elements and their @uid refs",
     ]);
@@ -241,7 +263,12 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     return null;
   }
   try {
-    const resp = await httpPost(pidInfo.port, "/call", { name: "take_snapshot", args: {} }, 5000);
+    const resp = await httpPost(
+      pidInfo.port,
+      "/call",
+      { name: "take_snapshot", args: {} },
+      5000,
+    );
     const data = JSON.parse(resp);
     if (data.error) return null;
     return data.result ?? null;

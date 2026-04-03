@@ -6,9 +6,8 @@ const { runAxiCli } = vi.hoisted(() => ({
 }));
 
 vi.mock("axi-sdk-js", async () => {
-  const actual = await vi.importActual<typeof import("axi-sdk-js")>(
-    "axi-sdk-js",
-  );
+  const actual =
+    await vi.importActual<typeof import("axi-sdk-js")>("axi-sdk-js");
   return {
     ...actual,
     runAxiCli,
