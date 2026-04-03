@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { request } from "node:http";
+import { AxiError } from "axi-sdk-js";
 import { resolveBridgeScript } from "./bridge.js";
 
 const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
@@ -21,13 +22,13 @@ export type ErrorCode =
   | "VALIDATION_ERROR"
   | "UNKNOWN";
 
-export class CdpError extends Error {
+export class CdpError extends AxiError {
   constructor(
     message: string,
     public readonly code: ErrorCode,
     public readonly suggestions: string[] = [],
   ) {
-    super(message);
+    super(message, code, suggestions);
     this.name = "CdpError";
   }
 }

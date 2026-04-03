@@ -41,7 +41,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@toon-format/toon": "^2.1.0"
+    "@toon-format/toon": "^2.1.0",
+    "axi-sdk-js": "^0.1.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
