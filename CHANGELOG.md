@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.11...chrome-devtools-axi-v0.1.12) (2026-04-03)
+
+
+### Features
+
+* migrate CLI to axi-sdk-js ([#21](https://github.com/kunchenguid/chrome-devtools-axi/issues/21)) ([257c953](https://github.com/kunchenguid/chrome-devtools-axi/commit/257c953e101bb176e52c1eb874f46553dac67085))
+
 ## [0.1.11](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.10...chrome-devtools-axi-v0.1.11) (2026-04-01)
 
 
