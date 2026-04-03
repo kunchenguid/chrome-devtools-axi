@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AxiError } from "axi-sdk-js";
 
 // --- Mock the client layer ---
 
@@ -7,13 +8,13 @@ const { callTool } = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/client.js", () => ({
-  CdpError: class CdpError extends Error {
+  CdpError: class CdpError extends AxiError {
     constructor(
       message: string,
       public readonly code: string,
       public readonly suggestions: string[] = [],
     ) {
-      super(message);
+      super(message, code, suggestions);
     }
   },
   callTool,
@@ -396,7 +397,7 @@ describe("run command validation", () => {
     const output = String(write.mock.calls[0]?.[0]);
     expect(output).toContain("No script provided");
     expect(output).toContain("VALIDATION_ERROR");
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
   });
 });
 

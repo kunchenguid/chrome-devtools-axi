@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { AxiError } from "axi-sdk-js";
 import { CdpError, mapErrorMessage } from "../src/client.js";
 
 describe("CdpError", () => {
-  it("retains the error code and suggestions", () => {
+  it("uses the shared axi-sdk-js error contract", () => {
     const error = new CdpError("boom", "UNKNOWN", ["try again"]);
 
+    expect(error).toBeInstanceOf(AxiError);
     expect(error.code).toBe("UNKNOWN");
     expect(error.suggestions).toEqual(["try again"]);
   });

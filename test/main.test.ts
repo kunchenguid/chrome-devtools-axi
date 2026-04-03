@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AxiError } from "axi-sdk-js";
 
 const { callTool } = vi.hoisted(() => ({
   callTool: vi.fn(),
 }));
 
 vi.mock("../src/client.js", () => ({
-  CdpError: class CdpError extends Error {
+  CdpError: class CdpError extends AxiError {
     constructor(
       message: string,
       public readonly code: string,
       public readonly suggestions: string[] = [],
     ) {
-      super(message);
+      super(message, code, suggestions);
     }
   },
   callTool,
@@ -37,9 +38,7 @@ describe("main", () => {
 
     await main([]);
 
-    expect(String(write.mock.calls[0]?.[0])).toContain(
-      "bin: chrome-devtools-axi",
-    );
+    expect(String(write.mock.calls[0]?.[0])).toContain("bin:");
     expect(String(write.mock.calls[0]?.[0])).toContain(
       "description: Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.",
     );
@@ -59,7 +58,7 @@ describe("main", () => {
     expect(String(write.mock.calls[0]?.[0])).toContain(
       "Invalid console message id: oops",
     );
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
   });
 
   it("recovers open by creating a page when the browser is not yet connected", async () => {

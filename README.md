@@ -154,6 +154,7 @@ session is active or the no-session status/help block when one is not.
 | Flag                        | Description                                 |
 | --------------------------- | ------------------------------------------- |
 | `--help`                    | Show usage information                      |
+| `-v`, `-V`, `--version`     | Show the installed CLI version              |
 | `--full`                    | Show complete output without truncation     |
 | `--background`              | Open new page in background (newpage)       |
 | `--uid @<uid>`              | Target a specific element (screenshot)      |
@@ -194,6 +195,8 @@ State is stored in `~/.chrome-devtools-axi/`:
 ### Session Hooks
 
 On supported agents, the packaged CLI also installs a `SessionStart` hook in `~/.claude/settings.json` and `~/.codex/hooks.json`, and enables `codex_hooks` in `~/.codex/config.toml`.
+
+Set `CHROME_DEVTOOLS_AXI_DISABLE_HOOKS=1` to skip that auto-install behavior.
 
 Development entrypoints such as `npm run dev` and `bin/chrome-devtools-axi.ts` do not modify those hook files.
 
