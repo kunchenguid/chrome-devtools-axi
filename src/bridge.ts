@@ -227,10 +227,19 @@ function writeReadySignal(): void {
 }
 
 function createTransport(): StdioClientTransport {
-  return new StdioClientTransport({
-    command: "npx",
-    args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"],
-  });
+  const args = ["-y", "chrome-devtools-mcp@latest", "--isolated"];
+  if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
+    args.push("--headless");
+  }
+
+  const extraChromeArgs = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
+  if (extraChromeArgs) {
+    for (const arg of extraChromeArgs.split(" ").filter(Boolean)) {
+      args.push(`--chrome-arg=${arg}`);
+    }
+  }
+
+  return new StdioClientTransport({ command: "npx", args });
 }
 
 function createBridgeClient(): Client {
