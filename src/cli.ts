@@ -48,7 +48,8 @@ flags[2]:
 
 environment:
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
-  CHROME_DEVTOOLS_AXI_CHROME_ARGS   Space-separated Chrome flags forwarded to the browser
+  CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
+                                    (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
   CHROME_DEVTOOLS_AXI_PORT          Bridge server port (default: 9224)
   CHROME_DEVTOOLS_AXI_DISABLE_HOOKS Set to 1 to skip auto-installing session hooks

@@ -226,7 +226,7 @@ function writeReadySignal(): void {
   process.stdout.write("READY\n");
 }
 
-function createTransport(): StdioClientTransport {
+export function buildTransportArgs(): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest", "--isolated"];
   if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
     args.push("--headless");
@@ -234,12 +234,16 @@ function createTransport(): StdioClientTransport {
 
   const extraChromeArgs = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
   if (extraChromeArgs) {
-    for (const arg of extraChromeArgs.split(" ").filter(Boolean)) {
+    for (const arg of extraChromeArgs.trim().split(/\s+/)) {
       args.push(`--chrome-arg=${arg}`);
     }
   }
 
-  return new StdioClientTransport({ command: "npx", args });
+  return args;
+}
+
+function createTransport(): StdioClientTransport {
+  return new StdioClientTransport({ command: "npx", args: buildTransportArgs() });
 }
 
 function createBridgeClient(): Client {
