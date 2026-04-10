@@ -1462,7 +1462,7 @@ async function handleRun(): Promise<string> {
   return RAW_STDOUT_MARKER + trimSingleTrailingNewline(result.stdout);
 }
 
-async function handleHome(full: boolean): Promise<string> {
+async function handleHome(_full: boolean): Promise<string> {
   const result = await getSessionSnapshotIfRunning();
   if (!result) {
     return renderOutput([
@@ -1471,7 +1471,17 @@ async function handleHome(full: boolean): Promise<string> {
     ]);
   }
   const snapshot = stripSnapshotHeader(result);
-  return formatPageOutput(snapshot, "snapshot", undefined, full);
+  const title = extractTitle(snapshot);
+  const refs = countRefs(snapshot);
+  const page: Record<string, unknown> = {};
+  if (title) page.title = title;
+  page.refs = refs;
+  const help: string[] = [
+    "Run `chrome-devtools-axi snapshot` to see page content",
+    "Run `chrome-devtools-axi open <url>` to navigate to a URL",
+    "Run `chrome-devtools-axi --help` to see full command list",
+  ];
+  return renderOutput([encode({ page }), renderHelp(help)]);
 }
 
 type CommandFn = (args: string[]) => Promise<string>;

@@ -22,7 +22,7 @@ vi.mock("../src/client.js", () => ({
 }));
 
 import { main } from "../src/cli.js";
-import { CdpError } from "../src/client.js";
+import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
 
 describe("main", () => {
   afterEach(() => {
@@ -45,6 +45,33 @@ describe("main", () => {
     expect(String(write.mock.calls[0]?.[0])).toContain(
       "browser: no active session",
     );
+  });
+
+  it("home view with active session shows metadata but not page content", async () => {
+    const snapshot =
+      'RootWebArea "My Page"\n  uid=1 heading "Welcome"\n  uid=2 link "About"';
+    vi.mocked(getSessionSnapshotIfRunning).mockResolvedValueOnce(snapshot);
+
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    await main([]);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    // Should show page metadata
+    expect(output).toContain("title: My Page");
+    expect(output).toContain("refs: 2");
+    // Should NOT include the raw snapshot content
+    expect(output).not.toContain("snapshot:");
+    expect(output).not.toContain("RootWebArea");
+    expect(output).not.toContain("uid=1");
+    // Should include contextual help for next steps
+    expect(output).toContain("help[");
+    expect(output).toContain("snapshot");
+    expect(output).toContain("--help");
+    // Should NOT suggest click without a snapshot visible
+    expect(output).not.toContain("click");
   });
 
   it("rejects an invalid console message id before calling MCP", async () => {
