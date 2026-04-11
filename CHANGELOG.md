@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.14...chrome-devtools-axi-v0.1.15) (2026-04-11)
+
+
+### Features
+
+* add BROWSER_URL and USER_DATA_DIR env vars for persistent sessions ([#30](https://github.com/kunchenguid/chrome-devtools-axi/issues/30)) ([400fdda](https://github.com/kunchenguid/chrome-devtools-axi/commit/400fddad94545a9b7e353dab57892b2351c8574c))
+
 ## [0.1.14](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.13...chrome-devtools-axi-v0.1.14) (2026-04-10)
 
 
