@@ -52,6 +52,10 @@ environment:
                                     (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
   CHROME_DEVTOOLS_AXI_PORT          Bridge server port (default: 9224)
+  CHROME_DEVTOOLS_AXI_BROWSER_URL   Connect to an existing Chrome instance instead of launching one
+                                    e.g. "http://127.0.0.1:9222"
+  CHROME_DEVTOOLS_AXI_USER_DATA_DIR Persistent Chrome profile directory (skips --isolated mode)
+                                    e.g. "/path/to/.chrome-profile"
   CHROME_DEVTOOLS_AXI_DISABLE_HOOKS Set to 1 to skip auto-installing session hooks
 
 gpu:

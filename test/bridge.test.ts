@@ -51,13 +51,19 @@ describe("buildTransportArgs", () => {
   beforeEach(() => {
     savedEnv.CHROME_DEVTOOLS_AXI_HEADED = process.env.CHROME_DEVTOOLS_AXI_HEADED;
     savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
+    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
+    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
   });
 
   afterEach(() => {
     process.env.CHROME_DEVTOOLS_AXI_HEADED = savedEnv.CHROME_DEVTOOLS_AXI_HEADED;
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
   });
 
   it("defaults to headless and isolated", () => {
@@ -93,6 +99,46 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).not.toContain("--headless");
     expect(args).toContain("--chrome-arg=--enable-unsafe-webgpu");
+  });
+
+  it("uses --browserUrl when CHROME_DEVTOOLS_AXI_BROWSER_URL is set", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    const args = buildTransportArgs();
+    expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
+    expect(args).not.toContain("--isolated");
+    expect(args).not.toContain("--headless");
+  });
+
+  it("passes chrome args alongside --browserUrl", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = "--some-flag";
+    const args = buildTransportArgs();
+    expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
+    expect(args).toContain("--chrome-arg=--some-flag");
+  });
+
+  it("uses --userDataDir when CHROME_DEVTOOLS_AXI_USER_DATA_DIR is set", () => {
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    const args = buildTransportArgs();
+    expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
+    expect(args).not.toContain("--isolated");
+    expect(args).toContain("--headless");
+  });
+
+  it("respects headed mode with --userDataDir", () => {
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    process.env.CHROME_DEVTOOLS_AXI_HEADED = "1";
+    const args = buildTransportArgs();
+    expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
+    expect(args).not.toContain("--headless");
+  });
+
+  it("--browserUrl takes precedence over --userDataDir", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    const args = buildTransportArgs();
+    expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
+    expect(args).not.toContain("--userDataDir=/path/to/.chrome-profile");
   });
 });
 

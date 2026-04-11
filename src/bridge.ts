@@ -227,9 +227,25 @@ function writeReadySignal(): void {
 }
 
 export function buildTransportArgs(): string[] {
-  const args = ["-y", "chrome-devtools-mcp@latest", "--isolated"];
-  if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
-    args.push("--headless");
+  const args = ["-y", "chrome-devtools-mcp@latest"];
+
+  const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+  const userDataDir = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+
+  if (browserUrl) {
+    // Connect to an existing Chrome instance — skip --isolated and --headless
+    // since the user manages the browser lifecycle externally.
+    args.push(`--browserUrl=${browserUrl}`);
+  } else {
+    if (userDataDir) {
+      // Persistent profile — skip --isolated so the profile is preserved.
+      args.push(`--userDataDir=${userDataDir}`);
+    } else {
+      args.push("--isolated");
+    }
+    if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
+      args.push("--headless");
+    }
   }
 
   const extraChromeArgs = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
