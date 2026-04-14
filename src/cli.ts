@@ -47,6 +47,9 @@ flags[2]:
   --help, -v/-V/--version
 
 environment:
+  CHROME_DEVTOOLS_AXI_AUTO_CONNECT  Set to 1 to connect to the user's running Chrome (144+)
+                                    via chrome://inspect/#remote-debugging instead of launching
+                                    a new browser. Requires remote debugging enabled in Chrome.
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
   CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
                                     (no shell-style quoting; flags with spaces are not supported)

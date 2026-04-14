@@ -229,10 +229,15 @@ function writeReadySignal(): void {
 export function buildTransportArgs(): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest"];
 
+  const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   const userDataDir = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
 
-  if (browserUrl) {
+  if (autoConnect) {
+    // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
+    // Connects to the user's running Chrome — no separate browser launched.
+    args.push("--autoConnect");
+  } else if (browserUrl) {
     // Connect to an existing Chrome instance — skip --isolated and --headless
     // since the user manages the browser lifecycle externally.
     args.push(`--browserUrl=${browserUrl}`);

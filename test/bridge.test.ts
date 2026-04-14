@@ -53,10 +53,12 @@ describe("buildTransportArgs", () => {
     savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
   });
 
   afterEach(() => {
@@ -64,6 +66,7 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
   });
 
   it("defaults to headless and isolated", () => {
@@ -139,6 +142,31 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).not.toContain("--userDataDir=/path/to/.chrome-profile");
+  });
+
+  it("uses --autoConnect when CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1", () => {
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    const args = buildTransportArgs();
+    expect(args).toContain("--autoConnect");
+    expect(args).not.toContain("--isolated");
+    expect(args).not.toContain("--headless");
+  });
+
+  it("--autoConnect takes precedence over --browserUrl and --userDataDir", () => {
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    const args = buildTransportArgs();
+    expect(args).toContain("--autoConnect");
+    expect(args).not.toContain("--browserUrl=http://127.0.0.1:9222");
+    expect(args).not.toContain("--userDataDir=/path/to/.chrome-profile");
+  });
+
+  it("ignores AUTO_CONNECT when not set to '1'", () => {
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "true";
+    const args = buildTransportArgs();
+    expect(args).not.toContain("--autoConnect");
+    expect(args).toContain("--isolated");
   });
 });
 
