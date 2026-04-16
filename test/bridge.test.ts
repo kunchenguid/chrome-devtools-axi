@@ -196,6 +196,13 @@ describe("buildTransportArgs", () => {
     expect(args).toContain('--wsHeaders={"Authorization":"Bearer token"}');
   });
 
+  it("rejects malformed ws headers before launching the transport", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
+    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = "{";
+
+    expect(() => buildTransportArgs()).toThrow("CHROME_DEVTOOLS_AXI_WS_HEADERS must be valid JSON");
+  });
+
   it("ignores --wsHeaders without a ws endpoint", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = '{"Authorization":"Bearer token"}';

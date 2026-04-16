@@ -247,6 +247,21 @@ export function buildTransportArgs(): string[] {
       args.push(`--wsEndpoint=${browserUrl}`);
       const wsHeaders = process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
       if (wsHeaders) {
+        let parsedHeaders: unknown;
+        try {
+          parsedHeaders = JSON.parse(wsHeaders);
+        } catch {
+          throw new Error("CHROME_DEVTOOLS_AXI_WS_HEADERS must be valid JSON");
+        }
+        if (
+          parsedHeaders === null ||
+          typeof parsedHeaders !== "object" ||
+          Array.isArray(parsedHeaders)
+        ) {
+          throw new Error(
+            "CHROME_DEVTOOLS_AXI_WS_HEADERS must be a JSON object",
+          );
+        }
         args.push(`--wsHeaders=${wsHeaders}`);
       }
     } else {
