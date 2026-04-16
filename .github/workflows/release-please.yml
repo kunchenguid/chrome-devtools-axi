@@ -35,3 +35,15 @@ jobs:
 
       - run: npm publish --access public --provenance
         if: ${{ steps.release.outputs.release_created }}
+
+      - name: Comment on released PRs
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY: ${{ steps.release.outputs.body }}
+          URL: ${{ steps.release.outputs.html_url }}
+        run: |
+          echo "$BODY" | grep -oE '#[0-9]+' | sort -u | while read ref; do
+            num="${ref#\#}"
+            gh pr comment "$num" --body "Released in $URL." || true
+          done
