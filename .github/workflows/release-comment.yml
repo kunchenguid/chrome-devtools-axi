@@ -1,0 +1,19 @@
+name: release-comment
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: apexskier/github-release-commenter@v1
+        with:
+          comment-template: "Released in {release_link}."
+          skip-label: "autorelease: tagged,autorelease: pending,dependencies"
