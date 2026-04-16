@@ -186,6 +186,24 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
+Connect to an existing Chrome instance instead of launching one:
+
+```sh
+export CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222
+```
+
+`CHROME_DEVTOOLS_AXI_BROWSER_URL` accepts both `http://` or `https://` URLs and `ws://` or `wss://` endpoints:
+
+- `http(s)://` uses `--browserUrl` and fetches `/json/version` to discover the WebSocket URL.
+- `ws(s)://` uses `--wsEndpoint` directly.
+
+For authenticated `ws://` or `wss://` endpoints, pass JSON headers with `CHROME_DEVTOOLS_AXI_WS_HEADERS`:
+
+```sh
+export CHROME_DEVTOOLS_AXI_BROWSER_URL=wss://cluster.example/launch
+export CHROME_DEVTOOLS_AXI_WS_HEADERS='{"Authorization":"Bearer token"}'
+```
+
 State is stored in `~/.chrome-devtools-axi/`:
 
 | File         | Purpose                            |

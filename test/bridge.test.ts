@@ -203,6 +203,13 @@ describe("buildTransportArgs", () => {
     expect(() => buildTransportArgs()).toThrow("CHROME_DEVTOOLS_AXI_WS_HEADERS must be valid JSON");
   });
 
+  it("rejects ws headers JSON that is not an object", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
+    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = '["Authorization: Bearer token"]';
+
+    expect(() => buildTransportArgs()).toThrow("CHROME_DEVTOOLS_AXI_WS_HEADERS must be a JSON object");
+  });
+
   it("ignores --wsHeaders without a ws endpoint", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = '{"Authorization":"Bearer token"}';
