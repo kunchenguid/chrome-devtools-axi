@@ -235,12 +235,23 @@ export function buildTransportArgs(): string[] {
 
   if (autoConnect) {
     // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
-    // Connects to the user's running Chrome — no separate browser launched.
+    // Connects to the user's running Chrome - no separate browser launched.
     args.push("--autoConnect");
   } else if (browserUrl) {
-    // Connect to an existing Chrome instance — skip --isolated and --headless
+    // Connect to an existing Chrome instance - skip --isolated and --headless
     // since the user manages the browser lifecycle externally.
-    args.push(`--browserUrl=${browserUrl}`);
+    // ws://|wss:// route to --wsEndpoint (direct WebSocket), http(s):// to --browserUrl
+    // (which fetches /json/version to discover the WebSocket URL).
+    const isWs = /^wss?:\/\//i.test(browserUrl);
+    if (isWs) {
+      args.push(`--wsEndpoint=${browserUrl}`);
+      const wsHeaders = process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+      if (wsHeaders) {
+        args.push(`--wsHeaders=${wsHeaders}`);
+      }
+    } else {
+      args.push(`--browserUrl=${browserUrl}`);
+    }
   } else {
     if (userDataDir) {
       // Persistent profile — skip --isolated so the profile is preserved.
