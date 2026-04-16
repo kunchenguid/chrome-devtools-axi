@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.15...chrome-devtools-axi-v0.1.16) (2026-04-16)
+
+
+### Features
+
+* add CHROME_DEVTOOLS_AXI_AUTO_CONNECT for Chrome 144+ autoConnect ([#33](https://github.com/kunchenguid/chrome-devtools-axi/issues/33)) ([542f176](https://github.com/kunchenguid/chrome-devtools-axi/commit/542f1762b8d63aacbfe19019c07c58758ab7517b))
+
 ## [0.1.15](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.14...chrome-devtools-axi-v0.1.15) (2026-04-11)
 
 
