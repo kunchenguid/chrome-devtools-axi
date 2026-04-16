@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.16...chrome-devtools-axi-v0.1.17) (2026-04-16)
+
+
+### Bug Fixes
+
+* **ws:** support websocket browser endpoints and validate ws headers ([#37](https://github.com/kunchenguid/chrome-devtools-axi/issues/37)) ([8376a4f](https://github.com/kunchenguid/chrome-devtools-axi/commit/8376a4fd8c5bbc22d19598b64d25da6de7587eae))
+
 ## [0.1.16](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.15...chrome-devtools-axi-v0.1.16) (2026-04-16)
 
 
