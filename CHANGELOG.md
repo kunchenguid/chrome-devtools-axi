@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.18](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.17...chrome-devtools-axi-v0.1.18) (2026-04-25)
+
+
+### Miscellaneous Chores
+
+* release 0.1.18 ([cdb5c4b](https://github.com/kunchenguid/chrome-devtools-axi/commit/cdb5c4be015e03d62478db2fc5ea12e69c2b8c44))
+
 ## [0.1.17](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.16...chrome-devtools-axi-v0.1.17) (2026-04-16)
 
 
