@@ -289,8 +289,35 @@ export function buildTransportArgs(): string[] {
   return args;
 }
 
+/**
+ * Resolve the command + args used to spawn the chrome-devtools-mcp transport.
+ *
+ * By default uses `npx -y chrome-devtools-mcp@latest`, which on some systems
+ * (npm registry roundtrip, slow link, large global cache) can take 30s+ just
+ * to bootstrap — racing the bridge's readiness deadline.
+ *
+ * When `CHROME_DEVTOOLS_AXI_MCP_PATH` is set, the bridge spawns
+ * `node $MCP_PATH` directly. That skips npx and starts in ~1-2s.
+ * Recommended setup:
+ *   npm install -g chrome-devtools-mcp
+ *   export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+ */
+export function resolveTransportSpec(): { command: string; args: string[] } {
+  const mcpArgs = buildTransportArgs();
+  const mcpPath = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+  if (mcpPath && mcpPath.length > 0) {
+    // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
+    // node spawn doesn't need it.
+    return {
+      command: process.execPath,
+      args: [mcpPath, ...mcpArgs.slice(2)],
+    };
+  }
+  return { command: "npx", args: mcpArgs };
+}
+
 function createTransport(): StdioClientTransport {
-  return new StdioClientTransport({ command: "npx", args: buildTransportArgs() });
+  return new StdioClientTransport(resolveTransportSpec());
 }
 
 function createBridgeClient(): Client {

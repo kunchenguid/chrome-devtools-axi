@@ -13,6 +13,23 @@ import { resolveBridgeScript } from "./bridge.js";
 const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
 const PID_FILE = join(STATE_DIR, "bridge.pid");
 const DEFAULT_PORT = 9224;
+const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
+const MIN_BRIDGE_TIMEOUT_MS = 1_000;
+
+/**
+ * Resolve the bridge readiness deadline in milliseconds.
+ *
+ * Honors `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` for systems where npx
+ * bootstrap or Chrome launch is slow (>30s). Values below 1s are clamped to
+ * 1s to avoid pathological retries.
+ */
+export function resolveBridgeTimeoutMs(): number {
+  const raw = process.env.CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS;
+  if (!raw) return DEFAULT_BRIDGE_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return DEFAULT_BRIDGE_TIMEOUT_MS;
+  return Math.max(parsed, MIN_BRIDGE_TIMEOUT_MS);
+}
 
 export type ErrorCode =
   | "BRIDGE_NOT_READY"
@@ -181,8 +198,9 @@ export async function ensureBridge(): Promise<number> {
   );
   child.unref();
 
-  // Poll for health (max 30s — Chrome launch can be slow)
-  const deadline = Date.now() + 30_000;
+  // Poll for health — Chrome launch + npx bootstrap can be slow
+  const timeoutMs = resolveBridgeTimeoutMs();
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await checkBridgeHealth(port)) {
       return port;
@@ -190,9 +208,25 @@ export async function ensureBridge(): Promise<number> {
     await sleep(500);
   }
 
-  throw new CdpError("Bridge failed to start within 30s", "BRIDGE_NOT_READY", [
+  const seconds = Math.round(timeoutMs / 1000);
+  const usingNpx = !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+  const suggestions = [
     "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
-  ]);
+  ];
+  if (usingNpx) {
+    suggestions.push(
+      "If `npx -y chrome-devtools-mcp@latest` is slow on this machine, install mcp globally and set:",
+      "  export CHROME_DEVTOOLS_AXI_MCP_PATH=\"$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js\"",
+    );
+  }
+  suggestions.push(
+    "Or extend the deadline: export CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS=60000",
+  );
+  throw new CdpError(
+    `Bridge failed to start within ${seconds}s`,
+    "BRIDGE_NOT_READY",
+    suggestions,
+  );
 }
 
 /**

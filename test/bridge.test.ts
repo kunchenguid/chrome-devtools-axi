@@ -1,5 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { buildTransportArgs, extractToolText, getErrorMessage, isBridgeClientConnected, parseBridgeCallPayload, resolveBridgeScript } from "../src/bridge.js";
+import {
+  buildTransportArgs,
+  extractToolText,
+  getErrorMessage,
+  isBridgeClientConnected,
+  parseBridgeCallPayload,
+  resolveBridgeScript,
+  resolveTransportSpec,
+} from "../src/bridge.js";
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {
@@ -216,6 +224,69 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
+  });
+});
+
+describe("resolveTransportSpec", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.CHROME_DEVTOOLS_AXI_MCP_PATH = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+    savedEnv.CHROME_DEVTOOLS_AXI_HEADED = process.env.CHROME_DEVTOOLS_AXI_HEADED;
+    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+    delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
+    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("defaults to spawning via npx when CHROME_DEVTOOLS_AXI_MCP_PATH is unset", () => {
+    const spec = resolveTransportSpec();
+    expect(spec.command).toBe("npx");
+    expect(spec.args[0]).toBe("-y");
+    expect(spec.args[1]).toBe("chrome-devtools-mcp@latest");
+    // Default mcp args follow
+    expect(spec.args).toContain("--isolated");
+    expect(spec.args).toContain("--headless");
+  });
+
+  it("spawns node directly when CHROME_DEVTOOLS_AXI_MCP_PATH is set", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/opt/mcp/build/src/bin/chrome-devtools-mcp.js";
+    const spec = resolveTransportSpec();
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe("/opt/mcp/build/src/bin/chrome-devtools-mcp.js");
+    // Strips the npx-only `-y, chrome-devtools-mcp@latest` prefix
+    expect(spec.args).not.toContain("-y");
+    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    // Preserves the mcp-specific args
+    expect(spec.args).toContain("--isolated");
+    expect(spec.args).toContain("--headless");
+  });
+
+  it("preserves --browserUrl when MCP_PATH and BROWSER_URL are both set", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/opt/mcp.js";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    const spec = resolveTransportSpec();
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe("/opt/mcp.js");
+    expect(spec.args).toContain("--browserUrl=http://127.0.0.1:9222");
+    expect(spec.args).not.toContain("--isolated");
+  });
+
+  it("treats an empty MCP_PATH as unset", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "";
+    const spec = resolveTransportSpec();
+    expect(spec.command).toBe("npx");
   });
 });
 
