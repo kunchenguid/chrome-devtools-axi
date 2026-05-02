@@ -19,15 +19,17 @@ import {
   type ServerResponse,
 } from "node:http";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import {
+  defaultUserDataDirForSession,
+  resolveSessionName,
+  resolveSessionPidFile,
+  resolveSessionPort,
+} from "./sessions.js";
 
-const DEFAULT_PORT = Number.parseInt(
-  process.env.CHROME_DEVTOOLS_AXI_PORT ?? "9224",
-  10,
-);
-const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
-const PID_FILE = join(STATE_DIR, "bridge.pid");
+// NOTE: do not capture port at module load — it depends on env vars
+// (CHROME_DEVTOOLS_AXI_PORT, CHROME_DEVTOOLS_AXI_SESSION) that may be set
+// after import. runBridge() resolves it lazily on each call.
 
 export interface BridgeContentBlock {
   type: string;
@@ -65,13 +67,14 @@ export async function isBridgeClientConnected(
 }
 
 function writePidFile(port: number): void {
-  mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port }));
+  const pidFile = resolveSessionPidFile();
+  mkdirSync(dirname(pidFile), { recursive: true });
+  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port }));
 }
 
 function removePidFile(): void {
   try {
-    unlinkSync(PID_FILE);
+    unlinkSync(resolveSessionPidFile());
   } catch {
     // Already gone — fine
   }
@@ -268,9 +271,18 @@ export function buildTransportArgs(): string[] {
       args.push(`--browserUrl=${browserUrl}`);
     }
   } else {
+    // Resolution order for the local-launch profile:
+    //   1. CHROME_DEVTOOLS_AXI_USER_DATA_DIR (explicit override, any session)
+    //   2. Auto-derived per-session profile (named sessions only — keeps
+    //      auth state isolated by session)
+    //   3. --isolated (default session, no override → fresh profile each run)
+    const sessionDefaultProfile = defaultUserDataDirForSession(
+      resolveSessionName(),
+    );
     if (userDataDir) {
-      // Persistent profile — skip --isolated so the profile is preserved.
       args.push(`--userDataDir=${userDataDir}`);
+    } else if (sessionDefaultProfile) {
+      args.push(`--userDataDir=${sessionDefaultProfile}`);
     } else {
       args.push("--isolated");
     }
@@ -336,7 +348,7 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
-export async function runBridge(port = DEFAULT_PORT): Promise<void> {
+export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const transport = createTransport();
   const client = createBridgeClient();
   await client.connect(transport);

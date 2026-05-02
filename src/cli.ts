@@ -71,6 +71,14 @@ environment:
                                       export CHROME_DEVTOOLS_AXI_MCP_PATH="\$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
+  CHROME_DEVTOOLS_AXI_SESSION       Named session for concurrent isolation. Each session gets its
+                                    own bridge process, port (auto-allocated from name hash),
+                                    PID file, and persistent profile directory. Multiple
+                                    sessions can run at once without colliding.
+                                    Defaults to "default" (port 9224, --isolated profile).
+                                    e.g. CHROME_DEVTOOLS_AXI_SESSION=widecorp-ceo
+                                         CHROME_DEVTOOLS_AXI_SESSION=deb-admin
+                                    Use CHROME_DEVTOOLS_AXI_PORT to override the auto port.
   CHROME_DEVTOOLS_AXI_DISABLE_HOOKS Set to 1 to skip auto-installing session hooks
 
 gpu:

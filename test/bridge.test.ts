@@ -63,21 +63,21 @@ describe("buildTransportArgs", () => {
     savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
     savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS = process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    savedEnv.CHROME_DEVTOOLS_AXI_SESSION = process.env.CHROME_DEVTOOLS_AXI_SESSION;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
   });
 
   afterEach(() => {
-    process.env.CHROME_DEVTOOLS_AXI_HEADED = savedEnv.CHROME_DEVTOOLS_AXI_HEADED;
-    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
-    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
-    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    for (const key of Object.keys(savedEnv)) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
   });
 
   it("defaults to headless and isolated", () => {
@@ -224,6 +224,31 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
+  });
+
+  it("uses --isolated for the default session when no profile env is set", () => {
+    // CHROME_DEVTOOLS_AXI_SESSION unset by beforeEach
+    const args = buildTransportArgs();
+    expect(args).toContain("--isolated");
+    expect(args.some((a) => a.startsWith("--userDataDir="))).toBe(false);
+  });
+
+  it("auto-derives a per-session profile dir for named sessions", () => {
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "widecorp-ceo";
+    const args = buildTransportArgs();
+    expect(args).not.toContain("--isolated");
+    expect(args.some((a) =>
+      a.startsWith("--userDataDir=") &&
+      a.includes("/sessions/widecorp-ceo")
+    )).toBe(true);
+  });
+
+  it("respects explicit USER_DATA_DIR over the session default", () => {
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "widecorp-ceo";
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/explicit/profile/dir";
+    const args = buildTransportArgs();
+    expect(args).toContain("--userDataDir=/explicit/profile/dir");
+    expect(args.some((a) => a.includes("/sessions/widecorp-ceo"))).toBe(false);
   });
 });
 

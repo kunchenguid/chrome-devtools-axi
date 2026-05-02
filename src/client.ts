@@ -4,15 +4,16 @@
 
 import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { request } from "node:http";
 import { AxiError } from "axi-sdk-js";
 import { resolveBridgeScript } from "./bridge.js";
+import {
+  resolveSessionName,
+  resolveSessionPidFile,
+  resolveSessionPort,
+  validateSessionName,
+} from "./sessions.js";
 
-const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
-const PID_FILE = join(STATE_DIR, "bridge.pid");
-const DEFAULT_PORT = 9224;
 const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
 const MIN_BRIDGE_TIMEOUT_MS = 1_000;
 
@@ -55,10 +56,10 @@ interface PidInfo {
   port: number;
 }
 
-function readPidFile(): PidInfo | null {
+function readPidFile(pidFile: string = resolveSessionPidFile()): PidInfo | null {
   try {
-    if (!existsSync(PID_FILE)) return null;
-    const data = JSON.parse(readFileSync(PID_FILE, "utf-8"));
+    if (!existsSync(pidFile)) return null;
+    const data = JSON.parse(readFileSync(pidFile, "utf-8"));
     if (typeof data.pid === "number" && typeof data.port === "number") {
       return data as PidInfo;
     }
@@ -158,15 +159,18 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Ensure the bridge is running, starting it if needed. Returns the port.
+ *
+ * Each named session (CHROME_DEVTOOLS_AXI_SESSION) has its own PID file,
+ * port, and bridge process — so multiple sessions can run concurrently.
  */
 export async function ensureBridge(): Promise<number> {
-  const port = parseInt(
-    process.env.CHROME_DEVTOOLS_AXI_PORT ?? String(DEFAULT_PORT),
-    10,
-  );
+  const sessionName = resolveSessionName();
+  validateSessionName(sessionName);
+  const port = resolveSessionPort(sessionName);
+  const pidFile = resolveSessionPidFile(sessionName);
 
   // Check existing bridge via PID file
-  const pidInfo = readPidFile();
+  const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
     if (await checkBridgeHealth(pidInfo.port)) {
       return pidInfo.port;
@@ -192,7 +196,11 @@ export async function ensureBridge(): Promise<number> {
     runner === "tsx" ? ["tsx", script] : [script],
     {
       stdio: "ignore",
-      env: { ...process.env, CHROME_DEVTOOLS_AXI_PORT: String(port) },
+      env: {
+        ...process.env,
+        CHROME_DEVTOOLS_AXI_PORT: String(port),
+        CHROME_DEVTOOLS_AXI_SESSION: sessionName,
+      },
       detached: true,
     },
   );
