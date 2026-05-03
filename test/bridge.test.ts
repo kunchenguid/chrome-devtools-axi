@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   buildTransportArgs,
+  detectGlobalMcpPath,
   extractToolText,
   getErrorMessage,
   isBridgeClientConnected,
@@ -250,8 +251,14 @@ describe("resolveTransportSpec", () => {
     }
   });
 
-  it("defaults to spawning via npx when CHROME_DEVTOOLS_AXI_MCP_PATH is unset", () => {
-    const spec = resolveTransportSpec();
+  it("defaults to spawning via npx when MCP_PATH is unset and auto-detection finds nothing", () => {
+    // Inject a probe that simulates "no global chrome-devtools-mcp" so the
+    // test outcome doesn't depend on the host machine's npm install state.
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => "/usr",
+    };
+    const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
     expect(spec.args[0]).toBe("-y");
     expect(spec.args[1]).toBe("chrome-devtools-mcp@latest");
@@ -285,8 +292,101 @@ describe("resolveTransportSpec", () => {
 
   it("treats an empty MCP_PATH as unset", () => {
     process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "";
-    const spec = resolveTransportSpec();
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => null,
+    };
+    const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
+  });
+
+  it("auto-detects a globally-installed chrome-devtools-mcp when MCP_PATH is unset", () => {
+    const probe = {
+      existsSync: (path: string) =>
+        path ===
+        "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
+      getNpmPrefix: () => "/usr",
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe(
+      "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
+    );
+    expect(spec.args).not.toContain("-y");
+    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    expect(spec.args).toContain("--isolated");
+  });
+
+  it("falls back to npx when auto-detection finds nothing", () => {
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => "/usr",
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe("npx");
+    expect(spec.args[0]).toBe("-y");
+  });
+
+  it("falls back to npx when npm prefix is unavailable", () => {
+    const probe = {
+      existsSync: () => true, // would match anything if asked
+      getNpmPrefix: () => null,
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe("npx");
+  });
+
+  it("explicit MCP_PATH always wins over auto-detection", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/explicit/override.js";
+    const probe = {
+      existsSync: () => true,
+      getNpmPrefix: () => "/usr",
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe("/explicit/override.js");
+  });
+});
+
+describe("detectGlobalMcpPath", () => {
+  it("returns the canonical MCP path when npm prefix + the file both exist", () => {
+    const probe = {
+      existsSync: (path: string) =>
+        path ===
+        "/opt/npm/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
+      getNpmPrefix: () => "/opt/npm",
+    };
+
+    expect(detectGlobalMcpPath(probe)).toBe(
+      "/opt/npm/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
+    );
+  });
+
+  it("returns null when the file is missing", () => {
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => "/opt/npm",
+    };
+
+    expect(detectGlobalMcpPath(probe)).toBeNull();
+  });
+
+  it("returns null when npm prefix is null (npm not installed)", () => {
+    const probe = {
+      existsSync: () => true,
+      getNpmPrefix: () => null,
+    };
+
+    expect(detectGlobalMcpPath(probe)).toBeNull();
+  });
+
+  it("returns null when npm prefix is the empty string", () => {
+    const probe = {
+      existsSync: () => true,
+      getNpmPrefix: () => "",
+    };
+
+    expect(detectGlobalMcpPath(probe)).toBeNull();
   });
 });
 

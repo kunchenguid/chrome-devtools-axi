@@ -12,6 +12,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { execSync } from "node:child_process";
 import {
   createServer,
   type IncomingMessage,
@@ -290,22 +291,76 @@ export function buildTransportArgs(): string[] {
 }
 
 /**
+ * Probe interface for {@link detectGlobalMcpPath}. Defaults to real `node:fs`
+ * + `npm prefix -g`; injectable for tests.
+ */
+export interface McpPathProbe {
+  existsSync: (path: string) => boolean;
+  getNpmPrefix: () => string | null;
+}
+
+const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
+  existsSync: (path) => existsSync(path),
+  getNpmPrefix: () => {
+    try {
+      return execSync("npm prefix -g", {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      return null;
+    }
+  },
+};
+
+/**
+ * Auto-detect a globally-installed chrome-devtools-mcp by probing
+ * `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
+ *
+ * Returns the resolved path on success, or null if npm is unavailable or the
+ * package isn't installed. Used as the auto-fallback in
+ * {@link resolveTransportSpec} when `CHROME_DEVTOOLS_AXI_MCP_PATH` isn't set.
+ */
+export function detectGlobalMcpPath(
+  probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
+): string | null {
+  const prefix = probe.getNpmPrefix();
+  if (!prefix || prefix.length === 0) return null;
+  const candidate = join(
+    prefix,
+    "lib",
+    "node_modules",
+    "chrome-devtools-mcp",
+    "build",
+    "src",
+    "bin",
+    "chrome-devtools-mcp.js",
+  );
+  return probe.existsSync(candidate) ? candidate : null;
+}
+
+/**
  * Resolve the command + args used to spawn the chrome-devtools-mcp transport.
  *
- * By default uses `npx -y chrome-devtools-mcp@latest`, which on some systems
- * (npm registry roundtrip, slow link, large global cache) can take 30s+ just
- * to bootstrap — racing the bridge's readiness deadline.
- *
- * When `CHROME_DEVTOOLS_AXI_MCP_PATH` is set, the bridge spawns
- * `node $MCP_PATH` directly. That skips npx and starts in ~1-2s.
- * Recommended setup:
- *   npm install -g chrome-devtools-mcp
- *   export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+ * Resolution order (most → least specific):
+ *   1. `CHROME_DEVTOOLS_AXI_MCP_PATH` env var — explicit override, always wins.
+ *   2. Auto-detect: probe a globally-installed `chrome-devtools-mcp` via
+ *      `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
+ *      If found, spawn `node <path>` directly — starts in ~1-2s vs. the
+ *      30s+ npx-bootstrap path.
+ *   3. Fall back to `npx -y chrome-devtools-mcp@latest`. On systems with a
+ *      slow link or large global cache this can race the bridge's readiness
+ *      deadline; install the package globally to skip it:
+ *        npm install -g chrome-devtools-mcp
  */
-export function resolveTransportSpec(): { command: string; args: string[] } {
+export function resolveTransportSpec(
+  probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
+): { command: string; args: string[] } {
   const mcpArgs = buildTransportArgs();
-  const mcpPath = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
-  if (mcpPath && mcpPath.length > 0) {
+  const explicit = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+  const mcpPath =
+    explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
+  if (mcpPath) {
     // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
     // node spawn doesn't need it.
     return {
