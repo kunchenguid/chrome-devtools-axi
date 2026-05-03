@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.18...chrome-devtools-axi-v0.1.19) (2026-05-03)
+
+
+### Features
+
+* add CHROME_DEVTOOLS_AXI_MCP_PATH + BRIDGE_TIMEOUT_MS to unblock slow npx bootstrap ([#47](https://github.com/kunchenguid/chrome-devtools-axi/issues/47)) ([6252b56](https://github.com/kunchenguid/chrome-devtools-axi/commit/6252b5601e5cb1f0f8275c5590f815530afec2f9))
+
 ## [0.1.18](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.17...chrome-devtools-axi-v0.1.18) (2026-04-25)
 
 

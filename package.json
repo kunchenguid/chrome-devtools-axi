@@ -1,6 +1,6 @@
 {
   "name": "chrome-devtools-axi",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "AXI-compliant chrome-devtools-mcp wrapper — combined operations, TOON output, contextual suggestions",
   "type": "module",
   "repository": {
