@@ -65,6 +65,25 @@ export async function isBridgeClientConnected(
   }
 }
 
+/**
+ * Probe whether the bridge's underlying CDP target is reachable. Drives one
+ * round-trip MCP tool call (`list_pages`) that requires a live browser/CDP
+ * connection — `listTools()` alone only confirms the local MCP server is up,
+ * not that the attached browser is still alive. Used by `/health?deep=1` so
+ * `ensureBridge` can detect a stale bridge after the user kills + restarts
+ * the underlying Chrome/Electron target.
+ */
+export async function isBridgeTargetReachable(
+  client: BridgeClient,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    await client.callTool({ name: "list_pages", arguments: {} });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: getErrorMessage(error) };
+  }
+}
+
 function writePidFile(port: number): void {
   mkdirSync(STATE_DIR, { recursive: true });
   writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port }));
@@ -186,12 +205,27 @@ export async function handleBridgeRequest(
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
-  if (req.method === "GET" && req.url === "/health") {
-    if (await isBridgeClientConnected(client)) {
-      writeJson(res, 200, { status: "ok" });
-    } else {
-      writeJson(res, 503, { error: "Not connected" });
+  if (
+    req.method === "GET" &&
+    (req.url === "/health" || req.url?.startsWith("/health?"))
+  ) {
+    if (!(await isBridgeClientConnected(client))) {
+      writeJson(res, 503, { status: "error", error: "Not connected" });
+      return;
     }
+    const deep = req.url.includes("deep=1");
+    if (deep) {
+      const probe = await isBridgeTargetReachable(client);
+      if (!probe.ok) {
+        writeJson(res, 503, {
+          status: "error",
+          error: "CDP target unreachable",
+          reason: probe.reason,
+        });
+        return;
+      }
+    }
+    writeJson(res, 200, { status: "ok" });
     return;
   }
 

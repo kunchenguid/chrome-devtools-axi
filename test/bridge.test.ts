@@ -1,13 +1,18 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import {
   buildTransportArgs,
   detectGlobalMcpPath,
   extractToolText,
   getErrorMessage,
+  handleBridgeRequest,
   isBridgeClientConnected,
+  isBridgeTargetReachable,
   parseBridgeCallPayload,
   resolveBridgeScript,
   resolveTransportSpec,
+  type BridgeClient,
 } from "../src/bridge.js";
 
 describe("extractToolText", () => {
@@ -411,5 +416,169 @@ describe("bridge health", () => {
     });
 
     expect(healthy).toBe(true);
+  });
+});
+
+describe("isBridgeTargetReachable", () => {
+  it("returns ok when list_pages succeeds", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async ({ name }) => {
+        expect(name).toBe("list_pages");
+        return { content: [] };
+      },
+      close: async () => {},
+    };
+
+    const result = await isBridgeTargetReachable(client);
+    expect(result.ok).toBe(true);
+  });
+
+  it("returns ok=false with reason when the CDP target is gone", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        throw new Error("Target closed");
+      },
+      close: async () => {},
+    };
+
+    const result = await isBridgeTargetReachable(client);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("Target closed");
+    }
+  });
+});
+
+function makeRequest(method: string, url: string): IncomingMessage {
+  const req = new IncomingMessage(new Socket());
+  req.method = method;
+  req.url = url;
+  return req;
+}
+
+interface CapturedResponse {
+  statusCode: number;
+  body: string;
+  headers: Record<string, string>;
+}
+
+function makeResponse(): { res: ServerResponse; captured: CapturedResponse } {
+  const captured: CapturedResponse = {
+    statusCode: 0,
+    body: "",
+    headers: {},
+  };
+  const req = new IncomingMessage(new Socket());
+  const res = new ServerResponse(req);
+  const origSetHeader = res.setHeader.bind(res);
+  res.setHeader = ((name: string, value: string | number | string[]) => {
+    captured.headers[String(name).toLowerCase()] = String(value);
+    return origSetHeader(name, value as string);
+  }) as typeof res.setHeader;
+  res.end = ((chunk?: unknown) => {
+    if (typeof chunk === "string") captured.body += chunk;
+    captured.statusCode = res.statusCode;
+    return res;
+  }) as typeof res.end;
+  return { res, captured };
+}
+
+describe("handleBridgeRequest /health", () => {
+  it("returns 200 ok for shallow /health when MCP is connected", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(client, makeRequest("GET", "/health"), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(JSON.parse(captured.body)).toEqual({ status: "ok" });
+  });
+
+  it("returns 503 when MCP server is disconnected", async () => {
+    const client: BridgeClient = {
+      listTools: async () => {
+        throw new Error("Not connected");
+      },
+      callTool: async () => ({}),
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(client, makeRequest("GET", "/health"), res);
+
+    expect(captured.statusCode).toBe(503);
+    expect(JSON.parse(captured.body)).toMatchObject({ status: "error" });
+  });
+
+  it("returns 503 from /health?deep=1 when CDP target is unreachable", async () => {
+    const client: BridgeClient = {
+      // Shallow probe (listTools) passes — local MCP server is fine.
+      listTools: async () => ({ tools: [] }),
+      // Deep probe (list_pages) fails — attached browser is gone.
+      callTool: async () => {
+        throw new Error("Target closed");
+      },
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("GET", "/health?deep=1"),
+      res,
+    );
+
+    expect(captured.statusCode).toBe(503);
+    const body = JSON.parse(captured.body);
+    expect(body.status).toBe("error");
+    expect(body.error).toContain("CDP target unreachable");
+    expect(body.reason).toContain("Target closed");
+  });
+
+  it("returns 200 from /health?deep=1 when both MCP and CDP target are healthy", async () => {
+    let listPagesCalls = 0;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async ({ name }) => {
+        if (name === "list_pages") listPagesCalls++;
+        return { content: [] };
+      },
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("GET", "/health?deep=1"),
+      res,
+    );
+
+    expect(captured.statusCode).toBe(200);
+    expect(JSON.parse(captured.body)).toEqual({ status: "ok" });
+    expect(listPagesCalls).toBe(1);
+  });
+
+  it("does not invoke the deep CDP probe on the shallow /health path", async () => {
+    let callToolCalls = 0;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        callToolCalls++;
+        return { content: [] };
+      },
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(client, makeRequest("GET", "/health"), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(callToolCalls).toBe(0);
   });
 });

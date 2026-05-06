@@ -1,9 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { spawn } from "node:child_process";
+import { createServer, type Server } from "node:http";
+import { AddressInfo } from "node:net";
 import { AxiError } from "axi-sdk-js";
 import {
   CdpError,
+  checkBridgeHealth,
   mapErrorMessage,
   resolveBridgeTimeoutMs,
+  terminateBridgeProcess,
+  waitForProcessExit,
 } from "../src/client.js";
 
 describe("CdpError", () => {
@@ -78,5 +84,181 @@ describe("resolveBridgeTimeoutMs", () => {
     expect(resolveBridgeTimeoutMs()).toBe(30_000);
     process.env.CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS = "-100";
     expect(resolveBridgeTimeoutMs()).toBe(30_000);
+  });
+});
+
+interface FakeBridgeOptions {
+  shallow: "ok" | "error";
+  deep: "ok" | "error";
+}
+
+function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
+  port: number;
+  server: Server;
+  close: () => Promise<void>;
+}> {
+  return new Promise((resolveStart, rejectStart) => {
+    const server = createServer((req, res) => {
+      if (req.method === "GET" && req.url?.startsWith("/health")) {
+        const wantsDeep = req.url.includes("deep=1");
+        const outcome = wantsDeep ? opts.deep : opts.shallow;
+        res.setHeader("Content-Type", "application/json");
+        if (outcome === "ok") {
+          res.statusCode = 200;
+          res.end(JSON.stringify({ status: "ok" }));
+        } else {
+          res.statusCode = 503;
+          res.end(JSON.stringify({ status: "error" }));
+        }
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    server.on("error", rejectStart);
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolveStart({
+        port,
+        server,
+        close: () =>
+          new Promise<void>((closeResolve) => {
+            server.close(() => closeResolve());
+          }),
+      });
+    });
+  });
+}
+
+describe("checkBridgeHealth (deep probe)", () => {
+  it("returns true on a shallow probe when /health responds 200 ok", async () => {
+    const fake = await startFakeBridgeServer({ shallow: "ok", deep: "error" });
+    try {
+      expect(await checkBridgeHealth(fake.port)).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns false on the deep probe when the bridge reports CDP target unreachable", async () => {
+    // This is the exact stale-bridge scenario from issue #43: the local MCP
+    // server still answers /health, but the attached browser is gone, so the
+    // deep probe correctly reports unhealthy.
+    const fake = await startFakeBridgeServer({ shallow: "ok", deep: "error" });
+    try {
+      expect(await checkBridgeHealth(fake.port)).toBe(true);
+      expect(await checkBridgeHealth(fake.port, { deep: true })).toBe(false);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns true on the deep probe when the bridge reports both layers healthy", async () => {
+    const fake = await startFakeBridgeServer({ shallow: "ok", deep: "ok" });
+    try {
+      expect(await checkBridgeHealth(fake.port, { deep: true })).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns false when nothing is listening on the port", async () => {
+    // Port 1 is privileged and unbound — connection should be refused immediately.
+    expect(await checkBridgeHealth(1)).toBe(false);
+    expect(await checkBridgeHealth(1, { deep: true })).toBe(false);
+  });
+});
+
+describe("waitForProcessExit", () => {
+  it("returns true once the process is gone", async () => {
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 200)"], {
+      stdio: "ignore",
+    });
+    expect(child.pid).toBeDefined();
+    const pid = child.pid as number;
+    child.unref();
+
+    // Process is alive at first
+    expect(await waitForProcessExit(pid, 50)).toBe(false);
+
+    // After it exits naturally, the wait should succeed
+    expect(await waitForProcessExit(pid, 2000)).toBe(true);
+  });
+
+  it("returns false when the process outlives the timeout", async () => {
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], {
+      stdio: "ignore",
+    });
+    const pid = child.pid as number;
+    try {
+      expect(await waitForProcessExit(pid, 100)).toBe(false);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+});
+
+describe("terminateBridgeProcess", () => {
+  it("waits for the bridge process to actually exit before returning", async () => {
+    // Mimics a well-behaved bridge: exits cleanly on SIGTERM.
+    const child = spawn(
+      process.execPath,
+      ["-e", "process.on('SIGTERM', () => process.exit(0)); setTimeout(() => {}, 30000);"],
+      { stdio: "ignore", detached: true },
+    );
+    const pid = child.pid as number;
+    child.unref();
+
+    // Give the listener a moment to register before we send the signal.
+    await new Promise((r) => setTimeout(r, 50));
+    await terminateBridgeProcess(pid);
+
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  });
+
+  it("escalates to SIGKILL when the bridge ignores SIGTERM", async () => {
+    // Mimics a stuck bridge: ignores SIGTERM. Without escalation, stop +
+    // start can't recover (issue #43). The 2s SIGTERM grace window means
+    // the test takes ~2s to drive the escalation path.
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        "process.on('SIGTERM', () => {}); setTimeout(() => {}, 30000);",
+      ],
+      { stdio: "ignore", detached: true },
+    );
+    const pid = child.pid as number;
+    child.unref();
+
+    await new Promise((r) => setTimeout(r, 50));
+    await terminateBridgeProcess(pid);
+
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  }, 10_000);
+
+  it("is a no-op when the pid is already gone", async () => {
+    // Pick a likely-unused pid by spawning + waiting for it to exit.
+    const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    const pid = child.pid as number;
+    await new Promise<void>((r) => child.on("exit", () => r()));
+
+    await expect(terminateBridgeProcess(pid)).resolves.toBeUndefined();
   });
 });

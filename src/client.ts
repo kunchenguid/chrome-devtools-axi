@@ -142,9 +142,20 @@ function httpPost(
   });
 }
 
-async function checkBridgeHealth(port: number): Promise<boolean> {
+/**
+ * Probe the bridge's `/health` endpoint. With `deep: true`, asks the bridge
+ * to drive one CDP-backed MCP call (`list_pages`) so callers can distinguish
+ * "MCP server is up but the attached browser is gone" from genuine readiness.
+ *
+ * Exported for tests; production code uses it via `ensureBridge`.
+ */
+export async function checkBridgeHealth(
+  port: number,
+  opts: { deep?: boolean } = {},
+): Promise<boolean> {
   try {
-    const resp = await httpGet(port, "/health");
+    const path = opts.deep ? "/health?deep=1" : "/health";
+    const resp = await httpGet(port, path);
     const data = JSON.parse(resp);
     return data.status === "ok";
   } catch {
@@ -156,8 +167,67 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+export async function waitForProcessExit(
+  pid: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return true;
+    await sleep(50);
+  }
+  return !isProcessAlive(pid);
+}
+
+/**
+ * Terminate a bridge process and reap its detached process group. Sends
+ * SIGTERM, polls up to ~2s for exit, then escalates to SIGKILL on the entire
+ * process group so chrome-devtools-mcp / Chrome children can't survive as
+ * orphans. Returns once the bridge PID is gone (or the SIGKILL grace window
+ * expires).
+ */
+export async function terminateBridgeProcess(pid: number): Promise<void> {
+  if (!isProcessAlive(pid)) return;
+
+  // Give the bridge a chance to run its own shutdown handler (which kills its
+  // process group on `exit`).
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    return;
+  }
+
+  if (await waitForProcessExit(pid, 2000)) {
+    // Belt-and-suspenders: even on a clean exit, sweep the process group in
+    // case any chrome-devtools-mcp child outlived its parent.
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Group already gone or pid was never a group leader — fine.
+    }
+    return;
+  }
+
+  // Escalate: kill the whole process group so children get reaped together.
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Already dead.
+    }
+  }
+  await waitForProcessExit(pid, 1000);
+}
+
 /**
  * Ensure the bridge is running, starting it if needed. Returns the port.
+ *
+ * Verifies a *deep* health check (one round-trip CDP-backed MCP call) before
+ * declaring the bridge ready, so a bridge whose attached browser/Electron
+ * target was killed while still answering local /health requests gets torn
+ * down + restarted instead of being reused as a stale endpoint.
  */
 export async function ensureBridge(): Promise<number> {
   const port = parseInt(
@@ -165,17 +235,14 @@ export async function ensureBridge(): Promise<number> {
     10,
   );
 
-  // Check existing bridge via PID file
+  // Check existing bridge via PID file. Use a deep probe so a bridge whose
+  // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile();
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
-    if (await checkBridgeHealth(pidInfo.port)) {
+    if (await checkBridgeHealth(pidInfo.port, { deep: true })) {
       return pidInfo.port;
     }
-    try {
-      process.kill(pidInfo.pid, "SIGTERM");
-    } catch {
-      // Best effort — if shutdown fails, the startup poll below will time out.
-    }
+    await terminateBridgeProcess(pidInfo.pid);
   }
 
   // Start a new bridge
@@ -198,17 +265,38 @@ export async function ensureBridge(): Promise<number> {
   );
   child.unref();
 
-  // Poll for health — Chrome launch + npx bootstrap can be slow
+  // Poll for health — Chrome launch + npx bootstrap can be slow.
+  // Track whether the *shallow* health check ever passed so we can attribute
+  // the failure correctly: shallow-but-no-deep means the MCP server came up
+  // but the attached CDP target is dead, vs. nothing-came-up which is the
+  // generic startup-timeout case.
   const timeoutMs = resolveBridgeTimeoutMs();
   const deadline = Date.now() + timeoutMs;
+  let sawShallowReady = false;
   while (Date.now() < deadline) {
-    if (await checkBridgeHealth(port)) {
+    if (await checkBridgeHealth(port, { deep: true })) {
       return port;
+    }
+    if (!sawShallowReady && (await checkBridgeHealth(port))) {
+      sawShallowReady = true;
     }
     await sleep(500);
   }
 
   const seconds = Math.round(timeoutMs / 1000);
+
+  if (sawShallowReady) {
+    throw new CdpError(
+      "Bridge is running but the attached CDP target appears to have gone away",
+      "BRIDGE_NOT_READY",
+      [
+        "The Chrome/Electron instance the bridge was attached to may have exited.",
+        "Verify the target is still listening on its remote-debugging port, then re-run the command.",
+        "If the target was restarted, the bridge has already been recycled — this run will succeed once the target is reachable.",
+      ],
+    );
+  }
+
   const usingNpx = !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
   const suggestions = [
     "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
@@ -312,16 +400,15 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
 }
 
 /**
- * Stop the bridge process.
+ * Stop the bridge process. Waits for the bridge PID to actually exit (bounded
+ * poll, ~2s) before escalating to SIGKILL on the entire detached process
+ * group, so chrome-devtools-mcp + Chrome children get reaped together rather
+ * than orphaned. Resolves once the bridge process is gone.
  */
-export function stopBridge(): boolean {
+export async function stopBridge(): Promise<boolean> {
   const pidInfo = readPidFile();
-  if (!pidInfo) {
-    return false;
-  }
-  if (isProcessAlive(pidInfo.pid)) {
-    process.kill(pidInfo.pid, "SIGTERM");
-    return true;
-  }
-  return false;
+  if (!pidInfo) return false;
+  if (!isProcessAlive(pidInfo.pid)) return false;
+  await terminateBridgeProcess(pidInfo.pid);
+  return true;
 }
