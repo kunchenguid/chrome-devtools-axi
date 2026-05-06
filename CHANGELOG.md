@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.20](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.19...chrome-devtools-axi-v0.1.20) (2026-05-06)
+
+
+### Bug Fixes
+
+* recycle stale bridge processes ([#51](https://github.com/kunchenguid/chrome-devtools-axi/issues/51)) ([9a97fbf](https://github.com/kunchenguid/chrome-devtools-axi/commit/9a97fbf6871637c07c6db5552c45ae9465a7c5bd))
+
 ## [0.1.19](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.18...chrome-devtools-axi-v0.1.19) (2026-05-03)
 
 
