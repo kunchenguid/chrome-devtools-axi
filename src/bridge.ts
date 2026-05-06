@@ -6,7 +6,7 @@
  *   POST /call  { name, args }  → { result }
  *   GET  /tools                 → [{ name, description }]
  *   GET  /health                → { status: "ok" } or 503 { status: "error", error }
- *   GET  /health?deep=1         → also verifies the attached CDP target
+ *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason
  *
  * Writes a PID file to ~/.chrome-devtools-axi/bridge.pid on startup.
  */
