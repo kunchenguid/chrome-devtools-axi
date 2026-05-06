@@ -2,6 +2,9 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
   CdpError,
@@ -90,6 +93,7 @@ describe("resolveBridgeTimeoutMs", () => {
 interface FakeBridgeOptions {
   shallow: "ok" | "error";
   deep: "ok" | "error";
+  deepDelayMs?: number;
 }
 
 function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
@@ -103,12 +107,19 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
         const wantsDeep = req.url.includes("deep=1");
         const outcome = wantsDeep ? opts.deep : opts.shallow;
         res.setHeader("Content-Type", "application/json");
-        if (outcome === "ok") {
-          res.statusCode = 200;
-          res.end(JSON.stringify({ status: "ok" }));
+        const sendResponse = () => {
+          if (outcome === "ok") {
+            res.statusCode = 200;
+            res.end(JSON.stringify({ status: "ok" }));
+          } else {
+            res.statusCode = 503;
+            res.end(JSON.stringify({ status: "error" }));
+          }
+        };
+        if (wantsDeep && opts.deepDelayMs) {
+          setTimeout(sendResponse, opts.deepDelayMs);
         } else {
-          res.statusCode = 503;
-          res.end(JSON.stringify({ status: "error" }));
+          sendResponse();
         }
         return;
       }
@@ -162,6 +173,19 @@ describe("checkBridgeHealth (deep probe)", () => {
     }
   });
 
+  it("allows a slower deep probe to complete successfully", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      deepDelayMs: 2200,
+    });
+    try {
+      expect(await checkBridgeHealth(fake.port, { deep: true })).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  }, 10_000);
+
   it("returns false when nothing is listening on the port", async () => {
     // Port 1 is privileged and unbound — connection should be refused immediately.
     expect(await checkBridgeHealth(1)).toBe(false);
@@ -203,6 +227,34 @@ describe("waitForProcessExit", () => {
 });
 
 describe("terminateBridgeProcess", () => {
+  function waitForFile(path: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + 2000;
+      const poll = () => {
+        try {
+          resolve(readFileSync(path, "utf-8").trim());
+          return;
+        } catch (err) {
+          if (Date.now() >= deadline) {
+            reject(err);
+            return;
+          }
+          setTimeout(poll, 25);
+        }
+      };
+      poll();
+    });
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   it("waits for the bridge process to actually exit before returning", async () => {
     // Mimics a well-behaved bridge: exits cleanly on SIGTERM.
     const child = spawn(
@@ -260,5 +312,41 @@ describe("terminateBridgeProcess", () => {
     await new Promise<void>((r) => child.on("exit", () => r()));
 
     await expect(terminateBridgeProcess(pid)).resolves.toBeUndefined();
+  });
+
+  it("does not kill the process group unless group termination is trusted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "chrome-devtools-axi-test-"));
+    const childPidFile = join(dir, "child.pid");
+    const parent = spawn(
+      process.execPath,
+      [
+        "-e",
+        [
+          "const { spawn } = require('node:child_process');",
+          "const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });",
+          `require('node:fs').writeFileSync(${JSON.stringify(childPidFile)}, String(child.pid));`,
+          "process.on('SIGTERM', () => {});",
+          "setTimeout(() => {}, 30000);",
+        ].join(""),
+      ],
+      { stdio: "ignore", detached: true },
+    );
+    const parentPid = parent.pid as number;
+    parent.unref();
+
+    const childPid = Number.parseInt(await waitForFile(childPidFile), 10);
+    try {
+      await terminateBridgeProcess(parentPid);
+
+      expect(isAlive(parentPid)).toBe(false);
+      expect(isAlive(childPid)).toBe(true);
+    } finally {
+      try {
+        process.kill(childPid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

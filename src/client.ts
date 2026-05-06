@@ -2,7 +2,7 @@
  * HTTP client for the chrome-devtools-axi bridge + bridge lifecycle management.
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -15,6 +15,8 @@ const PID_FILE = join(STATE_DIR, "bridge.pid");
 const DEFAULT_PORT = 9224;
 const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
 const MIN_BRIDGE_TIMEOUT_MS = 1_000;
+const HEALTH_TIMEOUT_MS = 2_000;
+const DEEP_HEALTH_TIMEOUT_MS = 5_000;
 
 /**
  * Resolve the bridge readiness deadline in milliseconds.
@@ -155,7 +157,8 @@ export async function checkBridgeHealth(
 ): Promise<boolean> {
   try {
     const path = opts.deep ? "/health?deep=1" : "/health";
-    const resp = await httpGet(port, path);
+    const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
+    const resp = await httpGet(port, path, timeoutMs);
     const data = JSON.parse(resp);
     return data.status === "ok";
   } catch {
@@ -179,6 +182,18 @@ export async function waitForProcessExit(
   return !isProcessAlive(pid);
 }
 
+function isBridgeProcess(pid: number): boolean {
+  try {
+    const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf-8",
+      timeout: 1000,
+    });
+    return command.includes("chrome-devtools-axi-bridge");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Terminate a bridge process and reap its detached process group. Sends
  * SIGTERM, polls up to ~2s for exit, then escalates to SIGKILL on the entire
@@ -186,8 +201,12 @@ export async function waitForProcessExit(
  * orphans. Returns once the bridge PID is gone (or the SIGKILL grace window
  * expires).
  */
-export async function terminateBridgeProcess(pid: number): Promise<void> {
+export async function terminateBridgeProcess(
+  pid: number,
+  opts: { killProcessGroup?: boolean } = {},
+): Promise<void> {
   if (!isProcessAlive(pid)) return;
+  const killProcessGroup = opts.killProcessGroup === true;
 
   // Give the bridge a chance to run its own shutdown handler (which kills its
   // process group on `exit`).
@@ -198,20 +217,28 @@ export async function terminateBridgeProcess(pid: number): Promise<void> {
   }
 
   if (await waitForProcessExit(pid, 2000)) {
-    // Belt-and-suspenders: even on a clean exit, sweep the process group in
-    // case any chrome-devtools-mcp child outlived its parent.
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {
-      // Group already gone or pid was never a group leader — fine.
+    if (killProcessGroup) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // Group already gone or pid was never a group leader — fine.
+      }
     }
     return;
   }
 
   // Escalate: kill the whole process group so children get reaped together.
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {
+  if (killProcessGroup) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already dead.
+      }
+    }
+  } else {
     try {
       process.kill(pid, "SIGKILL");
     } catch {
@@ -242,7 +269,9 @@ export async function ensureBridge(): Promise<number> {
     if (await checkBridgeHealth(pidInfo.port, { deep: true })) {
       return pidInfo.port;
     }
-    await terminateBridgeProcess(pidInfo.pid);
+    await terminateBridgeProcess(pidInfo.pid, {
+      killProcessGroup: isBridgeProcess(pidInfo.pid),
+    });
   }
 
   // Start a new bridge
@@ -409,6 +438,8 @@ export async function stopBridge(): Promise<boolean> {
   const pidInfo = readPidFile();
   if (!pidInfo) return false;
   if (!isProcessAlive(pidInfo.pid)) return false;
-  await terminateBridgeProcess(pidInfo.pid);
+  await terminateBridgeProcess(pidInfo.pid, {
+    killProcessGroup: isBridgeProcess(pidInfo.pid),
+  });
   return true;
 }
