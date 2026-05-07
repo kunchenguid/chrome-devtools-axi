@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.21](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.20...chrome-devtools-axi-v0.1.21) (2026-05-07)
+
+
+### Bug Fixes
+
+* **cli:** make type all clear prior filters ([#53](https://github.com/kunchenguid/chrome-devtools-axi/issues/53)) ([8001534](https://github.com/kunchenguid/chrome-devtools-axi/commit/8001534b03d5dd070fc15d90ca0ecd8486e7d7e4))
+* handle function eval input wrapping ([#56](https://github.com/kunchenguid/chrome-devtools-axi/issues/56)) ([d9e6d9f](https://github.com/kunchenguid/chrome-devtools-axi/commit/d9e6d9f1b530a4a67e14e66859caed0215d472be))
+* reject stale generation-tagged refs ([#55](https://github.com/kunchenguid/chrome-devtools-axi/issues/55)) ([ccac521](https://github.com/kunchenguid/chrome-devtools-axi/commit/ccac521cf649479cab2a1cad147a3526bb7b7bca))
+
 ## [0.1.20](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.19...chrome-devtools-axi-v0.1.20) (2026-05-06)
 
 
