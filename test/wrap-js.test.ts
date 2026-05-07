@@ -34,6 +34,10 @@ describe("wrapJsExpression", () => {
     expect(wrapJsExpression("(() => 42)()")).toBe("() => 42");
   });
 
+  it("unwraps a simple arrow IIFE with a trailing semicolon", () => {
+    expect(wrapJsExpression("(() => 42)();")).toBe("() => 42");
+  });
+
   it("unwraps a multi-statement arrow IIFE", () => {
     expect(wrapJsExpression("(() => { const x = 5; return x + 1 })()")).toBe(
       "() => { const x = 5; return x + 1 }",

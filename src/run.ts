@@ -27,13 +27,16 @@ type CallTool = (
  * which covers the common documented IIFE form.
  */
 function unwrapNoArgIIFE(s: string): string {
-  if (s.length < 4 || s[0] !== "(" || !s.endsWith(")")) return s;
+  const candidate = s.endsWith(";") ? s.slice(0, -1).trimEnd() : s;
+  if (candidate.length < 4 || candidate[0] !== "(" || !candidate.endsWith(")")) {
+    return s;
+  }
   let depth = 0;
   let inString: string | null = null;
   let escape = false;
   let closeIdx = -1;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
+  for (let i = 0; i < candidate.length; i++) {
+    const c = candidate[i];
     if (escape) {
       escape = false;
       continue;
@@ -60,9 +63,9 @@ function unwrapNoArgIIFE(s: string): string {
     }
   }
   if (closeIdx < 0) return s;
-  const rest = s.slice(closeIdx + 1).trim();
+  const rest = candidate.slice(closeIdx + 1).trim();
   if (rest !== "()") return s;
-  const inner = s.slice(1, closeIdx).trim();
+  const inner = candidate.slice(1, closeIdx).trim();
   if (
     /^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(
       inner,
