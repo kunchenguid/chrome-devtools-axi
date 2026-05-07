@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { getCommandHelp, parseFillFormArgs, parseUid } from "../src/cli.js";
+import {
+  getCommandHelp,
+  parseFillFormArgs,
+  parseUid,
+  parseUidFresh,
+} from "../src/cli.js";
 import * as generation from "../src/generation.js";
 
 describe("getCommandHelp", () => {
@@ -108,5 +113,25 @@ describe("parseUid (generation validation)", () => {
   it("works without an @ prefix on the input", () => {
     expect(parseUid("g7:abc")).toBe("abc");
     expect(() => parseUid("g4:abc")).toThrow(/Stale ref/);
+  });
+});
+
+describe("parseUidFresh", () => {
+  beforeEach(() => {
+    vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("throws STALE_REF when page mutations advance the current ref generation", async () => {
+    const callTool = vi.fn().mockResolvedValue(
+      'Script ran on page and returned:\n```json\n8\n```',
+    );
+
+    await expect(parseUidFresh("@g7:237_15", callTool)).rejects.toMatchObject({
+      code: "STALE_REF",
+    });
   });
 });

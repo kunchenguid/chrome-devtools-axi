@@ -11,11 +11,12 @@ import {
   stopBridge,
 } from "./client.js";
 import { bumpGeneration, getCurrentGeneration } from "./generation.js";
-import { readStdin, runScript } from "./run.js";
+import { parseEvalOutput, readStdin, runScript } from "./run.js";
 import {
   checkUidGeneration,
   countRefs,
   extractTitle,
+  parseStampedUid,
   stampSnapshotGeneration,
   truncateSnapshot,
   truncateText,
@@ -27,8 +28,14 @@ const HOME_DESCRIPTION =
 
 const VERSION = readPackageVersion();
 const RAW_STDOUT_MARKER = "__CHROME_DEVTOOLS_AXI_RAW__";
+const PAGE_GENERATION_KEY = "__chromeDevtoolsAxiSnapshotGeneration";
 
 type CliStdout = Pick<NodeJS.WriteStream, "write">;
+
+type ToolCaller = (
+  name: string,
+  args?: Record<string, unknown>,
+) => Promise<string>;
 
 export type MainOptions = {
   argv?: string[];
@@ -962,21 +969,86 @@ export function parseUid(arg: string): string {
   const current = getCurrentGeneration();
   const check = checkUidGeneration(arg, current);
   if (check.stale) {
-    const refRaw = arg.startsWith("@") ? arg.slice(1) : arg;
-    throw new CdpError(
-      `Stale ref @${refRaw}: from snapshot generation ${check.refGeneration}, current is ${current}. Re-snapshot to get fresh refs.`,
-      "STALE_REF",
-      [
-        "Run `chrome-devtools-axi snapshot` to capture current refs, then retry the action",
-      ],
-    );
+    throwStaleRef(arg, check.refGeneration, current);
   }
   return check.uid;
 }
 
 /** Tag a freshly captured snapshot with a bumped generation marker. */
-function stampFresh(snapshot: string): string {
-  return stampSnapshotGeneration(snapshot, bumpGeneration());
+async function stampFresh(snapshot: string): Promise<string> {
+  const generation = bumpGeneration();
+  await markPageSnapshotGeneration(generation);
+  return stampSnapshotGeneration(snapshot, generation);
+}
+
+function throwStaleRef(
+  arg: string,
+  refGeneration: number | null,
+  currentGeneration: number,
+): never {
+  const refRaw = arg.startsWith("@") ? arg.slice(1) : arg;
+  throw new CdpError(
+    `Stale ref @${refRaw}: from snapshot generation ${refGeneration}, current is ${currentGeneration}. Re-snapshot to get fresh refs.`,
+    "STALE_REF",
+    [
+      "Run `chrome-devtools-axi snapshot` to capture current refs, then retry the action",
+    ],
+  );
+}
+
+async function markPageSnapshotGeneration(generation: number): Promise<void> {
+  const key = JSON.stringify(PAGE_GENERATION_KEY);
+  try {
+    await callTool("evaluate_script", {
+      function: `() => {
+  const key = ${key};
+  const previous = globalThis[key];
+  if (previous && previous.observer) previous.observer.disconnect();
+  const state = { generation: ${generation}, mutations: 0, observer: null };
+  const observer = new MutationObserver(() => { state.mutations += 1; });
+  observer.observe(document.documentElement || document, { childList: true, subtree: true, attributes: true, characterData: true });
+  state.observer = observer;
+  globalThis[key] = state;
+  return state.generation;
+}`,
+    });
+  } catch {
+  }
+}
+
+async function getPageRefGeneration(caller: ToolCaller): Promise<number> {
+  const key = JSON.stringify(PAGE_GENERATION_KEY);
+  const fallback = getCurrentGeneration();
+  try {
+    const output = await caller("evaluate_script", {
+      function: `() => {
+  const state = globalThis[${key}];
+  if (!state || typeof state.generation !== 'number') return ${fallback};
+  const mutations = typeof state.mutations === 'number' ? state.mutations : 0;
+  return state.generation + mutations;
+}`,
+    });
+    const parsed = parseEvalOutput(output);
+    return typeof parsed === "number" && Number.isFinite(parsed)
+      ? parsed
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function parseUidFresh(
+  arg: string,
+  caller: ToolCaller = callTool,
+): Promise<string> {
+  const { generation } = parseStampedUid(arg);
+  const current =
+    generation === null ? getCurrentGeneration() : await getPageRefGeneration(caller);
+  const check = checkUidGeneration(arg, current);
+  if (check.stale) {
+    throwStaleRef(arg, check.refGeneration, current);
+  }
+  return check.uid;
 }
 
 function isRecoverableOpenError(error: unknown): error is CdpError {
@@ -998,10 +1070,10 @@ async function callWithSnapshot(
   const result = await callTool(name, { ...args, includeSnapshot: true });
   const snapshot = parseSnapshotFromResponse(result);
   if (snapshot && snapshot.length > 0) {
-    return stampFresh(stripSnapshotHeader(snapshot));
+    return await stampFresh(stripSnapshotHeader(snapshot));
   }
   // Fallback: take snapshot separately
-  return stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  return await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
 }
 
 const SCROLL_FUNCTIONS: Record<string, string> = {
@@ -1027,12 +1099,12 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
     }
     await callTool("new_page", { url });
   }
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "open", url, full);
 }
 
 async function handleSnapshot(full: boolean): Promise<string> {
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "snapshot", undefined, full);
 }
 
@@ -1045,7 +1117,7 @@ async function handleScreenshot(args: string[]): Promise<string> {
   }
 
   const toolArgs: Record<string, unknown> = { filePath: parsed.filePath };
-  if (parsed.uid) toolArgs.uid = parseUid(parsed.uid);
+  if (parsed.uid) toolArgs.uid = await parseUidFresh(parsed.uid);
   if (parsed.fullPage) toolArgs.fullPage = true;
   if (parsed.format) toolArgs.format = parsed.format;
 
@@ -1061,7 +1133,7 @@ async function handleClick(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  const snapshot = await callWithSnapshot("click", { uid: parseUid(uid) });
+  const snapshot = await callWithSnapshot("click", { uid: await parseUidFresh(uid) });
   return formatPageOutput(snapshot, "click", undefined, full);
 }
 
@@ -1080,7 +1152,7 @@ async function handleFill(args: string[], full: boolean): Promise<string> {
   }
 
   const snapshot = await callWithSnapshot("fill", {
-    uid: parseUid(uid),
+    uid: await parseUidFresh(uid),
     value,
   });
   return formatPageOutput(snapshot, "fill", undefined, full);
@@ -1107,7 +1179,7 @@ async function handleType(args: string[], full: boolean): Promise<string> {
   }
 
   await callTool("type_text", { text });
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "type", undefined, full);
 }
 
@@ -1121,13 +1193,13 @@ async function handleScroll(args: string[], full: boolean): Promise<string> {
   }
 
   await callTool("evaluate_script", { function: fn });
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "scroll", undefined, full);
 }
 
 async function handleBack(full: boolean): Promise<string> {
   await callTool("navigate_page", { type: "back" });
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "back", undefined, full);
 }
 
@@ -1259,7 +1331,7 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
   const toolArgs: Record<string, unknown> = { url };
   if (background) toolArgs.background = true;
   await callTool("new_page", toolArgs);
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "newpage", url, full);
 }
 
@@ -1280,7 +1352,7 @@ async function handleSelectPage(
     ]);
   }
   await callTool("select_page", { pageId });
-  const snapshot = stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
   return formatPageOutput(snapshot, "selectpage", undefined, full);
 }
 
@@ -1343,7 +1415,7 @@ async function handleHover(args: string[], full: boolean): Promise<string> {
       "Run `chrome-devtools-axi hover @<uid>` — get uid from snapshot",
     ]);
   }
-  const snapshot = await callWithSnapshot("hover", { uid: parseUid(uid) });
+  const snapshot = await callWithSnapshot("hover", { uid: await parseUidFresh(uid) });
   return formatPageOutput(snapshot, "hover", undefined, full);
 }
 
@@ -1356,8 +1428,8 @@ async function handleDrag(args: string[], full: boolean): Promise<string> {
     ]);
   }
   const snapshot = await callWithSnapshot("drag", {
-    from_uid: parseUid(from),
-    to_uid: parseUid(to),
+    from_uid: await parseUidFresh(from),
+    to_uid: await parseUidFresh(to),
   });
   return formatPageOutput(snapshot, "drag", undefined, full);
 }
@@ -1369,7 +1441,9 @@ async function handleFillForm(args: string[], full: boolean): Promise<string> {
       'Run `chrome-devtools-axi fillform @1="hello" @2="world"` to fill multiple fields',
     ]);
   }
-  const validated = entries.map((e) => ({ uid: parseUid(e.uid), value: e.value }));
+  const validated = await Promise.all(
+    entries.map(async (e) => ({ uid: await parseUidFresh(e.uid), value: e.value })),
+  );
   const snapshot = await callWithSnapshot("fill_form", { elements: validated });
   return formatPageOutput(snapshot, "fillform", undefined, full);
 }
@@ -1402,7 +1476,7 @@ async function handleUpload(args: string[], full: boolean): Promise<string> {
     ]);
   }
   const snapshot = await callWithSnapshot("upload_file", {
-    uid: parseUid(uid),
+    uid: await parseUidFresh(uid),
     filePath,
   });
   return formatPageOutput(snapshot, "upload", undefined, full);
@@ -1535,7 +1609,7 @@ async function handleHome(_full: boolean): Promise<string> {
       renderHelp(["Run `chrome-devtools-axi open <url>` to start browsing"]),
     ]);
   }
-  const snapshot = stampFresh(stripSnapshotHeader(result));
+  const snapshot = await stampFresh(stripSnapshotHeader(result));
   const title = extractTitle(snapshot);
   const refs = countRefs(snapshot);
   const page: Record<string, unknown> = {};

@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CdpError } from "./client.js";
+import { parseStampedUid } from "./snapshot.js";
 
 type CallTool = (
   name: string,
@@ -49,7 +50,7 @@ function stripSnapshotHeader(text: string): string {
 
 /** Strip leading @ from uid ref string. */
 function parseUid(ref: string): string {
-  return ref.startsWith("@") ? ref.slice(1) : ref;
+  return parseStampedUid(ref).uid;
 }
 
 /** Check if an open error is recoverable by falling back to new_page. */
@@ -63,7 +64,7 @@ function isRecoverableOpenError(error: unknown): boolean {
 
 // --- Selector detection ---
 
-const UID_RE = /^@?\d[\d_]*$/;
+const UID_RE = /^@?(?:\d[\d_]*|g\d+:.+)$/;
 
 /** Returns true when the string looks like a @uid ref (e.g. "@12", "26_181"). */
 export function isUidRef(s: string): boolean {

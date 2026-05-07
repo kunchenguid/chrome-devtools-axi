@@ -244,6 +244,15 @@ describe("createPageHelper", () => {
     expect(callTool).toHaveBeenCalledWith("click", { uid: "5" });
   });
 
+  it("page.click accepts stamped uid refs", async () => {
+    callTool.mockResolvedValueOnce("");
+
+    const page = createPageHelper(callTool);
+    await page.click("@g7:12_3");
+
+    expect(callTool).toHaveBeenCalledWith("click", { uid: "12_3" });
+  });
+
   it("page.click with CSS selector uses evaluate_script", async () => {
     callTool.mockResolvedValueOnce("");
 
@@ -273,6 +282,15 @@ describe("createPageHelper", () => {
 
     const page = createPageHelper(callTool);
     await page.fill("@3", "hello");
+
+    expect(callTool).toHaveBeenCalledWith("fill", { uid: "3", value: "hello" });
+  });
+
+  it("page.fill accepts stamped uid refs", async () => {
+    callTool.mockResolvedValueOnce("");
+
+    const page = createPageHelper(callTool);
+    await page.fill("@g7:3", "hello");
 
     expect(callTool).toHaveBeenCalledWith("fill", { uid: "3", value: "hello" });
   });
@@ -488,6 +506,11 @@ describe("isUidRef", () => {
   it("recognizes bare numeric refs", () => {
     expect(isUidRef("5")).toBe(true);
     expect(isUidRef("26_181")).toBe(true);
+  });
+
+  it("recognizes generation-stamped refs", () => {
+    expect(isUidRef("@g7:12")).toBe(true);
+    expect(isUidRef("g7:12_3")).toBe(true);
   });
 
   it("rejects CSS selectors", () => {

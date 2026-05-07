@@ -104,6 +104,10 @@ describe("main", () => {
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "https://airlockhq.com" }],
       ["take_snapshot"],
+      [
+        "evaluate_script",
+        { function: expect.stringContaining("__chromeDevtoolsAxiSnapshotGeneration") },
+      ],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
     expect(String(write.mock.calls[0]?.[0])).toContain(
