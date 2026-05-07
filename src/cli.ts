@@ -676,7 +676,8 @@ export function parseConsoleArgs(args: string[]): {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--type" && i + 1 < args.length) {
       const value = args[++i];
-      if (value.toLowerCase() !== "all") result.types = [value];
+      if (value.toLowerCase() === "all") delete result.types;
+      else result.types = [value];
     } else if (args[i] === "--limit" && i + 1 < args.length) {
       const pageSize = parseOptionalInteger(args[++i]);
       if (pageSize !== undefined) result.pageSize = pageSize;
@@ -701,7 +702,8 @@ export function parseNetworkArgs(args: string[]): {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--type" && i + 1 < args.length) {
       const value = args[++i];
-      if (value.toLowerCase() !== "all") result.resourceTypes = [value];
+      if (value.toLowerCase() === "all") delete result.resourceTypes;
+      else result.resourceTypes = [value];
     } else if (args[i] === "--limit" && i + 1 < args.length) {
       const pageSize = parseOptionalInteger(args[++i]);
       if (pageSize !== undefined) result.pageSize = pageSize;

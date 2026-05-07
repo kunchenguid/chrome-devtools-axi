@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { formatStopOutput, formatScreenshotOutput, getCommandHelp, parseScreenshotArgs } from "../src/cli.js";
+import {
+  formatStopOutput,
+  formatScreenshotOutput,
+  getCommandHelp,
+  parseConsoleArgs,
+  parseNetworkArgs,
+  parseScreenshotArgs,
+} from "../src/cli.js";
 
 describe("formatStopOutput", () => {
   it("returns stopped status when bridge was running", () => {
@@ -72,6 +79,22 @@ describe("parseScreenshotArgs", () => {
   it("returns null filePath when missing", () => {
     const result = parseScreenshotArgs(["--full-page"]);
     expect(result.filePath).toBeNull();
+  });
+});
+
+describe("parseConsoleArgs", () => {
+  it("clears earlier type filters when all is specified last", () => {
+    const result = parseConsoleArgs(["--type", "error", "--type", "all"]);
+
+    expect(result).toEqual({});
+  });
+});
+
+describe("parseNetworkArgs", () => {
+  it("clears earlier resource type filters when all is specified last", () => {
+    const result = parseNetworkArgs(["--type", "fetch", "--type", "all"]);
+
+    expect(result).toEqual({});
   });
 });
 
