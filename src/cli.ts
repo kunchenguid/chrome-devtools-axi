@@ -273,6 +273,7 @@ script API (available as global \`page\`):
   await page.back()                 Navigate back
 
 click and fill accept either @uid refs (from snapshot) or CSS selectors.
+page.eval accepts functions, arrow functions, and bare expression strings; no-arg IIFE strings are unwrapped automatically.
 
 examples:
   chrome-devtools-axi run <<'EOF'

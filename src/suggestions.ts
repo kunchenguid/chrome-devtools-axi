@@ -70,9 +70,9 @@ export function getSuggestions(ctx: SuggestionContext): string[] {
     lines.push("Run `chrome-devtools-axi scroll down` to scroll down");
   }
 
-  // Teach eval syntax — use IIFE for multi-statement logic
+  // Teach eval syntax - pass a function for multi-statement logic
   lines.push(
-    'Use `chrome-devtools-axi eval <expr>` for JS expressions. For multi-statement code, wrap in an IIFE: `eval "(() => { ...; return result })()"`',
+    'Use `chrome-devtools-axi eval <expr>` for JS expressions. For multi-statement code, pass a function: `eval "() => { ...; return result }"`',
   );
 
   return lines;
