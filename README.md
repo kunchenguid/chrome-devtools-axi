@@ -208,9 +208,10 @@ export CHROME_DEVTOOLS_AXI_WS_HEADERS='{"Authorization":"Bearer token"}'
 
 State is stored in `~/.chrome-devtools-axi/`:
 
-| File         | Purpose                            |
-| ------------ | ---------------------------------- |
-| `bridge.pid` | PID and port of the running bridge |
+| File                  | Purpose                              |
+| --------------------- | ------------------------------------ |
+| `bridge.pid`          | PID and port of the running bridge   |
+| `snapshot-generation` | Counter used to detect stale uid refs |
 
 ### Session Hooks
 

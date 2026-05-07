@@ -116,13 +116,15 @@ args:
   <path>  File path to save the screenshot (required)
 
 flags:
-  --uid @<uid>    Capture a specific element instead of the full viewport
+  --uid @<uid>    Capture a specific element instead of the full viewport.
+                  Refs are generation-tagged (e.g. @g3:12) - pass them back
+                  exactly as printed. A stale ref returns STALE_REF.
   --full-page     Capture the entire scrollable page
   --format <fmt>  Image format: png (default), jpeg, or webp
 
 examples:
   chrome-devtools-axi screenshot ./page.png
-  chrome-devtools-axi screenshot ./element.png --uid @3
+  chrome-devtools-axi screenshot ./element.png --uid @g1:3
   chrome-devtools-axi screenshot ./full.png --full-page --format jpeg`,
 
   snapshot: `usage: chrome-devtools-axi snapshot [--full]
@@ -154,15 +156,17 @@ examples:
 Fill a form field with text.
 
 args:
-  @<uid>  Element ref from snapshot (required)
+  @<uid>  Element ref from snapshot (required). Refs are generation-tagged
+          (e.g. @g3:12) - pass them back exactly as printed. A stale ref
+          returns a STALE_REF error so you know to re-snapshot.
   <text>  Text to fill (required)
 
 flags:
   --full  Show complete snapshot without truncation
 
 examples:
-  chrome-devtools-axi fill @3 "hello world"
-  chrome-devtools-axi fill @3 "search query" --full`,
+  chrome-devtools-axi fill @g1:3 "hello world"
+  chrome-devtools-axi fill @g2:3 "search query" --full`,
 
   type: `usage: chrome-devtools-axi type <text> [--full]
 Type text at the currently focused element.
@@ -350,39 +354,42 @@ examples:
 Hover over an element to trigger hover states.
 
 args:
-  @<uid>  Element ref from snapshot (required)
+  @<uid>  Element ref from snapshot (required). Refs are generation-tagged
+          (e.g. @g3:12) - pass them back exactly as printed. A stale ref
+          returns a STALE_REF error so you know to re-snapshot.
 
 flags:
   --full  Show complete snapshot without truncation
 
 examples:
-  chrome-devtools-axi hover @5`,
+  chrome-devtools-axi hover @g1:5`,
 
   drag: `usage: chrome-devtools-axi drag @<from> @<to> [--full]
 Drag an element onto another element.
 
 args:
-  @<from>  Element to drag (required)
-  @<to>    Element to drop onto (required)
+  @<from>  Element to drag (required). Use refs from the latest snapshot.
+  @<to>    Element to drop onto (required). Stale refs return STALE_REF.
 
 flags:
   --full  Show complete snapshot without truncation
 
 examples:
-  chrome-devtools-axi drag @3 @7`,
+  chrome-devtools-axi drag @g1:3 @g1:7`,
 
   fillform: `usage: chrome-devtools-axi fillform @<uid>=<value>... [--full]
 Fill multiple form fields at once.
 
 args:
-  @<uid>=<value>  One or more field entries (required)
+  @<uid>=<value>  One or more field entries from the latest snapshot (required).
+                  Stale refs return STALE_REF.
 
 flags:
   --full  Show complete snapshot without truncation
 
 examples:
-  chrome-devtools-axi fillform @1="hello" @2="world"
-  chrome-devtools-axi fillform @3="user@email.com" @4="password123"`,
+  chrome-devtools-axi fillform @g1:1="hello" @g1:2="world"
+  chrome-devtools-axi fillform @g2:3="user@email.com" @g2:4="password123"`,
 
   dialog: `usage: chrome-devtools-axi dialog <accept|dismiss> [text]
 Handle a browser dialog (alert, confirm, prompt).
@@ -400,14 +407,15 @@ examples:
 Upload a file through a file input element.
 
 args:
-  @<uid>  File input element ref from snapshot (required)
+  @<uid>  File input element ref from snapshot (required). Refs are
+          generation-tagged; stale refs return STALE_REF.
   <path>  Local file path to upload (required)
 
 flags:
   --full  Show complete snapshot without truncation
 
 examples:
-  chrome-devtools-axi upload @5 ./photo.jpg`,
+  chrome-devtools-axi upload @g1:5 ./photo.jpg`,
 
   // Emulation
   emulate: `usage: chrome-devtools-axi emulate [flags]
@@ -1438,7 +1446,7 @@ async function handleFillForm(args: string[], full: boolean): Promise<string> {
   const { entries } = parseFillFormArgs(args);
   if (entries.length === 0) {
     throw new CdpError("No valid field entries", "VALIDATION_ERROR", [
-      'Run `chrome-devtools-axi fillform @1="hello" @2="world"` to fill multiple fields',
+      'Run `chrome-devtools-axi fillform @g1:1="hello" @g1:2="world"` to fill multiple fields',
     ]);
   }
   const validated = await Promise.all(
