@@ -178,6 +178,10 @@ session is active or the no-session status/help block when one is not.
 | `--response-file <path>`    | Save response body (network-get)            |
 | `--request-file <path>`     | Save request body (network-get)             |
 
+`console --type` accepts `log`, `debug`, `info`, `error`, `warn`, `dir`, `dirxml`, `table`, `trace`, `clear`, `startGroup`, `startGroupCollapsed`, `endGroup`, `assert`, `profile`, `profileEnd`, `count`, `timeEnd`, `verbose`, `issue`, and `all`.
+`network --type` accepts `document`, `stylesheet`, `image`, `media`, `font`, `script`, `texttrack`, `xhr`, `fetch`, `prefetch`, `eventsource`, `websocket`, `manifest`, `signedexchange`, `ping`, `cspviolationreport`, `preflight`, `fedcm`, `other`, and `all`.
+For both commands, `all` or an omitted `--type` returns every item.
+
 ## Configuration
 
 The bridge server port defaults to `9224`. Override it with an environment variable:
