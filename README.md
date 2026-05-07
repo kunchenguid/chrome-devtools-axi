@@ -26,15 +26,17 @@ snapshot:
 RootWebArea "Example Domain"
   heading "Example Domain"
   paragraph "This domain is for use in illustrative examples..."
-  uid=1 link "More information..."
+  uid=g1:1 link "More information..."
 help[1]:
-  Run `chrome-devtools-axi click @1` to click the "More information..." link
+  Run `chrome-devtools-axi click @g1:1` to click the "More information..." link
 
-$ chrome-devtools-axi click @1
+$ chrome-devtools-axi click @g1:1
 page: {title: "IANA — IANA-Managed Reserved Domains", refs: 12}
 snapshot:
 ...
 ```
+
+Refs in snapshot output carry a `g<N>:` generation prefix that bumps every time a new accessibility tree is captured. Pass refs back exactly as printed - if the page re-rendered between snapshot and action, the action fails loudly with `STALE_REF` instead of silently no-op'ing, so the agent re-snapshots and retries.
 
 ## Install
 

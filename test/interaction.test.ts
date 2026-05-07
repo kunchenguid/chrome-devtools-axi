@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { getCommandHelp, parseFillFormArgs } from "../src/cli.js";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { getCommandHelp, parseFillFormArgs, parseUid } from "../src/cli.js";
+import * as generation from "../src/generation.js";
 
 describe("getCommandHelp", () => {
   it("returns non-null for hover", () => {
@@ -65,5 +66,47 @@ describe("parseFillFormArgs", () => {
   it("handles empty args array", () => {
     const result = parseFillFormArgs([]);
     expect(result.entries).toEqual([]);
+  });
+});
+
+describe("parseUid (generation validation)", () => {
+  beforeEach(() => {
+    vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the bare uid for a fresh generation-tagged ref", () => {
+    expect(parseUid("@g7:237_15")).toBe("237_15");
+  });
+
+  it("returns the bare uid for an untagged legacy ref", () => {
+    expect(parseUid("@237_15")).toBe("237_15");
+  });
+
+  it("throws STALE_REF on an older-generation ref", () => {
+    let caught: unknown;
+    try {
+      parseUid("@g3:237_15");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const e = caught as Error & { code?: string };
+    expect(e.code).toBe("STALE_REF");
+    expect(e.message).toContain("generation 3");
+    expect(e.message).toContain("current is 7");
+    expect(e.message).toContain("@g3:237_15");
+  });
+
+  it("throws STALE_REF on a newer-generation ref (defensive)", () => {
+    expect(() => parseUid("@g9:237_15")).toThrow(/Stale ref/);
+  });
+
+  it("works without an @ prefix on the input", () => {
+    expect(parseUid("g7:abc")).toBe("abc");
+    expect(() => parseUid("g4:abc")).toThrow(/Stale ref/);
   });
 });

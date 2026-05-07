@@ -21,6 +21,69 @@ export function extractRefs(snapshot: string): RefInfo[] {
   return refs;
 }
 
+export interface ParsedUid {
+  /** The raw upstream uid (without @ prefix and without generation tag). */
+  uid: string;
+  /** The snapshot generation the ref was minted in, or null if untagged (legacy). */
+  generation: number | null;
+}
+
+/**
+ * Parse a uid argument that may carry an `@` prefix and/or a generation tag.
+ * Examples: `@g7:237_15` -> { uid: "237_15", generation: 7 }
+ *           `@237_15`    -> { uid: "237_15", generation: null }
+ *           `g3:abc`     -> { uid: "abc", generation: 3 }
+ */
+export function parseStampedUid(arg: string): ParsedUid {
+  const stripped = arg.startsWith("@") ? arg.slice(1) : arg;
+  const m = stripped.match(/^g(\d+):(.+)$/);
+  if (m) return { uid: m[2], generation: Number.parseInt(m[1], 10) };
+  return { uid: stripped, generation: null };
+}
+
+/**
+ * Rewrite every `uid=<id>` token in snapshot text to carry a generation tag,
+ * e.g. `uid=237_15` -> `uid=g7:237_15`. Already-stamped tokens are left alone
+ * so this is idempotent. Agents detect re-render churn by feeding tagged refs
+ * back to action commands - mismatched generations fail loudly instead of
+ * silently no-op'ing against a stale tree.
+ */
+export function stampSnapshotGeneration(
+  snapshot: string,
+  generation: number,
+): string {
+  return snapshot.replace(/\buid=(\S+)/g, (match, uid: string) => {
+    if (/^g\d+:/.test(uid)) return match;
+    return `uid=g${generation}:${uid}`;
+  });
+}
+
+export interface UidCheckResult {
+  /** The raw upstream uid (no @ prefix, no generation tag). */
+  uid: string;
+  /** True when the ref carries a generation tag that does not match current. */
+  stale: boolean;
+  /** The generation embedded in the ref, or null if the ref was untagged. */
+  refGeneration: number | null;
+}
+
+/**
+ * Pure validation: given a ref argument and the current snapshot generation,
+ * return the upstream uid plus whether the ref is stale. Untagged refs are
+ * accepted (legacy compatibility) and reported as not-stale.
+ */
+export function checkUidGeneration(
+  arg: string,
+  currentGeneration: number,
+): UidCheckResult {
+  const { uid, generation } = parseStampedUid(arg);
+  return {
+    uid,
+    stale: generation !== null && generation !== currentGeneration,
+    refGeneration: generation,
+  };
+}
+
 /** Extract page title from snapshot (RootWebArea or first heading). */
 export function extractTitle(snapshot: string): string {
   const rootMatch = snapshot.match(/RootWebArea\s+"([^"]+)"/);

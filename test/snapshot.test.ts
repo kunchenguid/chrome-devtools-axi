@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  checkUidGeneration,
   countRefs,
   extractRefs,
   extractTitle,
   isInputType,
+  parseStampedUid,
+  stampSnapshotGeneration,
   truncateSnapshot,
   truncateText,
 } from "../src/snapshot.js";
@@ -149,5 +152,77 @@ describe("truncateText", () => {
     expect(result.text).toBe(text);
     expect(result.truncated).toBe(false);
     expect(result.totalLength).toBe(120);
+  });
+});
+
+describe("parseStampedUid", () => {
+  it("strips leading @ and returns null generation for untagged refs", () => {
+    expect(parseStampedUid("@237_15")).toEqual({
+      uid: "237_15",
+      generation: null,
+    });
+  });
+
+  it("returns generation when ref carries g<N>: prefix", () => {
+    expect(parseStampedUid("@g7:237_15")).toEqual({
+      uid: "237_15",
+      generation: 7,
+    });
+  });
+
+  it("works without leading @", () => {
+    expect(parseStampedUid("g3:abc")).toEqual({ uid: "abc", generation: 3 });
+  });
+
+  it("treats malformed gN-only ref (no colon) as untagged", () => {
+    expect(parseStampedUid("@g7")).toEqual({ uid: "g7", generation: null });
+  });
+});
+
+describe("stampSnapshotGeneration", () => {
+  it("rewrites uid= tokens with the given generation", () => {
+    const snapshot = `RootWebArea "Page"
+  uid=1 button "OK"
+  uid=237_15 link "Home"`;
+    const stamped = stampSnapshotGeneration(snapshot, 7);
+    expect(stamped).toContain("uid=g7:1");
+    expect(stamped).toContain("uid=g7:237_15");
+    expect(stamped).not.toMatch(/\buid=1\b/);
+  });
+
+  it("is idempotent on already-stamped refs", () => {
+    const snapshot = `  uid=g3:5 button "OK"`;
+    const stamped = stampSnapshotGeneration(snapshot, 9);
+    // Existing g3: tag is preserved; not re-stamped.
+    expect(stamped).toContain("uid=g3:5");
+    expect(stamped).not.toContain("uid=g9:");
+  });
+
+  it("preserves the rest of the line when stamping", () => {
+    const snapshot = `  uid=42 textbox "Name"`;
+    const stamped = stampSnapshotGeneration(snapshot, 1);
+    expect(stamped).toBe(`  uid=g1:42 textbox "Name"`);
+  });
+});
+
+describe("checkUidGeneration", () => {
+  it("flags refs from older generations as stale", () => {
+    const result = checkUidGeneration("@g3:5", 7);
+    expect(result).toEqual({ uid: "5", stale: true, refGeneration: 3 });
+  });
+
+  it("flags refs from newer generations as stale (defensive)", () => {
+    const result = checkUidGeneration("@g9:5", 7);
+    expect(result.stale).toBe(true);
+  });
+
+  it("accepts refs that match current generation", () => {
+    const result = checkUidGeneration("@g7:abc", 7);
+    expect(result).toEqual({ uid: "abc", stale: false, refGeneration: 7 });
+  });
+
+  it("accepts untagged legacy refs as not stale", () => {
+    const result = checkUidGeneration("@5", 7);
+    expect(result).toEqual({ uid: "5", stale: false, refGeneration: null });
   });
 });

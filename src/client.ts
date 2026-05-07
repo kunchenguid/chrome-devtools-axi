@@ -36,6 +36,7 @@ export function resolveBridgeTimeoutMs(): number {
 export type ErrorCode =
   | "BRIDGE_NOT_READY"
   | "REF_NOT_FOUND"
+  | "STALE_REF"
   | "TIMEOUT"
   | "BROWSER_ERROR"
   | "VALIDATION_ERROR"
