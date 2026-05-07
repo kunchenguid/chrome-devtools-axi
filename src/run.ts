@@ -16,6 +16,68 @@ type CallTool = (
   args?: Record<string, unknown>,
 ) => Promise<string>;
 
+// --- JS expression wrapping ---
+
+/**
+ * If `s` is a no-arg IIFE of the form `(<fn-expr>)()`, return `<fn-expr>`.
+ * Returns `s` unchanged otherwise. Walks parens with depth-tracking and
+ * skips string literals so nested parens inside strings don't fool us.
+ *
+ * Conservative: only unwraps when the trailing call is `()` (empty args),
+ * which covers the common documented IIFE form.
+ */
+function unwrapNoArgIIFE(s: string): string {
+  if (s.length < 4 || s[0] !== "(" || !s.endsWith(")")) return s;
+  let depth = 0;
+  let inString: string | null = null;
+  let escape = false;
+  let closeIdx = -1;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (c === "\\") {
+        escape = true;
+        continue;
+      }
+      if (c === inString) inString = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      inString = c;
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) {
+        closeIdx = i;
+        break;
+      }
+    }
+  }
+  if (closeIdx < 0) return s;
+  const rest = s.slice(closeIdx + 1).trim();
+  if (rest !== "()") return s;
+  return s.slice(1, closeIdx).trim();
+}
+
+/** Wrap plain JS expressions for MCP evaluate_script, but pass functions through unchanged. */
+export function wrapJsExpression(js: string): string {
+  const trimmed = unwrapNoArgIIFE(js.trim());
+  if (
+    /^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(
+      trimmed,
+    )
+  ) {
+    return trimmed;
+  }
+  return `() => (${trimmed})`;
+}
+
 // --- Value parsing ---
 
 /** Extract the actual JS value from MCP evaluate_script response wrapper. */
@@ -129,7 +191,7 @@ export function createPageHelper(callTool: CallTool): PageHelper {
       const fn =
         typeof jsOrFn === "function"
           ? String(jsOrFn)
-          : `() => (${jsOrFn.trim()})`;
+          : wrapJsExpression(jsOrFn);
       return evalJs(fn);
     },
 

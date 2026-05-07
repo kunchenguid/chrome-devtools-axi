@@ -84,11 +84,11 @@ Execute `npx -y chrome-devtools-axi` to get browser automation tools.
 | `eval <js>`       | Evaluate a JavaScript expression or function |
 | `run`             | Execute a multi-step script from stdin       |
 
-`eval` wraps plain input as `() => (<expr>)` before sending it to DevTools. For multi-statement logic, pass an arrow function, `function`, or IIFE yourself.
+`eval` wraps plain input as `() => (<expr>)` before sending it to DevTools. For multi-statement logic, pass an arrow function or `function`. No-arg IIFE form `(...)()` is accepted too and unwrapped automatically.
 
 ```sh
 chrome-devtools-axi eval "document.title"
-chrome-devtools-axi eval "(() => { const rows = [...document.querySelectorAll('tr')]; return rows.map((row) => row.textContent) })()"
+chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr')]; return rows.map((row) => row.textContent) }"
 ```
 
 ### Interaction

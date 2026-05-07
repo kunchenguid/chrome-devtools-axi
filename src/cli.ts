@@ -11,7 +11,14 @@ import {
   stopBridge,
 } from "./client.js";
 import { bumpGeneration, getCurrentGeneration } from "./generation.js";
-import { parseEvalOutput, readStdin, runScript } from "./run.js";
+import {
+  parseEvalOutput,
+  readStdin,
+  runScript,
+  wrapJsExpression,
+} from "./run.js";
+
+export { wrapJsExpression };
 import {
   checkUidGeneration,
   countRefs,
@@ -230,8 +237,9 @@ examples:
 
   eval: `usage: chrome-devtools-axi eval <js>
 Evaluate a JavaScript expression in the page context and return the result.
-The input is wrapped as () => (<js>), so it must be a single expression.
-For multi-statement logic, pass an arrow function or IIFE.
+A bare expression is wrapped as () => (<js>); pass a function (arrow or
+function-keyword) for multi-statement logic. No-arg IIFE form (...)() is
+also accepted and unwrapped automatically.
 
 args:
   <js>  JavaScript expression (required)
@@ -239,7 +247,7 @@ args:
 examples:
   chrome-devtools-axi eval "document.title"
   chrome-devtools-axi eval "document.querySelectorAll('a').length"
-  chrome-devtools-axi eval "(() => { const rows = [...document.querySelectorAll('tr')]; return rows.map(r => r.textContent) })()"`,
+  chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr')]; return rows.map(r => r.textContent) }"`,
 
   run: `usage: chrome-devtools-axi run <<'EOF'
   ...script...
@@ -1253,19 +1261,6 @@ async function handleWait(args: string[]): Promise<string> {
   const suggestions = getSuggestions({ command: "wait" });
   if (suggestions.length > 0) blocks.push(renderHelp(suggestions));
   return renderOutput(blocks);
-}
-
-/** Wrap plain JS expressions for MCP evaluate_script, but pass functions through unchanged. */
-export function wrapJsExpression(js: string): string {
-  const trimmed = js.trim();
-  if (
-    /^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(
-      trimmed,
-    )
-  ) {
-    return trimmed;
-  }
-  return `() => (${trimmed})`;
 }
 
 /** Extract the actual value from MCP evaluate_script response. */

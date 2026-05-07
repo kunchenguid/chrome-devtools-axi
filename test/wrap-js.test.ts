@@ -29,4 +29,31 @@ describe("wrapJsExpression", () => {
       "() => (document.querySelectorAll('a').length)",
     );
   });
+
+  it("unwraps a simple arrow IIFE to the inner function", () => {
+    expect(wrapJsExpression("(() => 42)()")).toBe("() => 42");
+  });
+
+  it("unwraps a multi-statement arrow IIFE", () => {
+    expect(wrapJsExpression("(() => { const x = 5; return x + 1 })()")).toBe(
+      "() => { const x = 5; return x + 1 }",
+    );
+  });
+
+  it("unwraps an async arrow IIFE", () => {
+    expect(wrapJsExpression("(async () => 7)()")).toBe("async () => 7");
+  });
+
+  it("unwraps a function-keyword IIFE", () => {
+    expect(wrapJsExpression("(function() { return 1 })()")).toBe(
+      "function() { return 1 }",
+    );
+  });
+
+  it("wraps an IIFE with non-empty args (conservative: only () unwraps)", () => {
+    // Not a no-arg IIFE — wrap so MCP can call it as a function and get the value.
+    expect(wrapJsExpression("(x => x + 1)(5)")).toBe(
+      "() => ((x => x + 1)(5))",
+    );
+  });
 });
