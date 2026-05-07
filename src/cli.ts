@@ -418,13 +418,18 @@ examples:
 List console messages for the current page.
 
 flags:
-  --type <type>  Filter by message type (error, warn, log, etc.)
+  --type <type>  Filter by message type. Valid values:
+                   log, debug, info, error, warn, dir, dirxml, table, trace,
+                   clear, startGroup, startGroupCollapsed, endGroup, assert,
+                   profile, profileEnd, count, timeEnd, verbose, issue, all
+                 ("all" or omitted returns every message.)
   --limit <n>    Maximum messages to return
   --page <n>     Page number (0-based)
 
 examples:
   chrome-devtools-axi console
-  chrome-devtools-axi console --type error --limit 50`,
+  chrome-devtools-axi console --type error --limit 50
+  chrome-devtools-axi console --type all`,
 
   "console-get": `usage: chrome-devtools-axi console-get <id>
 Get a specific console message by ID.
@@ -439,13 +444,19 @@ examples:
 List network requests for the current page.
 
 flags:
-  --type <type>  Filter by resource type (fetch, xhr, document, etc.)
+  --type <type>  Filter by resource type. Valid values:
+                   document, stylesheet, image, media, font, script, texttrack,
+                   xhr, fetch, prefetch, eventsource, websocket, manifest,
+                   signedexchange, ping, cspviolationreport, preflight, fedcm,
+                   other, all
+                 ("all" or omitted returns every request.)
   --limit <n>    Maximum requests to return
   --page <n>     Page number (0-based)
 
 examples:
   chrome-devtools-axi network
-  chrome-devtools-axi network --type fetch --limit 50`,
+  chrome-devtools-axi network --type fetch --limit 50
+  chrome-devtools-axi network --type all`,
 
   "network-get": `usage: chrome-devtools-axi network-get [id] [--response-file <path>] [--request-file <path>]
 Get a specific network request. If id is omitted, gets the selected request.
@@ -664,7 +675,8 @@ export function parseConsoleArgs(args: string[]): {
   const result: { types?: string[]; pageSize?: number; pageIdx?: number } = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--type" && i + 1 < args.length) {
-      result.types = [args[++i]];
+      const value = args[++i];
+      if (value.toLowerCase() !== "all") result.types = [value];
     } else if (args[i] === "--limit" && i + 1 < args.length) {
       const pageSize = parseOptionalInteger(args[++i]);
       if (pageSize !== undefined) result.pageSize = pageSize;
@@ -688,7 +700,8 @@ export function parseNetworkArgs(args: string[]): {
   } = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--type" && i + 1 < args.length) {
-      result.resourceTypes = [args[++i]];
+      const value = args[++i];
+      if (value.toLowerCase() !== "all") result.resourceTypes = [value];
     } else if (args[i] === "--limit" && i + 1 < args.length) {
       const pageSize = parseOptionalInteger(args[++i]);
       if (pageSize !== undefined) result.pageSize = pageSize;

@@ -65,6 +65,21 @@ describe("parseConsoleArgs", () => {
     const result = parseConsoleArgs(["--limit", "many", "--page", "later"]);
     expect(result).toEqual({});
   });
+
+  it("treats --type all as no filter", () => {
+    const result = parseConsoleArgs(["--type", "all"]);
+    expect(result).toEqual({});
+  });
+
+  it("treats --type ALL as no filter (case-insensitive)", () => {
+    const result = parseConsoleArgs(["--type", "ALL"]);
+    expect(result).toEqual({});
+  });
+
+  it("strips --type all but keeps other flags", () => {
+    const result = parseConsoleArgs(["--type", "all", "--limit", "10"]);
+    expect(result).toEqual({ pageSize: 10 });
+  });
 });
 
 describe("parseNetworkArgs", () => {
@@ -87,6 +102,84 @@ describe("parseNetworkArgs", () => {
     const result = parseNetworkArgs(["--limit", "many", "--page", "later"]);
     expect(result).toEqual({});
   });
+
+  it("treats --type all as no filter", () => {
+    const result = parseNetworkArgs(["--type", "all"]);
+    expect(result).toEqual({});
+  });
+
+  it("treats --type ALL as no filter (case-insensitive)", () => {
+    const result = parseNetworkArgs(["--type", "ALL"]);
+    expect(result).toEqual({});
+  });
+
+  it("strips --type all but keeps other flags", () => {
+    const result = parseNetworkArgs(["--type", "all", "--limit", "10"]);
+    expect(result).toEqual({ pageSize: 10 });
+  });
+});
+
+describe("console help enumerates valid --type values", () => {
+  const help = getCommandHelp("console") ?? "";
+  const expectedTypes = [
+    "log",
+    "debug",
+    "info",
+    "error",
+    "warn",
+    "dir",
+    "dirxml",
+    "table",
+    "trace",
+    "clear",
+    "startGroup",
+    "startGroupCollapsed",
+    "endGroup",
+    "assert",
+    "profile",
+    "profileEnd",
+    "count",
+    "timeEnd",
+    "verbose",
+    "issue",
+    "all",
+  ];
+  for (const type of expectedTypes) {
+    it(`mentions ${type}`, () => {
+      expect(help).toContain(type);
+    });
+  }
+});
+
+describe("network help enumerates valid --type values", () => {
+  const help = getCommandHelp("network") ?? "";
+  const expectedTypes = [
+    "document",
+    "stylesheet",
+    "image",
+    "media",
+    "font",
+    "script",
+    "texttrack",
+    "xhr",
+    "fetch",
+    "prefetch",
+    "eventsource",
+    "websocket",
+    "manifest",
+    "signedexchange",
+    "ping",
+    "cspviolationreport",
+    "preflight",
+    "fedcm",
+    "other",
+    "all",
+  ];
+  for (const type of expectedTypes) {
+    it(`mentions ${type}`, () => {
+      expect(help).toContain(type);
+    });
+  }
 });
 
 describe("parseNetworkGetArgs", () => {
