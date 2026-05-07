@@ -56,4 +56,14 @@ describe("wrapJsExpression", () => {
       "() => ((x => x + 1)(5))",
     );
   });
+
+  it("wraps a parenthesized property call", () => {
+    expect(wrapJsExpression("(window.getValue)()")).toBe(
+      "() => ((window.getValue)())",
+    );
+  });
+
+  it("wraps a parenthesized method call", () => {
+    expect(wrapJsExpression("(obj.method)()")).toBe("() => ((obj.method)())");
+  });
 });

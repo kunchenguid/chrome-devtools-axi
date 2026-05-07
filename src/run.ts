@@ -62,7 +62,15 @@ function unwrapNoArgIIFE(s: string): string {
   if (closeIdx < 0) return s;
   const rest = s.slice(closeIdx + 1).trim();
   if (rest !== "()") return s;
-  return s.slice(1, closeIdx).trim();
+  const inner = s.slice(1, closeIdx).trim();
+  if (
+    /^(async\s*)?(\(.*?\)\s*=>|[a-zA-Z_$][a-zA-Z0-9_$]*\s*=>|function[\s*(])/.test(
+      inner,
+    )
+  ) {
+    return inner;
+  }
+  return s;
 }
 
 /** Wrap plain JS expressions for MCP evaluate_script, but pass functions through unchanged. */
