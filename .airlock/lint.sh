@@ -44,15 +44,15 @@ errors=0
 
 # Step 0: Ensure dependencies are installed
 if [ ! -d "node_modules" ]; then
-  echo "==> npm install (dependencies missing)"
-  npm install --ignore-scripts 2>&1
+  echo "==> pnpm install (dependencies missing)"
+  pnpm install --frozen-lockfile --ignore-scripts 2>&1
   echo "    Dependencies installed."
   echo ""
 fi
 
 # Step 1: Auto-fix formatting with Prettier
 echo "==> Prettier --write (auto-fix)"
-if npx prettier --write "${ts_files[@]}" 2>&1; then
+if pnpm exec prettier --write "${ts_files[@]}" 2>&1; then
   echo "    Prettier auto-fix done."
 else
   echo "    Prettier auto-fix encountered issues."
@@ -61,7 +61,7 @@ echo ""
 
 # Step 2: Verify formatting is clean
 echo "==> Prettier --check (verify)"
-if npx prettier --check "${ts_files[@]}" 2>&1; then
+if pnpm exec prettier --check "${ts_files[@]}" 2>&1; then
   echo "    Prettier check passed."
 else
   echo "    Prettier check FAILED — formatting issues remain."
@@ -71,7 +71,7 @@ echo ""
 
 # Step 3: TypeScript type-check (whole project, since types are interconnected)
 echo "==> tsc --noEmit (type-check)"
-if npx tsc --noEmit 2>&1; then
+if pnpm exec tsc --noEmit 2>&1; then
   echo "    TypeScript check passed."
 else
   echo "    TypeScript check FAILED."
