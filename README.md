@@ -223,13 +223,13 @@ On supported agents, the packaged CLI also installs a `SessionStart` hook in `~/
 
 Set `CHROME_DEVTOOLS_AXI_DISABLE_HOOKS=1` to skip that auto-install behavior.
 
-Development entrypoints such as `npm run dev` and `bin/chrome-devtools-axi.ts` do not modify those hook files.
+Development entrypoints such as `pnpm run dev` and `bin/chrome-devtools-axi.ts` do not modify those hook files.
 
 ## Development
 
 ```sh
-npm run build      # Compile TypeScript to dist/
-npm run dev        # Run CLI directly with tsx
-npm test           # Run tests with vitest
-npm run test:watch # Run tests in watch mode
+pnpm run build      # Compile TypeScript to dist/
+pnpm run dev        # Run CLI directly with tsx
+pnpm test           # Run tests with vitest
+pnpm run test:watch # Run tests in watch mode
 ```
