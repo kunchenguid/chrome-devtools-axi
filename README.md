@@ -219,7 +219,7 @@ State is stored in `~/.chrome-devtools-axi/`:
 
 ### Session Hooks
 
-On supported agents, the packaged CLI also installs a `SessionStart` hook in `~/.claude/settings.json` and `~/.codex/hooks.json`, and enables `codex_hooks` in `~/.codex/config.toml`.
+On supported agents, the packaged CLI also installs a `SessionStart` hook in `~/.claude/settings.json` and `~/.codex/hooks.json`, and enables `hooks` in `~/.codex/config.toml`.
 
 Set `CHROME_DEVTOOLS_AXI_DISABLE_HOOKS=1` to skip that auto-install behavior.
 

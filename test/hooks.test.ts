@@ -207,30 +207,30 @@ describe("computeCodexConfigUpdate", () => {
   it("creates a features section when config is empty", () => {
     const [updated, changed] = computeCodexConfigUpdate("");
     expect(changed).toBe(true);
-    expect(updated).toBe("[features]\ncodex_hooks = true\n");
+    expect(updated).toBe("[features]\nhooks = true\n");
   });
 
-  it("adds codex_hooks when features section exists", () => {
+  it("adds hooks when features section exists", () => {
     const [updated, changed] = computeCodexConfigUpdate(
       "[features]\nother = true\n",
     );
     expect(changed).toBe(true);
     expect(updated).toContain("[features]");
     expect(updated).toContain("other = true");
-    expect(updated).toContain("codex_hooks = true");
+    expect(updated).toContain("hooks = true");
   });
 
-  it("repairs codex_hooks when disabled", () => {
+  it("repairs hooks when disabled", () => {
     const [updated, changed] = computeCodexConfigUpdate(
-      "[features]\ncodex_hooks = false\n",
+      "[features]\nhooks = false\n",
     );
     expect(changed).toBe(true);
-    expect(updated).toContain("codex_hooks = true");
-    expect(updated).not.toContain("codex_hooks = false");
+    expect(updated).toContain("hooks = true");
+    expect(updated).not.toContain("hooks = false");
   });
 
-  it("is a no-op when codex_hooks is already enabled", () => {
-    const original = "[features]\ncodex_hooks = true\n";
+  it("is a no-op when hooks is already enabled", () => {
+    const original = "[features]\nhooks = true\n";
     const [updated, changed] = computeCodexConfigUpdate(original);
     expect(changed).toBe(false);
     expect(updated).toBe(original);
@@ -244,7 +244,7 @@ describe("computeCodexConfigUpdate", () => {
     expect(updated).toContain("[model]");
     expect(updated).toContain('name = "gpt-5"');
     expect(updated).toContain("[features]");
-    expect(updated).toContain("codex_hooks = true");
+    expect(updated).toContain("hooks = true");
   });
 
   it("inserts before a following array-of-tables header", () => {
@@ -252,7 +252,7 @@ describe("computeCodexConfigUpdate", () => {
     const [updated, changed] = computeCodexConfigUpdate(input);
     expect(changed).toBe(true);
     expect(updated).toBe(
-      '[features]\nother = true\ncodex_hooks = true\n[[profiles]]\nname = "default"\n',
+      '[features]\nother = true\nhooks = true\n[[profiles]]\nname = "default"\n',
     );
   });
 });
