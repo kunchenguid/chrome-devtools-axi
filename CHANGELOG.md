@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.22](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.21...chrome-devtools-axi-v0.1.22) (2026-05-13)
+
+
+### Bug Fixes
+
+* enable Codex hooks with hooks feature flag ([#59](https://github.com/kunchenguid/chrome-devtools-axi/issues/59)) ([e67a5ec](https://github.com/kunchenguid/chrome-devtools-axi/commit/e67a5ec723eff9756e391641754472a0e8896e37))
+
 ## [0.1.21](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.20...chrome-devtools-axi-v0.1.21) (2026-05-07)
 
 
