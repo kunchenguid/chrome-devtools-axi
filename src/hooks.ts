@@ -93,9 +93,16 @@ export function installHooks(): void {
 }
 
 export function installHooksOrThrow(): void {
+  const errors: string[] = [];
   installSessionStartHooks({
     marker: HOOK_MARKER,
     timeoutSeconds: 10,
     shouldInstall: shouldInstallHooksForExecPath,
+    onError: (message) => {
+      errors.push(message);
+    },
   });
+  if (errors.length > 0) {
+    throw new Error(errors.join("\n"));
+  }
 }

@@ -1,10 +1,38 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+const { installSessionStartHooks } = vi.hoisted(() => ({
+  installSessionStartHooks: vi.fn(),
+}));
+
+vi.mock("axi-sdk-js", async () => {
+  const actual = await vi.importActual<typeof import("axi-sdk-js")>(
+    "axi-sdk-js",
+  );
+  return {
+    ...actual,
+    installSessionStartHooks,
+  };
+});
+
 import {
   computeCodexConfigUpdate,
   computeHookUpdate,
   getHookTargets,
+  installHooksOrThrow,
   shouldInstallHooksForExecPath,
 } from "../src/hooks.js";
+
+describe("installHooksOrThrow", () => {
+  it("throws when the hook installer reports an internal install error", () => {
+    installSessionStartHooks.mockImplementationOnce((options) => {
+      options.onError?.("/home/user/.claude/settings.json: permission denied");
+    });
+
+    expect(() => installHooksOrThrow()).toThrow(
+      "/home/user/.claude/settings.json: permission denied",
+    );
+  });
+});
 
 describe("computeHookUpdate", () => {
   it("installs hook when settings have no hooks", () => {
