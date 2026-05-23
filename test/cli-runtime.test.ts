@@ -17,9 +17,8 @@ vi.mock("axi-sdk-js", async () => {
 });
 
 vi.mock("../src/hooks.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/hooks.js")>(
-    "../src/hooks.js",
-  );
+  const actual =
+    await vi.importActual<typeof import("../src/hooks.js")>("../src/hooks.js");
   return {
     ...actual,
     installHooks,
@@ -109,9 +108,7 @@ describe("main CLI runtime", () => {
       }
     }
 
-    expect(vi.mocked(runAxiCli).mock.calls[0]?.[0]).not.toHaveProperty(
-      "hooks",
-    );
+    expect(vi.mocked(runAxiCli).mock.calls[0]?.[0]).not.toHaveProperty("hooks");
   });
 
   it("installs session hooks from the explicit setup command", async () => {

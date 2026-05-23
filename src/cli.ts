@@ -1050,8 +1050,7 @@ async function markPageSnapshotGeneration(generation: number): Promise<void> {
   return state.generation;
 }`,
     });
-  } catch {
-  }
+  } catch {}
 }
 
 async function getPageRefGeneration(caller: ToolCaller): Promise<number> {
@@ -1081,7 +1080,9 @@ export async function parseUidFresh(
 ): Promise<string> {
   const { generation } = parseStampedUid(arg);
   const current =
-    generation === null ? getCurrentGeneration() : await getPageRefGeneration(caller);
+    generation === null
+      ? getCurrentGeneration()
+      : await getPageRefGeneration(caller);
   const check = checkUidGeneration(arg, current);
   if (check.stale) {
     throwStaleRef(arg, check.refGeneration, current);
@@ -1137,12 +1138,16 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
     }
     await callTool("new_page", { url });
   }
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "open", url, full);
 }
 
 async function handleSnapshot(full: boolean): Promise<string> {
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "snapshot", undefined, full);
 }
 
@@ -1171,7 +1176,9 @@ async function handleClick(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  const snapshot = await callWithSnapshot("click", { uid: await parseUidFresh(uid) });
+  const snapshot = await callWithSnapshot("click", {
+    uid: await parseUidFresh(uid),
+  });
   return formatPageOutput(snapshot, "click", undefined, full);
 }
 
@@ -1217,7 +1224,9 @@ async function handleType(args: string[], full: boolean): Promise<string> {
   }
 
   await callTool("type_text", { text });
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "type", undefined, full);
 }
 
@@ -1231,13 +1240,17 @@ async function handleScroll(args: string[], full: boolean): Promise<string> {
   }
 
   await callTool("evaluate_script", { function: fn });
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "scroll", undefined, full);
 }
 
 async function handleBack(full: boolean): Promise<string> {
   await callTool("navigate_page", { type: "back" });
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "back", undefined, full);
 }
 
@@ -1356,7 +1369,9 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
   const toolArgs: Record<string, unknown> = { url };
   if (background) toolArgs.background = true;
   await callTool("new_page", toolArgs);
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "newpage", url, full);
 }
 
@@ -1377,7 +1392,9 @@ async function handleSelectPage(
     ]);
   }
   await callTool("select_page", { pageId });
-  const snapshot = await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  const snapshot = await stampFresh(
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
   return formatPageOutput(snapshot, "selectpage", undefined, full);
 }
 
@@ -1440,7 +1457,9 @@ async function handleHover(args: string[], full: boolean): Promise<string> {
       "Run `chrome-devtools-axi hover @<uid>` — get uid from snapshot",
     ]);
   }
-  const snapshot = await callWithSnapshot("hover", { uid: await parseUidFresh(uid) });
+  const snapshot = await callWithSnapshot("hover", {
+    uid: await parseUidFresh(uid),
+  });
   return formatPageOutput(snapshot, "hover", undefined, full);
 }
 
@@ -1467,7 +1486,10 @@ async function handleFillForm(args: string[], full: boolean): Promise<string> {
     ]);
   }
   const validated = await Promise.all(
-    entries.map(async (e) => ({ uid: await parseUidFresh(e.uid), value: e.value })),
+    entries.map(async (e) => ({
+      uid: await parseUidFresh(e.uid),
+      value: e.value,
+    })),
   );
   const snapshot = await callWithSnapshot("fill_form", { elements: validated });
   return formatPageOutput(snapshot, "fillform", undefined, full);
