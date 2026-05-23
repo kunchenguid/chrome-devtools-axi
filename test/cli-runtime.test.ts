@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { runAxiCli } = vi.hoisted(() => ({
+const { installHooks, runAxiCli } = vi.hoisted(() => ({
+  installHooks: vi.fn(),
   runAxiCli: vi.fn(),
 }));
 
@@ -11,6 +12,16 @@ vi.mock("axi-sdk-js", async () => {
   return {
     ...actual,
     runAxiCli,
+  };
+});
+
+vi.mock("../src/hooks.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/hooks.js")>(
+    "../src/hooks.js",
+  );
+  return {
+    ...actual,
+    installHooks,
   };
 });
 
@@ -28,6 +39,11 @@ describe("main CLI runtime", () => {
   it("documents top-level version flags in help output", () => {
     expect(TOP_HELP).toContain("--help");
     expect(TOP_HELP).toContain("-v/-V/--version");
+  });
+
+  it("documents explicit hook setup in help output", () => {
+    expect(TOP_HELP).toContain("setup hooks");
+    expect(TOP_HELP).not.toContain("CHROME_DEVTOOLS_AXI_DISABLE_HOOKS");
   });
 
   it("passes bare top-level help argv through to axi-sdk-js", async () => {
@@ -75,5 +91,36 @@ describe("main CLI runtime", () => {
       }),
     );
     expect(vi.mocked(runAxiCli).mock.calls[0]?.[0]).not.toHaveProperty("argv");
+  });
+
+  it("does not pass the removed hooks option to axi-sdk-js", async () => {
+    const originalDisableHooks = process.env.CHROME_DEVTOOLS_AXI_DISABLE_HOOKS;
+    process.env.CHROME_DEVTOOLS_AXI_DISABLE_HOOKS = "1";
+
+    try {
+      await main();
+    } finally {
+      if (originalDisableHooks === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_DISABLE_HOOKS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_DISABLE_HOOKS = originalDisableHooks;
+      }
+    }
+
+    expect(vi.mocked(runAxiCli).mock.calls[0]?.[0]).not.toHaveProperty(
+      "hooks",
+    );
+  });
+
+  it("installs session hooks from the explicit setup command", async () => {
+    await main();
+
+    const options = vi.mocked(runAxiCli).mock.calls[0]?.[0];
+    const output = await options.commands.setup(["hooks"]);
+
+    expect(installHooks).toHaveBeenCalledTimes(1);
+    expect(output).toContain("hooks:");
+    expect(output).toContain("status: installed");
+    expect(output).toContain("Restart your agent session");
   });
 });

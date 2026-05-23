@@ -14,8 +14,8 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0
       axi-sdk-js:
-        specifier: ^0.1.6
-        version: 0.1.6
+        specifier: ^0.1.7
+        version: 0.1.7
     devDependencies:
       "@types/node":
         specifier: ^22.0.0
@@ -620,10 +620,10 @@ packages:
       }
     engines: { node: ">=12" }
 
-  axi-sdk-js@0.1.6:
+  axi-sdk-js@0.1.7:
     resolution:
       {
-        integrity: sha512-Nc/mNasFUVqBieSOLGt2A5u4pJEOZPpueq+ignqoY+vcg8j4VuAvhWTn3cJ7hhTkGVqLg4yjTdjMi4tXyOCsCA==,
+        integrity: sha512-kzIeuQHZx3FFpzJknq+sdbi3XBGdyPGMdOHM2Zepa4MF5MpckhPeWPd5x+RX6gBKEWZdaW73YrOPY+HAGyLekw==,
       }
     engines: { node: ">=20" }
 
@@ -1822,7 +1822,7 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  axi-sdk-js@0.1.6:
+  axi-sdk-js@0.1.7:
     dependencies:
       "@toon-format/toon": 2.1.0
 

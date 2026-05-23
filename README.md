@@ -219,11 +219,10 @@ State is stored in `~/.chrome-devtools-axi/`:
 
 ### Session Hooks
 
-On supported agents, the packaged CLI also installs a `SessionStart` hook in `~/.claude/settings.json` and `~/.codex/hooks.json`, and enables `hooks` in `~/.codex/config.toml`.
+Run `chrome-devtools-axi setup hooks` once to install or repair optional agent `SessionStart` hooks for ambient browser context.
+The setup command writes Claude Code hooks, Codex hooks and config, and the OpenCode ambient context plugin.
 
-Set `CHROME_DEVTOOLS_AXI_DISABLE_HOOKS=1` to skip that auto-install behavior.
-
-Development entrypoints such as `pnpm run dev` and `bin/chrome-devtools-axi.ts` do not modify those hook files.
+Development entrypoints such as `pnpm run dev` and `bin/chrome-devtools-axi.ts` are still guarded from accidental hook installation.
 
 ## Development
 
