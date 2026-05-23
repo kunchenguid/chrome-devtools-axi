@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.22...chrome-devtools-axi-v0.1.23) (2026-05-23)
+
+
+### Features
+
+* **cli:** add explicit hook setup command ([#61](https://github.com/kunchenguid/chrome-devtools-axi/issues/61)) ([06049a2](https://github.com/kunchenguid/chrome-devtools-axi/commit/06049a26016a4ac726faa3c9161bec55a685a69b))
+
 ## [0.1.22](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.21...chrome-devtools-axi-v0.1.22) (2026-05-13)
 
 
