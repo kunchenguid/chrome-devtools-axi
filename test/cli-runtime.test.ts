@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { installHooks, runAxiCli } = vi.hoisted(() => ({
+const { installHooks, installHooksOrThrow, runAxiCli } = vi.hoisted(() => ({
   installHooks: vi.fn(),
+  installHooksOrThrow: vi.fn(),
   runAxiCli: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("../src/hooks.js", async () => {
   return {
     ...actual,
     installHooks,
+    installHooksOrThrow,
   };
 });
 
@@ -118,9 +120,23 @@ describe("main CLI runtime", () => {
     const options = vi.mocked(runAxiCli).mock.calls[0]?.[0];
     const output = await options.commands.setup(["hooks"]);
 
-    expect(installHooks).toHaveBeenCalledTimes(1);
+    expect(installHooksOrThrow).toHaveBeenCalledTimes(1);
     expect(output).toContain("hooks:");
     expect(output).toContain("status: installed");
     expect(output).toContain("Restart your agent session");
+  });
+
+  it("surfaces explicit hook setup failures", async () => {
+    installHooksOrThrow.mockImplementationOnce(() => {
+      throw new Error("permission denied");
+    });
+
+    await main();
+
+    const options = vi.mocked(runAxiCli).mock.calls[0]?.[0];
+
+    await expect(options.commands.setup(["hooks"])).rejects.toThrow(
+      "permission denied",
+    );
   });
 });
