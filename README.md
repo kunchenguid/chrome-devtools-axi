@@ -142,10 +142,11 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 
 ### Bridge
 
-| Command | Description             |
-| ------- | ----------------------- |
-| `start` | Start the bridge server |
-| `stop`  | Stop the bridge server  |
+| Command       | Description                         |
+| ------------- | ----------------------------------- |
+| `start`       | Start the bridge server             |
+| `stop`        | Stop the bridge server              |
+| `setup hooks` | Install or repair agent hooks       |
 
 Running with no command shows the CLI home view. It prepends `bin` and
 `description` metadata, then includes the current snapshot when a browser
