@@ -32,11 +32,28 @@ export function extractCommandsBlock(): string {
  *
  * @returns full SKILL.md contents including YAML frontmatter
  */
+// Extended frontmatter consumed by harnesses that support it (e.g. Hermes
+// Agent reads author and metadata.hermes for first-class skill listings);
+// harnesses that don't, like Claude Code, ignore unknown fields.
+export const SKILL_AUTHOR = "Kun Chen (kunchenguid)";
+export const SKILL_HERMES_TAGS = [
+  "browser",
+  "chrome",
+  "automation",
+  "devtools",
+] as const;
+export const SKILL_HERMES_CATEGORY = "automation";
+
 export function createSkillMarkdown(): string {
   return `---
 name: chrome-devtools-axi
 description: ${yamlDoubleQuote(SKILL_DESCRIPTION)}
 user-invocable: false
+author: ${SKILL_AUTHOR}
+metadata:
+  hermes:
+    tags: [${SKILL_HERMES_TAGS.join(", ")}]
+    category: ${SKILL_HERMES_CATEGORY}
 ---
 
 # chrome-devtools-axi

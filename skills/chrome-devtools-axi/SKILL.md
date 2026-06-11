@@ -2,6 +2,11 @@
 name: chrome-devtools-axi
 description: "Control a Chrome browser session through the chrome-devtools-axi CLI - navigate, snapshot, click, fill forms, run JavaScript, inspect console and network, take screenshots, audit performance. Use whenever a task needs a real browser: opening or testing a web page, clicking through a flow, extracting page content, or debugging a website."
 user-invocable: false
+author: Kun Chen (kunchenguid)
+metadata:
+  hermes:
+    tags: [browser, chrome, automation, devtools]
+    category: automation
 ---
 
 # chrome-devtools-axi

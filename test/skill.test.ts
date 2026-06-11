@@ -1,38 +1,21 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   createSkillMarkdown,
   extractCommandsBlock,
+  SKILL_AUTHOR,
   SKILL_DESCRIPTION,
+  SKILL_HERMES_CATEGORY,
+  SKILL_HERMES_TAGS,
 } from "../src/skill.js";
 
-function parseFrontmatter(markdown: string): Record<string, string | boolean> {
+function parseFrontmatter(markdown: string): Record<string, unknown> {
   const match = markdown.match(/^---\n([\s\S]*?)\n---\n/);
   if (!match) {
     throw new Error("Missing frontmatter");
   }
-
-  const parsed: Record<string, string | boolean> = {};
-  for (const line of match[1].split("\n")) {
-    const field = line.match(/^([a-z-]+): (.*)$/);
-    if (!field) {
-      throw new Error(`Invalid frontmatter line: ${line}`);
-    }
-
-    const [, key, rawValue] = field;
-    if (rawValue.startsWith('"')) {
-      parsed[key] = JSON.parse(rawValue);
-    } else if (rawValue === "true" || rawValue === "false") {
-      parsed[key] = rawValue === "true";
-    } else {
-      if (/:\s/.test(rawValue)) {
-        throw new Error(`Invalid plain scalar for ${key}`);
-      }
-      parsed[key] = rawValue;
-    }
-  }
-
-  return parsed;
+  return parseYaml(match[1]) as Record<string, unknown>;
 }
 
 describe("createSkillMarkdown", () => {
@@ -51,6 +34,13 @@ describe("createSkillMarkdown", () => {
       name: "chrome-devtools-axi",
       description: SKILL_DESCRIPTION,
       "user-invocable": false,
+      author: SKILL_AUTHOR,
+      metadata: {
+        hermes: {
+          tags: [...SKILL_HERMES_TAGS],
+          category: SKILL_HERMES_CATEGORY,
+        },
+      },
     });
     expect(markdown).not.toContain("$ARGUMENTS");
     expect(markdown).not.toContain("argument-hint:");
