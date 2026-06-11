@@ -23,6 +23,7 @@
   },
   "files": [
     "dist",
+    "skills/chrome-devtools-axi",
     "LICENSE",
     "README.md"
   ],
@@ -31,6 +32,7 @@
   },
   "scripts": {
     "build": "tsc && chmod +x dist/bin/chrome-devtools-axi.js",
+    "build:skill": "tsx scripts/build-skill.ts",
     "dev": "tsx bin/chrome-devtools-axi.ts",
     "test": "vitest run",
     "test:watch": "vitest",
