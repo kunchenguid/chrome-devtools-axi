@@ -8,6 +8,10 @@ export const SKILL_DESCRIPTION =
   "performance. Use whenever a task needs a real browser: opening or testing a web page, " +
   "clicking through a flow, extracting page content, or debugging a website.";
 
+function yamlDoubleQuote(value: string): string {
+  return JSON.stringify(value);
+}
+
 /**
  * Extract the `commands[N]:` block from the top-level help so the skill's
  * command list can never drift from what `chrome-devtools-axi --help` prints.
@@ -31,7 +35,7 @@ export function extractCommandsBlock(): string {
 export function createSkillMarkdown(): string {
   return `---
 name: chrome-devtools-axi
-description: ${SKILL_DESCRIPTION}
+description: ${yamlDoubleQuote(SKILL_DESCRIPTION)}
 user-invocable: false
 ---
 

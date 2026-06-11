@@ -6,6 +6,35 @@ import {
   SKILL_DESCRIPTION,
 } from "../src/skill.js";
 
+function parseFrontmatter(markdown: string): Record<string, string | boolean> {
+  const match = markdown.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!match) {
+    throw new Error("Missing frontmatter");
+  }
+
+  const parsed: Record<string, string | boolean> = {};
+  for (const line of match[1].split("\n")) {
+    const field = line.match(/^([a-z-]+): (.*)$/);
+    if (!field) {
+      throw new Error(`Invalid frontmatter line: ${line}`);
+    }
+
+    const [, key, rawValue] = field;
+    if (rawValue.startsWith('"')) {
+      parsed[key] = JSON.parse(rawValue);
+    } else if (rawValue === "true" || rawValue === "false") {
+      parsed[key] = rawValue === "true";
+    } else {
+      if (/:\s/.test(rawValue)) {
+        throw new Error(`Invalid plain scalar for ${key}`);
+      }
+      parsed[key] = rawValue;
+    }
+  }
+
+  return parsed;
+}
+
 describe("createSkillMarkdown", () => {
   it("matches the committed skills/chrome-devtools-axi/SKILL.md", () => {
     const committed = readFileSync(
@@ -17,9 +46,12 @@ describe("createSkillMarkdown", () => {
 
   it("starts with valid frontmatter and is not user-invocable", () => {
     const markdown = createSkillMarkdown();
-    expect(markdown.startsWith("---\nname: chrome-devtools-axi\n")).toBe(true);
-    expect(markdown).toContain(`description: ${SKILL_DESCRIPTION}`);
-    expect(markdown).toContain("user-invocable: false");
+    const frontmatter = parseFrontmatter(markdown);
+    expect(frontmatter).toEqual({
+      name: "chrome-devtools-axi",
+      description: SKILL_DESCRIPTION,
+      "user-invocable": false,
+    });
     expect(markdown).not.toContain("$ARGUMENTS");
     expect(markdown).not.toContain("argument-hint:");
   });
