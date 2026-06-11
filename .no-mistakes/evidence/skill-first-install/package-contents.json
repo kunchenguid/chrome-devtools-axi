@@ -1,0 +1,118 @@
+{
+  "name": "chrome-devtools-axi",
+  "version": "0.1.23",
+  "filename": "chrome-devtools-axi-0.1.23.tgz",
+  "files": [
+    {
+      "path": "dist/bin/chrome-devtools-axi-bridge.d.ts"
+    },
+    {
+      "path": "dist/bin/chrome-devtools-axi-bridge.js"
+    },
+    {
+      "path": "dist/bin/chrome-devtools-axi-bridge.js.map"
+    },
+    {
+      "path": "dist/bin/chrome-devtools-axi.d.ts"
+    },
+    {
+      "path": "dist/bin/chrome-devtools-axi.js"
+    },
+    {
+      "path": "dist/bin/chrome-devtools-axi.js.map"
+    },
+    {
+      "path": "dist/src/bridge.d.ts"
+    },
+    {
+      "path": "dist/src/bridge.js"
+    },
+    {
+      "path": "dist/src/bridge.js.map"
+    },
+    {
+      "path": "dist/src/cli.d.ts"
+    },
+    {
+      "path": "dist/src/cli.js"
+    },
+    {
+      "path": "dist/src/cli.js.map"
+    },
+    {
+      "path": "dist/src/client.d.ts"
+    },
+    {
+      "path": "dist/src/client.js"
+    },
+    {
+      "path": "dist/src/client.js.map"
+    },
+    {
+      "path": "dist/src/generation.d.ts"
+    },
+    {
+      "path": "dist/src/generation.js"
+    },
+    {
+      "path": "dist/src/generation.js.map"
+    },
+    {
+      "path": "dist/src/hooks.d.ts"
+    },
+    {
+      "path": "dist/src/hooks.js"
+    },
+    {
+      "path": "dist/src/hooks.js.map"
+    },
+    {
+      "path": "dist/src/run.d.ts"
+    },
+    {
+      "path": "dist/src/run.js"
+    },
+    {
+      "path": "dist/src/run.js.map"
+    },
+    {
+      "path": "dist/src/skill.d.ts"
+    },
+    {
+      "path": "dist/src/skill.js"
+    },
+    {
+      "path": "dist/src/skill.js.map"
+    },
+    {
+      "path": "dist/src/snapshot.d.ts"
+    },
+    {
+      "path": "dist/src/snapshot.js"
+    },
+    {
+      "path": "dist/src/snapshot.js.map"
+    },
+    {
+      "path": "dist/src/suggestions.d.ts"
+    },
+    {
+      "path": "dist/src/suggestions.js"
+    },
+    {
+      "path": "dist/src/suggestions.js.map"
+    },
+    {
+      "path": "LICENSE"
+    },
+    {
+      "path": "package.json"
+    },
+    {
+      "path": "README.md"
+    },
+    {
+      "path": "skills/chrome-devtools-axi/SKILL.md"
+    }
+  ]
+}
