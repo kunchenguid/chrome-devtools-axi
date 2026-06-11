@@ -1,0 +1,15 @@
+{
+  "name": "chrome-devtools-axi",
+  "author": "Kun Chen (kunchenguid)",
+  "metadata": {
+    "hermes": {
+      "tags": [
+        "browser",
+        "chrome",
+        "automation",
+        "devtools"
+      ],
+      "category": "automation"
+    }
+  }
+}
