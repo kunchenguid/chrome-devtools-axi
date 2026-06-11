@@ -34,7 +34,16 @@ describe("getCommandHelp", () => {
   });
 
   it("includes --full flag for snapshot-producing commands", () => {
-    for (const cmd of ["open", "snapshot", "click", "fill", "type", "press", "scroll", "back"]) {
+    for (const cmd of [
+      "open",
+      "snapshot",
+      "click",
+      "fill",
+      "type",
+      "press",
+      "scroll",
+      "back",
+    ]) {
       expect(getCommandHelp(cmd)).toContain("--full");
     }
   });
@@ -46,7 +55,21 @@ describe("getCommandHelp", () => {
   });
 
   it("has help for all 13 commands", () => {
-    const commands = ["open", "snapshot", "screenshot", "click", "fill", "type", "press", "scroll", "back", "wait", "eval", "start", "stop"];
+    const commands = [
+      "open",
+      "snapshot",
+      "screenshot",
+      "click",
+      "fill",
+      "type",
+      "press",
+      "scroll",
+      "back",
+      "wait",
+      "eval",
+      "start",
+      "stop",
+    ];
     for (const cmd of commands) {
       expect(getCommandHelp(cmd)).not.toBeNull();
     }
@@ -63,12 +86,29 @@ describe("getCommandHelp", () => {
 describe("parseScreenshotArgs", () => {
   it("parses path only", () => {
     const result = parseScreenshotArgs(["./shot.png"]);
-    expect(result).toEqual({ filePath: "./shot.png", uid: undefined, fullPage: false, format: undefined });
+    expect(result).toEqual({
+      filePath: "./shot.png",
+      uid: undefined,
+      fullPage: false,
+      format: undefined,
+    });
   });
 
   it("parses all flags", () => {
-    const result = parseScreenshotArgs(["./shot.jpg", "--uid", "@3", "--full-page", "--format", "jpeg"]);
-    expect(result).toEqual({ filePath: "./shot.jpg", uid: "3", fullPage: true, format: "jpeg" });
+    const result = parseScreenshotArgs([
+      "./shot.jpg",
+      "--uid",
+      "@3",
+      "--full-page",
+      "--format",
+      "jpeg",
+    ]);
+    expect(result).toEqual({
+      filePath: "./shot.jpg",
+      uid: "3",
+      fullPage: true,
+      format: "jpeg",
+    });
   });
 
   it("strips @ prefix from uid", () => {

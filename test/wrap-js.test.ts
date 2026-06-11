@@ -56,9 +56,7 @@ describe("wrapJsExpression", () => {
 
   it("wraps an IIFE with non-empty args (conservative: only () unwraps)", () => {
     // Not a no-arg IIFE — wrap so MCP can call it as a function and get the value.
-    expect(wrapJsExpression("(x => x + 1)(5)")).toBe(
-      "() => ((x => x + 1)(5))",
-    );
+    expect(wrapJsExpression("(x => x + 1)(5)")).toBe("() => ((x => x + 1)(5))");
   });
 
   it("wraps a parenthesized property call", () => {

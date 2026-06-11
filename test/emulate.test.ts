@@ -24,13 +24,24 @@ describe("getCommandHelp", () => {
 
 describe("parseEmulateArgs", () => {
   it("parses viewport and color-scheme", () => {
-    const result = parseEmulateArgs(["--viewport", "390x844x3,mobile", "--color-scheme", "dark"]);
-    expect(result).toEqual({ viewport: "390x844x3,mobile", colorScheme: "dark" });
+    const result = parseEmulateArgs([
+      "--viewport",
+      "390x844x3,mobile",
+      "--color-scheme",
+      "dark",
+    ]);
+    expect(result).toEqual({
+      viewport: "390x844x3,mobile",
+      colorScheme: "dark",
+    });
   });
 
   it("parses cpu and network", () => {
     const result = parseEmulateArgs(["--cpu", "4", "--network", "Slow 3G"]);
-    expect(result).toEqual({ cpuThrottlingRate: 4, networkConditions: "Slow 3G" });
+    expect(result).toEqual({
+      cpuThrottlingRate: 4,
+      networkConditions: "Slow 3G",
+    });
   });
 
   it("returns empty object for no args", () => {

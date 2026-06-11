@@ -126,9 +126,9 @@ describe("parseUidFresh", () => {
   });
 
   it("throws STALE_REF when page mutations advance the current ref generation", async () => {
-    const callTool = vi.fn().mockResolvedValue(
-      'Script ran on page and returned:\n```json\n8\n```',
-    );
+    const callTool = vi
+      .fn()
+      .mockResolvedValue("Script ran on page and returned:\n```json\n8\n```");
 
     await expect(parseUidFresh("@g7:237_15", callTool)).rejects.toMatchObject({
       code: "STALE_REF",

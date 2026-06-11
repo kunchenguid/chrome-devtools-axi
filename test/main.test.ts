@@ -106,7 +106,11 @@ describe("main", () => {
       ["take_snapshot"],
       [
         "evaluate_script",
-        { function: expect.stringContaining("__chromeDevtoolsAxiSnapshotGeneration") },
+        {
+          function: expect.stringContaining(
+            "__chromeDevtoolsAxiSnapshotGeneration",
+          ),
+        },
       ],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");

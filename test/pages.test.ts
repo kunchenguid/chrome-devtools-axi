@@ -66,12 +66,18 @@ describe("getCommandHelp", () => {
 
 describe("parsePagesList", () => {
   it("parses single page with selected marker", () => {
-    const result = parsePagesList("## Pages\n1: https://example.com/ [selected]");
-    expect(result).toEqual([{ id: 1, url: "https://example.com/", selected: true }]);
+    const result = parsePagesList(
+      "## Pages\n1: https://example.com/ [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
   });
 
   it("parses multiple pages", () => {
-    const result = parsePagesList("## Pages\n0: https://a.com/\n1: https://b.com/ [selected]");
+    const result = parsePagesList(
+      "## Pages\n0: https://a.com/\n1: https://b.com/ [selected]",
+    );
     expect(result).toEqual([
       { id: 0, url: "https://a.com/", selected: false },
       { id: 1, url: "https://b.com/", selected: true },
@@ -100,7 +106,9 @@ describe("formatMcpResult", () => {
   });
 
   it("includes suggestions as help block", () => {
-    const output = formatMcpResult("result", "data", ["Run `foo` to do something"]);
+    const output = formatMcpResult("result", "data", [
+      "Run `foo` to do something",
+    ]);
     expect(output).toContain("help[1]:");
     expect(output).toContain("Run `foo` to do something");
   });

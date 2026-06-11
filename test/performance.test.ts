@@ -27,7 +27,13 @@ describe("getCommandHelp", () => {
   });
 
   it("none include --full in help", () => {
-    const commands = ["lighthouse", "perf-start", "perf-stop", "perf-insight", "heap"];
+    const commands = [
+      "lighthouse",
+      "perf-start",
+      "perf-stop",
+      "perf-insight",
+      "heap",
+    ];
     for (const cmd of commands) {
       const help = getCommandHelp(cmd);
       expect(help).not.toContain("--full");
@@ -37,7 +43,12 @@ describe("getCommandHelp", () => {
 
 describe("parseLighthouseArgs", () => {
   it("parses --device and --output-dir", () => {
-    const result = parseLighthouseArgs(["--device", "mobile", "--output-dir", "./reports"]);
+    const result = parseLighthouseArgs([
+      "--device",
+      "mobile",
+      "--output-dir",
+      "./reports",
+    ]);
     expect(result).toEqual({ device: "mobile", outputDirPath: "./reports" });
   });
 
@@ -49,7 +60,11 @@ describe("parseLighthouseArgs", () => {
 
 describe("parsePerfStartArgs", () => {
   it("parses --no-reload and --file", () => {
-    const result = parsePerfStartArgs(["--no-reload", "--file", "trace.json.gz"]);
+    const result = parsePerfStartArgs([
+      "--no-reload",
+      "--file",
+      "trace.json.gz",
+    ]);
     expect(result).toEqual({ reload: false, filePath: "trace.json.gz" });
   });
 

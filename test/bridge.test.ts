@@ -35,11 +35,15 @@ describe("parseBridgeCallPayload", () => {
   });
 
   it("rejects payloads without a tool name", () => {
-    expect(() => parseBridgeCallPayload('{"args":{}}')).toThrow("Invalid bridge request payload");
+    expect(() => parseBridgeCallPayload('{"args":{}}')).toThrow(
+      "Invalid bridge request payload",
+    );
   });
 
   it("normalizes malformed JSON into a validation error", () => {
-    expect(() => parseBridgeCallPayload("{")).toThrow("Invalid bridge request payload");
+    expect(() => parseBridgeCallPayload("{")).toThrow(
+      "Invalid bridge request payload",
+    );
   });
 });
 
@@ -55,7 +59,9 @@ describe("getErrorMessage", () => {
 
 describe("resolveBridgeScript", () => {
   it("prefers the TypeScript bridge entrypoint in the repo checkout", () => {
-    expect(resolveBridgeScript(import.meta.dirname)).toMatch(/bin\/chrome-devtools-axi-bridge\.ts$/);
+    expect(resolveBridgeScript(import.meta.dirname)).toMatch(
+      /bin\/chrome-devtools-axi-bridge\.ts$/,
+    );
   });
 });
 
@@ -63,12 +69,18 @@ describe("buildTransportArgs", () => {
   const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    savedEnv.CHROME_DEVTOOLS_AXI_HEADED = process.env.CHROME_DEVTOOLS_AXI_HEADED;
-    savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
-    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
-    savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS = process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    savedEnv.CHROME_DEVTOOLS_AXI_HEADED =
+      process.env.CHROME_DEVTOOLS_AXI_HEADED;
+    savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
+      process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
+    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL =
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR =
+      process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
+      process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS =
+      process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -78,17 +90,28 @@ describe("buildTransportArgs", () => {
   });
 
   afterEach(() => {
-    process.env.CHROME_DEVTOOLS_AXI_HEADED = savedEnv.CHROME_DEVTOOLS_AXI_HEADED;
-    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
-    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
-    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    process.env.CHROME_DEVTOOLS_AXI_HEADED =
+      savedEnv.CHROME_DEVTOOLS_AXI_HEADED;
+    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
+      savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL =
+      savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR =
+      savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
+      savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
+      savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
   });
 
   it("defaults to headless and isolated", () => {
     const args = buildTransportArgs();
-    expect(args).toEqual(["-y", "chrome-devtools-mcp@latest", "--isolated", "--headless"]);
+    expect(args).toEqual([
+      "-y",
+      "chrome-devtools-mcp@latest",
+      "--isolated",
+      "--headless",
+    ]);
   });
 
   it("omits --headless when CHROME_DEVTOOLS_AXI_HEADED=1", () => {
@@ -98,14 +121,16 @@ describe("buildTransportArgs", () => {
   });
 
   it("forwards chrome args via --chrome-arg=", () => {
-    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = "--enable-gpu --ignore-gpu-blocklist";
+    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
+      "--enable-gpu --ignore-gpu-blocklist";
     const args = buildTransportArgs();
     expect(args).toContain("--chrome-arg=--enable-gpu");
     expect(args).toContain("--chrome-arg=--ignore-gpu-blocklist");
   });
 
   it("handles tabs, newlines, and extra whitespace in chrome args", () => {
-    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = "  --flag-a\t--flag-b\n--flag-c  ";
+    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
+      "  --flag-a\t--flag-b\n--flag-c  ";
     const args = buildTransportArgs();
     expect(args).toContain("--chrome-arg=--flag-a");
     expect(args).toContain("--chrome-arg=--flag-b");
@@ -187,10 +212,15 @@ describe("buildTransportArgs", () => {
   });
 
   it("routes ws:// BROWSER_URL to --wsEndpoint", () => {
-    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "ws://127.0.0.1:9222/devtools/browser/abc123";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL =
+      "ws://127.0.0.1:9222/devtools/browser/abc123";
     const args = buildTransportArgs();
-    expect(args).toContain("--wsEndpoint=ws://127.0.0.1:9222/devtools/browser/abc123");
-    expect(args).not.toContain("--browserUrl=ws://127.0.0.1:9222/devtools/browser/abc123");
+    expect(args).toContain(
+      "--wsEndpoint=ws://127.0.0.1:9222/devtools/browser/abc123",
+    );
+    expect(args).not.toContain(
+      "--browserUrl=ws://127.0.0.1:9222/devtools/browser/abc123",
+    );
     expect(args).not.toContain("--isolated");
     expect(args).not.toContain("--headless");
   });
@@ -204,7 +234,8 @@ describe("buildTransportArgs", () => {
 
   it("passes --wsHeaders when CHROME_DEVTOOLS_AXI_WS_HEADERS is set with ws endpoint", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
-    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = '{"Authorization":"Bearer token"}';
+    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
+      '{"Authorization":"Bearer token"}';
     const args = buildTransportArgs();
     expect(args).toContain("--wsEndpoint=wss://our.cluster.io/launch");
     expect(args).toContain('--wsHeaders={"Authorization":"Bearer token"}');
@@ -214,19 +245,25 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = "{";
 
-    expect(() => buildTransportArgs()).toThrow("CHROME_DEVTOOLS_AXI_WS_HEADERS must be valid JSON");
+    expect(() => buildTransportArgs()).toThrow(
+      "CHROME_DEVTOOLS_AXI_WS_HEADERS must be valid JSON",
+    );
   });
 
   it("rejects ws headers JSON that is not an object", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
-    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = '["Authorization: Bearer token"]';
+    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
+      '["Authorization: Bearer token"]';
 
-    expect(() => buildTransportArgs()).toThrow("CHROME_DEVTOOLS_AXI_WS_HEADERS must be a JSON object");
+    expect(() => buildTransportArgs()).toThrow(
+      "CHROME_DEVTOOLS_AXI_WS_HEADERS must be a JSON object",
+    );
   });
 
   it("ignores --wsHeaders without a ws endpoint", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
-    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = '{"Authorization":"Bearer token"}';
+    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
+      '{"Authorization":"Bearer token"}';
     const args = buildTransportArgs();
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
@@ -237,11 +274,16 @@ describe("resolveTransportSpec", () => {
   const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    savedEnv.CHROME_DEVTOOLS_AXI_MCP_PATH = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
-    savedEnv.CHROME_DEVTOOLS_AXI_HEADED = process.env.CHROME_DEVTOOLS_AXI_HEADED;
-    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    savedEnv.CHROME_DEVTOOLS_AXI_MCP_PATH =
+      process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+    savedEnv.CHROME_DEVTOOLS_AXI_HEADED =
+      process.env.CHROME_DEVTOOLS_AXI_HEADED;
+    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL =
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR =
+      process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
+      process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -273,7 +315,8 @@ describe("resolveTransportSpec", () => {
   });
 
   it("spawns node directly when CHROME_DEVTOOLS_AXI_MCP_PATH is set", () => {
-    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/opt/mcp/build/src/bin/chrome-devtools-mcp.js";
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH =
+      "/opt/mcp/build/src/bin/chrome-devtools-mcp.js";
     const spec = resolveTransportSpec();
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe("/opt/mcp/build/src/bin/chrome-devtools-mcp.js");

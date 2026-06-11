@@ -57,7 +57,14 @@ describe("parseConsoleArgs", () => {
   });
 
   it("parses all flags together", () => {
-    const result = parseConsoleArgs(["--type", "warning", "--limit", "25", "--page", "1"]);
+    const result = parseConsoleArgs([
+      "--type",
+      "warning",
+      "--limit",
+      "25",
+      "--page",
+      "1",
+    ]);
     expect(result).toEqual({ types: ["warning"], pageSize: 25, pageIdx: 1 });
   });
 
@@ -184,7 +191,11 @@ describe("network help enumerates valid --type values", () => {
 
 describe("parseNetworkGetArgs", () => {
   it("parses id and --response-file flag", () => {
-    const result = parseNetworkGetArgs(["42", "--response-file", "./resp.json"]);
+    const result = parseNetworkGetArgs([
+      "42",
+      "--response-file",
+      "./resp.json",
+    ]);
     expect(result).toEqual({ reqid: 42, responseFilePath: "./resp.json" });
   });
 
@@ -204,12 +215,24 @@ describe("parseNetworkGetArgs", () => {
   });
 
   it("parses both file flags without id", () => {
-    const result = parseNetworkGetArgs(["--response-file", "/tmp/resp", "--request-file", "/tmp/req"]);
-    expect(result).toEqual({ responseFilePath: "/tmp/resp", requestFilePath: "/tmp/req" });
+    const result = parseNetworkGetArgs([
+      "--response-file",
+      "/tmp/resp",
+      "--request-file",
+      "/tmp/req",
+    ]);
+    expect(result).toEqual({
+      responseFilePath: "/tmp/resp",
+      requestFilePath: "/tmp/req",
+    });
   });
 
   it("omits an invalid request id while keeping file flags", () => {
-    const result = parseNetworkGetArgs(["oops", "--response-file", "./resp.json"]);
+    const result = parseNetworkGetArgs([
+      "oops",
+      "--response-file",
+      "./resp.json",
+    ]);
     expect(result).toEqual({ responseFilePath: "./resp.json" });
   });
 });

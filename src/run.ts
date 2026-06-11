@@ -28,7 +28,11 @@ type CallTool = (
  */
 function unwrapNoArgIIFE(s: string): string {
   const candidate = s.endsWith(";") ? s.slice(0, -1).trimEnd() : s;
-  if (candidate.length < 4 || candidate[0] !== "(" || !candidate.endsWith(")")) {
+  if (
+    candidate.length < 4 ||
+    candidate[0] !== "(" ||
+    !candidate.endsWith(")")
+  ) {
     return s;
   }
   let depth = 0;

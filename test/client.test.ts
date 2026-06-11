@@ -210,9 +210,13 @@ describe("waitForProcessExit", () => {
   });
 
   it("returns false when the process outlives the timeout", async () => {
-    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], {
-      stdio: "ignore",
-    });
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 5000)"],
+      {
+        stdio: "ignore",
+      },
+    );
     const pid = child.pid as number;
     try {
       expect(await waitForProcessExit(pid, 100)).toBe(false);
@@ -259,7 +263,10 @@ describe("terminateBridgeProcess", () => {
     // Mimics a well-behaved bridge: exits cleanly on SIGTERM.
     const child = spawn(
       process.execPath,
-      ["-e", "process.on('SIGTERM', () => process.exit(0)); setTimeout(() => {}, 30000);"],
+      [
+        "-e",
+        "process.on('SIGTERM', () => process.exit(0)); setTimeout(() => {}, 30000);",
+      ],
       { stdio: "ignore", detached: true },
     );
     const pid = child.pid as number;
@@ -284,10 +291,7 @@ describe("terminateBridgeProcess", () => {
     // the test takes ~2s to drive the escalation path.
     const child = spawn(
       process.execPath,
-      [
-        "-e",
-        "process.on('SIGTERM', () => {}); setTimeout(() => {}, 30000);",
-      ],
+      ["-e", "process.on('SIGTERM', () => {}); setTimeout(() => {}, 30000);"],
       { stdio: "ignore", detached: true },
     );
     const pid = child.pid as number;

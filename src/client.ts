@@ -334,7 +334,7 @@ export async function ensureBridge(): Promise<number> {
   if (usingNpx) {
     suggestions.push(
       "If `npx -y chrome-devtools-mcp@latest` is slow on this machine, install mcp globally and set:",
-      "  export CHROME_DEVTOOLS_AXI_MCP_PATH=\"$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js\"",
+      '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
     );
   }
   suggestions.push(
