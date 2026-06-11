@@ -1,0 +1,28 @@
+
+███████╗██╗  ██╗██╗██╗     ██╗     ███████╗
+██╔════╝██║ ██╔╝██║██║     ██║     ██╔════╝
+███████╗█████╔╝ ██║██║     ██║     ███████╗
+╚════██║██╔═██╗ ██║██║     ██║     ╚════██║
+███████║██║  ██╗██║███████╗███████╗███████║
+╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚══════╝
+
+┌   skills 
+│
+│  Tip: use the --yes (-y) and --global (-g) flags to install without prompts.
+│
+◇  Source: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KTVTPKFTA2KNTK2MMQWP6ZYP
+│
+◇  Local path validated
+│
+◇  Found 1 skill
+
+│
+◇  Available Skills
+│
+│    chrome-devtools-axi
+│
+│      Control a Chrome browser session through the chrome-devtools-axi CLI - navigate, snapshot, click, fill forms, run JavaScript, inspect console and network, take screenshots, audit performance. Use whenever a task needs a real browser: opening or testing a web page, clicking through a flow, extracting page content, or debugging a website.
+
+│
+└  Use --skill <name> to install specific skills
+
