@@ -38,7 +38,7 @@ task along with the command:
      non-default branch, so the work must land there before you run.
   3. **Then validate**, passing the user's task as your `--intent`. The task
      text is exactly what the user set out to accomplish, in their own words, so
-     it _is_ the intent - pass it through, enriched with the decisions and
+     it *is* the intent - pass it through, enriched with the decisions and
      tradeoffs you made while doing the work (see
      [Intent is required](#intent-is-required)).
 
@@ -103,7 +103,6 @@ Run the pipeline and decide on its findings as they come up:
      [Escalate `ask-user` findings](#escalate-ask-user-findings) below.
 
    Choose one response:
-
    ```sh
    # accept the step as-is and continue
    no-mistakes axi respond --action approve
@@ -114,22 +113,20 @@ Run the pipeline and decide on its findings as they come up:
    # skip this step
    no-mistakes axi respond --action skip
    ```
-
    While a run is active, never fix findings by editing the code yourself -
    the pipeline owns both the findings and the fixes. Your job at a gate is to
    decide and respond; `--action fix` has the pipeline apply the fix and
    re-review the result.
 
-   Each `respond` blocks until the next `gate:`, `checks-passed` decision point, or final outcome.
+    Each `respond` blocks until the next `gate:`, `checks-passed` decision point, or final outcome.
 
-   Two extra flags are available on `respond` when you need them:
-   - `--add-finding '<json>'` (with `--action fix`) folds a finding you
-     spotted yourself - one the pipeline did not surface - into the fix round,
-     as a JSON finding object. Use it for a problem you noticed that is not in
-     the gate's own `findings` table.
-   - `--step <name>` responds to a specific step instead of the one currently
-     awaiting approval. You rarely need this; omit it to answer the active gate.
-
+    Two extra flags are available on `respond` when you need them:
+    - `--add-finding '<json>'` (with `--action fix`) folds a finding you
+      spotted yourself - one the pipeline did not surface - into the fix round,
+      as a JSON finding object. Use it for a problem you noticed that is not in
+      the gate's own `findings` table.
+    - `--step <name>` responds to a specific step instead of the one currently
+      awaiting approval. You rarely need this; omit it to answer the active gate.
 3. Repeat step 2 until the output has an `outcome:` instead of a `gate:`. The
    outcomes are:
    - `checks-passed` - the change is validated and CI is green, but the PR is
