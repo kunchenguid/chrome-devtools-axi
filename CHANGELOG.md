@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.24](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.23...chrome-devtools-axi-v0.1.24) (2026-06-12)
+
+
+### Features
+
+* ship installable chrome-devtools-axi agent skill ([#63](https://github.com/kunchenguid/chrome-devtools-axi/issues/63)) ([fc0c335](https://github.com/kunchenguid/chrome-devtools-axi/commit/fc0c33556ece6032eb1b0954298daef4e88455f8))
+* **skills:** add Hermes metadata to public skill ([#66](https://github.com/kunchenguid/chrome-devtools-axi/issues/66)) ([125f2c3](https://github.com/kunchenguid/chrome-devtools-axi/commit/125f2c352ac9e5bb389fba6fe6855bf6e8fa8761))
+
+
+### Bug Fixes
+
+* hide internal no-mistakes skill from discovery ([#65](https://github.com/kunchenguid/chrome-devtools-axi/issues/65)) ([12f1d90](https://github.com/kunchenguid/chrome-devtools-axi/commit/12f1d90756eb2a5fc22ab5ecc6a0fb0053a4c367))
+
 ## [0.1.23](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.22...chrome-devtools-axi-v0.1.23) (2026-05-23)
 
 
