@@ -1,0 +1,33 @@
+Intent: remove only the repository-vendored no-mistakes skill while preserving the public chrome-devtools-axi skill package.
+
+$ git diff --name-status 9dc2739fe8299a55c58698f4630c6473361eed4b...HEAD
+A	.agents/skills/.gitkeep
+D	.agents/skills/no-mistakes/SKILL.md
+
+$ test ! -e .agents/skills/no-mistakes && printf "vendored no-mistakes skill is absent"
+vendored no-mistakes skill is absent
+
+$ test -f .agents/skills/.gitkeep && printf ".agents/skills directory is preserved"
+.agents/skills directory is preserved
+
+$ readlink .claude/skills
+../.agents/skills
+
+$ test ! -e .claude/skills/no-mistakes && printf "symlinked .claude skill entry is absent"
+symlinked .claude skill entry is absent
+
+$ pnpm pack --pack-destination .no-mistakes/evidence/fm/dv-chromedt-q5
+package: chrome-devtools-axi@0.1.24
+Tarball Contents
+LICENSE
+package.json
+README.md
+skills/chrome-devtools-axi/SKILL.md
+Tarball Details
+/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KV25F2YDXKCR05EKDP8GRVK2/.no-mistakes/evidence/fm/dv-chromedt-q5/chrome-devtools-axi-0.1.24.tgz
+
+$ tar -tzf /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KV25F2YDXKCR05EKDP8GRVK2/.no-mistakes/evidence/fm/dv-chromedt-q5/chrome-devtools-axi-0.1.24.tgz | rg "^(package/skills/chrome-devtools-axi/|package/\.agents/)"
+package/skills/chrome-devtools-axi/SKILL.md
+
+$ tar -tzf /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KV25F2YDXKCR05EKDP8GRVK2/.no-mistakes/evidence/fm/dv-chromedt-q5/chrome-devtools-axi-0.1.24.tgz | rg "no-mistakes|\.agents" || printf "package contains no vendored/internal skills"
+package contains no vendored/internal skills
