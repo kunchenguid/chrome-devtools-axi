@@ -49,6 +49,7 @@ The skill teaches your agent to run chrome-devtools-axi through `npx -y chrome-d
 
 The skill is not a user-facing slash command (`user-invocable: false`).
 Just ask for anything that needs a real browser - opening a page, clicking through a flow, extracting page content, debugging console or network, auditing performance - and the agent loads the skill on its own when it recognizes the task.
+For ordinary web search, curl-able pages, or static extraction, the skill tells agents to skip Chrome and use simpler fetch/curl-style tooling.
 The skill frontmatter also includes Hermes Agent metadata (`author` plus `metadata.hermes` tags/category) so Hermes can list it as a first-class browser automation skill; other harnesses ignore those extra fields.
 
 `-g` installs the skill for all projects (`~/.claude/skills/`, for example); drop it to install for the current project only (`.claude/skills/`).
@@ -73,6 +74,7 @@ snapshot:
 ```
 
 Refs in snapshot output carry a `g<N>:` generation prefix that bumps every time a new accessibility tree is captured. Pass refs back exactly as printed - if the page re-rendered between snapshot and action, the action fails loudly with `STALE_REF` instead of silently no-op'ing, so the agent re-snapshots and retries.
+The skill also instructs agents to verify state-changing actions with a fresh snapshot, `eval`, or screenshot before reporting success, because a current ref can still produce no visible page change.
 
 ## Other Ways to Install
 
@@ -195,6 +197,8 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | `console-get <id>` | Get a specific console message |
 | `network`          | List network requests          |
 | `network-get [id]` | Get a specific network request |
+
+For large request or response bodies, prefer `network-get <id> --response-file <path>` or `--request-file <path>` so the body goes to disk instead of flooding agent context.
 
 ### Performance
 
