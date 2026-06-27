@@ -44,6 +44,10 @@ commands[35]:
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
   perf-insight <set> <name>, heap <path>, start, stop, setup hooks
+
+built-in:
+  update: Upgrade chrome-devtools-axi to the latest published npm version
+  "update --check": Report current vs latest without installing
 ```
 
 Run `npx -y chrome-devtools-axi --help` for flags and environment variables, or `npx -y chrome-devtools-axi <command> --help` for per-command usage.

@@ -13,8 +13,9 @@ function yamlDoubleQuote(value: string): string {
 }
 
 /**
- * Extract the `commands[N]:` block from the top-level help so the skill's
- * command list can never drift from what `chrome-devtools-axi --help` prints.
+ * Extract the project-owned `commands[N]:` block from top-level help.
+ * SDK built-in commands are documented separately in the skill body because
+ * runAxiCli appends them at runtime.
  */
 export function extractCommandsBlock(): string {
   const match = TOP_HELP.match(/^(commands\[\d+\]:\n(?: {2}.*\n)+)/m);
@@ -24,11 +25,16 @@ export function extractCommandsBlock(): string {
   return match[1].trimEnd();
 }
 
+const SDK_BUILT_IN_COMMANDS_BLOCK = `built-in:
+  update: Upgrade chrome-devtools-axi to the latest published npm version
+  "update --check": Report current vs latest without installing`;
+
 /**
  * Render the installable SKILL.md for the chrome-devtools-axi skill. The body is
  * built from the same shared guidance the CLI prints (home description and
- * top-level help), rewriting invocations to non-interactive
- * `npx -y chrome-devtools-axi ...` so the CLI comes along on demand.
+ * top-level help) plus documented SDK built-ins, rewriting invocations to
+ * non-interactive `npx -y chrome-devtools-axi ...` so the CLI comes along on
+ * demand.
  *
  * @returns full SKILL.md contents including YAML frontmatter
  */
@@ -83,6 +89,8 @@ Skip it when a plain \`fetch\`/\`curl\` suffices - ordinary web search, curl-abl
 
 \`\`\`
 ${extractCommandsBlock()}
+
+${SDK_BUILT_IN_COMMANDS_BLOCK}
 \`\`\`
 
 Run \`npx -y chrome-devtools-axi --help\` for flags and environment variables, or \`npx -y chrome-devtools-axi <command> --help\` for per-command usage.

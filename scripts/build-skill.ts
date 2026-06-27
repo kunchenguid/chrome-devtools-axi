@@ -1,5 +1,5 @@
-// Generates skills/chrome-devtools-axi/SKILL.md from the shared CLI guidance so the
-// installable skill never drifts from what `chrome-devtools-axi` prints.
+// Generates skills/chrome-devtools-axi/SKILL.md from shared CLI guidance and
+// documented SDK built-ins so the installable skill stays aligned with help.
 //
 //   pnpm run build:skill            # write the file
 //   pnpm run build:skill -- --check # fail (exit 1) if the committed file is stale

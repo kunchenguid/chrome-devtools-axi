@@ -1,0 +1,6 @@
+$ pnpm exec tsx bin/chrome-devtools-axi.ts update --check
+update:
+  package: chrome-devtools-axi
+  current: 0.1.24
+  latest: 0.1.24
+  available: false
