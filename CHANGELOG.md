@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.25](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.24...chrome-devtools-axi-v0.1.25) (2026-06-27)
+
+
+### Features
+
+* inherit SDK self-update command ([#72](https://github.com/kunchenguid/chrome-devtools-axi/issues/72)) ([87c7031](https://github.com/kunchenguid/chrome-devtools-axi/commit/87c7031ed9a65f45eac0e743c8b5edc4c1c901c5))
+
+
+### Bug Fixes
+
+* **skills:** add guardrails to generated agent skill ([#70](https://github.com/kunchenguid/chrome-devtools-axi/issues/70)) ([8d7d627](https://github.com/kunchenguid/chrome-devtools-axi/commit/8d7d627c8603accb2d1fb67f1909f6bb193a529a))
+
 ## [0.1.24](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.23...chrome-devtools-axi-v0.1.24) (2026-06-12)
 
 
