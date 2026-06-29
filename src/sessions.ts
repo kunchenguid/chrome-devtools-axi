@@ -28,7 +28,7 @@ import { homedir } from "node:os";
 export const DEFAULT_SESSION_NAME = "default";
 export const DEFAULT_BASE_PORT = 9224;
 
-const SESSION_PORT_RANGE = 100; // 9225..9324 reserved for named sessions
+const SESSION_PORT_RANGE = 1000; // 9225..10224 reserved for named sessions
 const STATE_DIR_NAME = ".chrome-devtools-axi";
 
 /**

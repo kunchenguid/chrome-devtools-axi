@@ -97,11 +97,11 @@ describe("defaultPortForSession", () => {
     );
   });
 
-  it("stays within the named-session range (9225..9324)", () => {
+  it("stays within the named-session range (9225..10224)", () => {
     for (const name of ["a", "worker-1", "ceo", "x".repeat(64)]) {
       const port = defaultPortForSession(name);
       expect(port).toBeGreaterThanOrEqual(DEFAULT_BASE_PORT + 1);
-      expect(port).toBeLessThanOrEqual(DEFAULT_BASE_PORT + 100);
+      expect(port).toBeLessThanOrEqual(DEFAULT_BASE_PORT + 1000);
     }
   });
 
