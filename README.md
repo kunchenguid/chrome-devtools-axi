@@ -299,7 +299,23 @@ export CHROME_DEVTOOLS_AXI_CHANNEL=beta
 This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
 It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
 
-State is stored in `~/.chrome-devtools-axi/`:
+Run multiple isolated bridges at once with `CHROME_DEVTOOLS_AXI_SESSION` - one per agent session, worktree, or test worker:
+
+```sh
+CHROME_DEVTOOLS_AXI_SESSION=worker-1 chrome-devtools-axi open https://example.com
+CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.org
+```
+
+Each session name gets its own bridge process, port (auto-derived from the name, or pinned with `CHROME_DEVTOOLS_AXI_PORT`), and on-disk state.
+In the default `--isolated` and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` launch modes each bridge also launches its own Chrome, so concurrent sessions share neither browser state nor each other's stale-ref tracking.
+Sessions that attach to the same external browser - multiple `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1` sessions on one running Chrome, or the same `CHROME_DEVTOOLS_AXI_BROWSER_URL`/`wsEndpoint` - drive that shared browser and are isolated only at the bridge level, where the per-session generation counter does not prevent cross-talk.
+A session only isolates the bridge - the connection mode and profile are unchanged; combine with `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` for a persistent per-session profile.
+The default (unset) session keeps port 9224 and the legacy state paths below.
+
+Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.
+Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT` only inline per command.
+
+State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`):
 
 | File                  | Purpose                               |
 | --------------------- | ------------------------------------- |

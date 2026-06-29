@@ -77,6 +77,12 @@ environment:
                                     (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
   CHROME_DEVTOOLS_AXI_PORT          Bridge server port (default: 9224)
+  CHROME_DEVTOOLS_AXI_SESSION       Named session for concurrent isolation. Each session name gets
+                                    its own bridge process, port (auto-derived from the name, or set
+                                    CHROME_DEVTOOLS_AXI_PORT), and on-disk state, so multiple sessions
+                                    run at once without colliding. Connection mode and profile are
+                                    unchanged. Defaults to "default" (port 9224, legacy state paths).
+                                    e.g. CHROME_DEVTOOLS_AXI_SESSION=worker-1
   CHROME_DEVTOOLS_AXI_BROWSER_URL   Connect to an existing Chrome instance instead of launching one.
                                     http(s):// uses --browserUrl (fetches /json/version).
                                     ws(s):// uses --wsEndpoint (direct WebSocket).

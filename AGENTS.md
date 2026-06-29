@@ -43,19 +43,24 @@ Every invocation is a short-lived process, so anything that must survive across 
 Three processes: CLI -> bridge -> chrome-devtools-mcp (which drives headless Chrome over CDP).
 
 The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP tools through the bridge, and formats output.
-`ensureBridge` (`src/client.ts`) reads `~/.chrome-devtools-axi/bridge.pid` and reuses a live bridge only after a **deep** health check (`/health?deep=1` drives one CDP-backed `list_pages` call), so a bridge whose attached browser died gets terminated and respawned instead of reused as a stale endpoint.
+`ensureBridge` (`src/client.ts`) reads its session's `bridge.pid` (`~/.chrome-devtools-axi/bridge.pid` for the default session) and reuses a live bridge only after a **deep** health check (`/health?deep=1` drives one CDP-backed `list_pages` call), so a bridge whose attached browser died gets terminated and respawned instead of reused as a stale endpoint.
 Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/bridge.ts`) **detached** as a process group leader and polls health until the `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` deadline (default 30s).
 
-The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on port 9224 (`CHROME_DEVTOOLS_AXI_PORT`): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
+The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
 Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
 
 `resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else an auto-detected global npm install (fast), else `npx -y chrome-devtools-mcp@latest` (slow first run).
 Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, `CHANNEL` (`--channel` to pick which installed Chrome release channel is attached to or launched, omitted in `BROWSER_URL`/`wsEndpoint` mode), and `HEADED`.
 
+Named sessions (`CHROME_DEVTOOLS_AXI_SESSION`, `src/sessions.ts`) give each name its own bridge - its own port (explicit `CHROME_DEVTOOLS_AXI_PORT`, else a deterministic FNV-1a hash of the name) and its own state dir under `~/.chrome-devtools-axi/sessions/<name>/` (PID file + generation counter) - so concurrent sessions don't share a bridge or each other's stale-ref tracking.
+The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-axi/` paths, so existing behavior is unchanged.
+`resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through; a session isolates only the bridge, so the connection mode and profile compose unchanged.
+`/health` reports the bridge's `session`, and `checkBridgeHealth`/`ensureBridge` reject a mismatched session so two sessions forced onto one port (a globally-exported `CHROME_DEVTOOLS_AXI_PORT`) fail loudly instead of silently sharing; the bridge exits with `BRIDGE_PORT_IN_USE_EXIT_CODE` (48) on an EADDRINUSE bind so the early-exit error attributes the collision (`buildBridgeEarlyExitError`).
+
 ### Snapshot generations and STALE_REF
 
 Snapshots are accessibility trees whose interactive elements carry `uid=` refs.
-Because CLI processes are short-lived, a generation counter persists at `~/.chrome-devtools-axi/snapshot-generation` (`src/generation.ts`); every fresh snapshot bumps it and `stampSnapshotGeneration` (`src/snapshot.ts`) rewrites `uid=X` to `uid=g<N>:X`.
+Because CLI processes are short-lived, a generation counter persists in the active session's state dir as `snapshot-generation` (`~/.chrome-devtools-axi/snapshot-generation` by default; `src/generation.ts`); every fresh snapshot bumps it and `stampSnapshotGeneration` (`src/snapshot.ts`) rewrites `uid=X` to `uid=g<N>:X`.
 Action commands parse refs through `parseUidFresh` (`src/cli.ts`), which fails loudly with `STALE_REF` instead of letting upstream MCP silently no-op against a stale tree.
 `stampFresh` also installs a MutationObserver in the page (`markPageSnapshotGeneration`), so the effective page generation is `snapshot generation + observed mutations` - a re-render invalidates refs even without a newer snapshot.
 
@@ -78,6 +83,6 @@ Only the script's own `console.log` output reaches stdout: handlers return text 
 ## Things to know when editing
 
 - The bridge resolves its own script path at runtime (`resolveBridgeScript`): it prefers a sibling `.ts` (dev mode, run via tsx) and falls back to the built `.js`, so dev and dist behave the same without flags.
-- `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists.
+- `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists; it also degrades an invalid `CHROME_DEVTOOLS_AXI_SESSION` to null here, while action commands (`ensureBridge`/`stopBridge`) still fail loudly.
 - Generation-counter writes are best-effort; a failed write degrades to one missed stale-ref detection, never a hang (`src/generation.ts`).
 - Some `test/client.test.ts` cases exercise real SIGTERM/SIGKILL escalation timing and take a couple of seconds each; that is expected, not flakiness.

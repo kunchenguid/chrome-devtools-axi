@@ -5,10 +5,12 @@
  * persistent MCP session. Exposes a simple HTTP API:
  *   POST /call  { name, args }  → { result }
  *   GET  /tools                 → [{ name, description }]
- *   GET  /health                → { status: "ok" } or 503 { status: "error", error }
+ *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
  *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason
  *
- * Writes a PID file to ~/.chrome-devtools-axi/bridge.pid on startup.
+ * Writes a PID file to the active session's state dir on startup
+ * (~/.chrome-devtools-axi/bridge.pid for the default session; named sessions
+ * nest under sessions/<name>/ - see src/sessions.ts).
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -20,16 +22,19 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
-
-const DEFAULT_PORT = Number.parseInt(
-  process.env.CHROME_DEVTOOLS_AXI_PORT ?? "9224",
-  10,
-);
-const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
-const PID_FILE = join(STATE_DIR, "bridge.pid");
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import {
+  resolveSessionName,
+  resolveSessionPidFile,
+  resolveSessionPort,
+} from "./sessions.js";
 
 export interface BridgeContentBlock {
   type: string;
@@ -86,13 +91,35 @@ export async function isBridgeTargetReachable(
 }
 
 function writePidFile(port: number): void {
-  mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port }));
+  const pidFile = resolveSessionPidFile();
+  mkdirSync(dirname(pidFile), { recursive: true });
+  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port }));
 }
 
-function removePidFile(): void {
+/**
+ * Remove the session PID file, but only when this process owns it. On a
+ * same-session bind race the losing bridge exits via EADDRINUSE after the
+ * winning bridge has already written the shared PID file; an unconditional
+ * unlink would delete the still-running winner's handle and orphan it (later
+ * `stop`/reuse can no longer find it). A missing, unreadable, or malformed
+ * file — or one recording a different pid — is left untouched. `ownerPid` is
+ * injectable for tests.
+ */
+export function removePidFile(
+  pidFile: string = resolveSessionPidFile(),
+  ownerPid: number = process.pid,
+): void {
   try {
-    unlinkSync(PID_FILE);
+    const data = JSON.parse(readFileSync(pidFile, "utf-8")) as {
+      pid?: unknown;
+    };
+    if (data.pid !== ownerPid) return;
+  } catch {
+    // Missing, unreadable, or malformed — nothing we own to remove.
+    return;
+  }
+  try {
+    unlinkSync(pidFile);
   } catch {
     // Already gone — fine
   }
@@ -203,6 +230,7 @@ export async function handleBridgeRequest(
   client: BridgeClient,
   req: IncomingMessage,
   res: ServerResponse,
+  sessionName?: string,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -226,7 +254,7 @@ export async function handleBridgeRequest(
         return;
       }
     }
-    writeJson(res, 200, { status: "ok" });
+    writeJson(res, 200, { status: "ok", session: sessionName });
     return;
   }
 
@@ -248,14 +276,52 @@ export async function handleBridgeRequest(
   writeJson(res, 404, { error: "not found" });
 }
 
-export function createBridgeServer(client: BridgeClient): Server {
+export function createBridgeServer(
+  client: BridgeClient,
+  sessionName?: string,
+): Server {
   return createServer((req, res) => {
-    void handleBridgeRequest(client, req, res);
+    void handleBridgeRequest(client, req, res, sessionName);
   });
 }
 
 function logBridgeMessage(message: string): void {
   process.stderr.write(`[chrome-devtools-axi] ${message}\n`);
+}
+
+/**
+ * Distinct exit code the bridge uses for an EADDRINUSE bind failure. A generic
+ * non-zero exit is ambiguous (npx/MCP launch failures exit non-zero too), so
+ * `ensureBridge` keys on this sentinel to attribute an early death to a genuine
+ * port collision versus a startup failure and tailor its error accordingly.
+ */
+export const BRIDGE_PORT_IN_USE_EXIT_CODE = 48;
+
+/**
+ * Handle a fatal HTTP server error by logging it and exiting non-zero. An
+ * EADDRINUSE means another bridge already owns this port (typically because
+ * `CHROME_DEVTOOLS_AXI_PORT` was exported globally, forcing every session onto
+ * one port); it exits with {@link BRIDGE_PORT_IN_USE_EXIT_CODE} so `ensureBridge`
+ * can distinguish it from any other early death. Failing loudly prevents
+ * `ensureBridge` from silently attaching to the other session's bridge. `exit`
+ * is injectable for tests.
+ */
+export function handleBridgeServerError(
+  error: NodeJS.ErrnoException,
+  port: number,
+  exit: (code: number) => void = process.exit,
+): void {
+  if (error.code === "EADDRINUSE") {
+    logBridgeMessage(
+      `Port ${port} is already in use (EADDRINUSE) - another bridge is listening there. ` +
+        `Exporting CHROME_DEVTOOLS_AXI_PORT globally forces every session onto one port; ` +
+        `unset it so each session gets its own, or set it only per-session.`,
+    );
+    exit(BRIDGE_PORT_IN_USE_EXIT_CODE);
+    return;
+  }
+  logBridgeMessage(`Bridge server error: ${getErrorMessage(error)}`);
+  exit(1);
 }
 
 function writeReadySignal(): void {
@@ -435,13 +501,23 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
-export async function runBridge(port = DEFAULT_PORT): Promise<void> {
+export async function runBridge(port = resolveSessionPort()): Promise<void> {
+  // Connect the MCP transport (which spawns chrome-devtools-mcp and launches
+  // Chrome) before binding the port. A same-session bind race then self-heals:
+  // both racers finish booting before listen(), so the loser's EADDRINUSE exit
+  // finds the winner already deep-healthy and reuses it instead of failing. The
+  // trade-off is one wasted Chrome launch on a genuine cross-session collision,
+  // a rare and self-correcting path.
   const transport = createTransport();
   const client = createBridgeClient();
   await client.connect(transport);
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
-  const server = createBridgeServer(client);
+  const sessionName = resolveSessionName();
+  const server = createBridgeServer(client, sessionName);
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    handleBridgeServerError(error, port);
+  });
   server.listen(port, "127.0.0.1", () => {
     writePidFile(port);
     logBridgeMessage(`Listening on http://127.0.0.1:${port}`);

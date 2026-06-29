@@ -12,16 +12,19 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { resolveSessionStateDir } from "./sessions.js";
 
-const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
-const GEN_FILE = join(STATE_DIR, "snapshot-generation");
+/** Path to the active session's snapshot-generation counter file. */
+function genFile(): string {
+  return join(resolveSessionStateDir(), "snapshot-generation");
+}
 
 export function getCurrentGeneration(): number {
+  const file = genFile();
   try {
-    if (!existsSync(GEN_FILE)) return 0;
-    const parsed = Number.parseInt(readFileSync(GEN_FILE, "utf-8").trim(), 10);
+    if (!existsSync(file)) return 0;
+    const parsed = Number.parseInt(readFileSync(file, "utf-8").trim(), 10);
     return Number.isNaN(parsed) ? 0 : parsed;
   } catch {
     return 0;
@@ -30,9 +33,10 @@ export function getCurrentGeneration(): number {
 
 export function bumpGeneration(): number {
   const next = getCurrentGeneration() + 1;
+  const file = genFile();
   try {
-    mkdirSync(STATE_DIR, { recursive: true });
-    writeFileSync(GEN_FILE, String(next));
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, String(next));
   } catch {
     // Best-effort: a write failure still returns the bumped value so the
     // current invocation behaves consistently. The next process will
@@ -43,8 +47,9 @@ export function bumpGeneration(): number {
 }
 
 export function resetGeneration(): void {
+  const file = genFile();
   try {
-    if (existsSync(GEN_FILE)) unlinkSync(GEN_FILE);
+    if (existsSync(file)) unlinkSync(file);
   } catch {
     // ignore
   }
