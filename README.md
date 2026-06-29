@@ -289,6 +289,16 @@ export CHROME_DEVTOOLS_AXI_BROWSER_URL=wss://cluster.example/launch
 export CHROME_DEVTOOLS_AXI_WS_HEADERS='{"Authorization":"Bearer token"}'
 ```
 
+Pick which installed Chrome release channel to target with `CHROME_DEVTOOLS_AXI_CHANNEL` - `stable` (the default), `beta`, `canary`, or `dev`:
+
+```sh
+export CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1
+export CHROME_DEVTOOLS_AXI_CHANNEL=beta
+```
+
+This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
+It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
+
 State is stored in `~/.chrome-devtools-axi/`:
 
 | File                  | Purpose                               |

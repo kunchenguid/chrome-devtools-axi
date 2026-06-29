@@ -268,6 +268,7 @@ export function buildTransportArgs(): string[] {
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   const userDataDir = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
+  const channel = process.env.CHROME_DEVTOOLS_AXI_CHANNEL?.trim();
 
   if (autoConnect) {
     // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
@@ -313,6 +314,14 @@ export function buildTransportArgs(): string[] {
     if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
       args.push("--headless");
     }
+  }
+
+  // --channel selects which installed Chrome distribution chrome-devtools-mcp
+  // targets: the running instance --autoConnect attaches to, or the one launched
+  // by default. It is irrelevant when attaching to an explicit endpoint, so it is
+  // omitted in BROWSER_URL/wsEndpoint mode. Validation is left to chrome-devtools-mcp.
+  if (channel && !browserUrl) {
+    args.push(`--channel=${channel}`);
   }
 
   const extraChromeArgs = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;

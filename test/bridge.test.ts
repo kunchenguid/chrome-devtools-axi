@@ -81,12 +81,15 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS =
       process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
+      process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
   });
 
   afterEach(() => {
@@ -102,6 +105,8 @@ describe("buildTransportArgs", () => {
       savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
       savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL =
+      savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL;
   });
 
   it("defaults to headless and isolated", () => {
@@ -209,6 +214,55 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).not.toContain("--autoConnect");
     expect(args).toContain("--isolated");
+  });
+
+  it("omits --channel by default", () => {
+    const args = buildTransportArgs();
+    expect(args.some((a) => a.startsWith("--channel"))).toBe(false);
+  });
+
+  it("appends --channel to --autoConnect", () => {
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
+    const args = buildTransportArgs();
+    expect(args).toContain("--autoConnect");
+    expect(args).toContain("--channel=beta");
+  });
+
+  it("appends --channel in the default launch mode", () => {
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
+    const args = buildTransportArgs();
+    expect(args).toContain("--channel=beta");
+    expect(args).toContain("--isolated");
+    expect(args).toContain("--headless");
+  });
+
+  it("appends --channel alongside --userDataDir", () => {
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "canary";
+    const args = buildTransportArgs();
+    expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
+    expect(args).toContain("--channel=canary");
+  });
+
+  it("ignores --channel when connecting via --browserUrl", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
+    const args = buildTransportArgs();
+    expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
+    expect(args.some((a) => a.startsWith("--channel"))).toBe(false);
+  });
+
+  it("trims surrounding whitespace from the channel", () => {
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "  beta  ";
+    const args = buildTransportArgs();
+    expect(args).toContain("--channel=beta");
+  });
+
+  it("ignores a blank channel", () => {
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "   ";
+    const args = buildTransportArgs();
+    expect(args.some((a) => a.startsWith("--channel"))).toBe(false);
   });
 
   it("routes ws:// BROWSER_URL to --wsEndpoint", () => {
