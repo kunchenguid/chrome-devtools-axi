@@ -50,7 +50,7 @@ The bridge holds one persistent MCP stdio session and exposes a localhost HTTP A
 Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
 
 `resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else an auto-detected global npm install (fast), else `npx -y chrome-devtools-mcp@latest` (slow first run).
-Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, and `HEADED`.
+Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, `CHANNEL` (`--channel` to pick which installed Chrome release channel is attached to or launched, omitted in `BROWSER_URL`/`wsEndpoint` mode), and `HEADED`.
 
 ### Snapshot generations and STALE_REF
 
