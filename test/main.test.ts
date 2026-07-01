@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AxiError } from "axi-sdk-js";
 
@@ -118,5 +119,101 @@ describe("main", () => {
       'url: "https://airlockhq.com"',
     );
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("resolves relative screenshot path against caller cwd before calling MCP", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(["screenshot", "./shot.png"]);
+
+    const expected = resolve("/caller/dir", "./shot.png");
+    expect(callTool).toHaveBeenCalledWith("take_screenshot", {
+      filePath: expected,
+    });
+    expect(String(write.mock.calls[0]?.[0])).toContain(expected);
+  });
+
+  it("passes absolute screenshot paths through unchanged", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(["screenshot", "/tmp/shot.png"]);
+
+    expect(callTool).toHaveBeenCalledWith("take_screenshot", {
+      filePath: "/tmp/shot.png",
+    });
+    expect(String(write.mock.calls[0]?.[0])).toContain("/tmp/shot.png");
+  });
+
+  it("resolves relative heap path against caller cwd before calling MCP", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(["heap", "./snapshot.heapsnapshot"]);
+
+    const expected = resolve("/caller/dir", "./snapshot.heapsnapshot");
+    expect(callTool).toHaveBeenCalledWith("take_memory_snapshot", {
+      filePath: expected,
+    });
+    expect(String(write.mock.calls[0]?.[0])).toContain(expected);
+  });
+
+  it("resolves relative network-get output paths against caller cwd", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("saved");
+
+    await main([
+      "network-get",
+      "42",
+      "--response-file",
+      "./resp.json",
+      "--request-file",
+      "./req.json",
+    ]);
+
+    expect(callTool).toHaveBeenCalledWith("get_network_request", {
+      reqid: 42,
+      responseFilePath: resolve("/caller/dir", "./resp.json"),
+      requestFilePath: resolve("/caller/dir", "./req.json"),
+    });
+  });
+
+  it("resolves relative perf-start --file path against caller cwd", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(["perf-start", "--file", "trace.json.gz"]);
+
+    const expected = resolve("/caller/dir", "trace.json.gz");
+    expect(callTool).toHaveBeenCalledWith("performance_start_trace", {
+      filePath: expected,
+    });
+    expect(String(write.mock.calls[0]?.[0])).toContain(expected);
+  });
+
+  it("resolves relative perf-stop --file path against caller cwd", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("trace data");
+
+    await main(["perf-stop", "--file", "./trace.json.gz"]);
+
+    expect(callTool).toHaveBeenCalledWith("performance_stop_trace", {
+      filePath: resolve("/caller/dir", "./trace.json.gz"),
+    });
   });
 });
