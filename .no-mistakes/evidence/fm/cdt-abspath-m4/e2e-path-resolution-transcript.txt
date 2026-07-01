@@ -1,0 +1,33 @@
+caller_cwd: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir
+fake_bridge_pidfile: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home/.chrome-devtools-axi/sessions/e2e-paths/bridge.pid
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts screenshot ./outputs/shot.png
+screenshot: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/outputs/shot.png
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts screenshot /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/absolute-shot.png
+screenshot: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/absolute-shot.png
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts network-get 42 --response-file ./net/resp.json --request-file ./net/req.json
+request:
+bridge-call: get_network_request
+args: {"reqid":42,"responseFilePath":"/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/net/resp.json","requestFilePath":"/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/net/req.json"}
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts perf-start --file trace/trace.json.gz
+trace: started
+filePath: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/trace/trace.json.gz
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts perf-stop --file ./trace/trace.json.gz
+trace:
+bridge-call: performance_stop_trace
+args: {"filePath":"/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/trace/trace.json.gz"}
+help[1]:
+  Run `chrome-devtools-axi perf-insight <set-id> <insight-name>` to analyze insights
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts heap ./heap/snapshot.heapsnapshot
+heap: /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/heap/snapshot.heapsnapshot
+
+$ env HOME=/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/home CHROME_DEVTOOLS_AXI_SESSION=e2e-paths /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/node_modules/.bin/tsx /Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/bin/chrome-devtools-axi.ts lighthouse --device mobile --output-dir ./reports
+lighthouse:
+bridge-call: lighthouse_audit
+args: {"device":"mobile","outputDirPath":"/Users/kunchen/.no-mistakes/worktrees/fdb54d0fcf83/01KWE9XZAEZMPW7WMWAQ2N1PBR/.no-mistakes/evidence/fm/cdt-abspath-m4/caller/subdir/reports"}
+

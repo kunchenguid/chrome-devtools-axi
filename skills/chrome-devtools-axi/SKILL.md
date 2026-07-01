@@ -57,3 +57,4 @@ Run `npx -y chrome-devtools-axi --help` for flags and environment variables, or 
 - Pipe output through grep/head to extract specific data from large pages.
 - Add `--full` to snapshot-producing commands to disable truncation.
 - Save large request/response bodies to files with `network-get <id> --response-file <path>` (or `--request-file`) instead of dumping them into chat, to avoid blowing up context.
+- Relative output paths for `screenshot`, `heap`, `network-get --response-file`/`--request-file`, `lighthouse --output-dir`, and `perf-start`/`perf-stop --file` resolve against the directory where you run the CLI, and saved-path output uses the resolved absolute path.

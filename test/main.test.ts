@@ -189,6 +189,19 @@ describe("main", () => {
     });
   });
 
+  it("resolves relative lighthouse output dir against caller cwd", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("report saved");
+
+    await main(["lighthouse", "--device", "mobile", "--output-dir", "reports"]);
+
+    expect(callTool).toHaveBeenCalledWith("lighthouse_audit", {
+      device: "mobile",
+      outputDirPath: resolve("/caller/dir", "reports"),
+    });
+  });
+
   it("resolves relative perf-start --file path against caller cwd", async () => {
     vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
     const write = vi

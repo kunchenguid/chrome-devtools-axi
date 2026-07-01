@@ -83,6 +83,8 @@ Only the script's own `console.log` output reaches stdout: handlers return text 
 ## Things to know when editing
 
 - The bridge resolves its own script path at runtime (`resolveBridgeScript`): it prefers a sibling `.ts` (dev mode, run via tsx) and falls back to the built `.js`, so dev and dist behave the same without flags.
+- `resolveOutputPath` (`src/paths.ts`) is the chokepoint for local output artifacts sent to the bridge.
+  Use it for any new command or flag that asks the bridge/MCP to write a caller-supplied output file or directory, so relative paths resolve against the invoking CLI's `process.cwd()` and output can report the absolute path.
 - `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists; it also degrades an invalid `CHROME_DEVTOOLS_AXI_SESSION` to null here, while action commands (`ensureBridge`/`stopBridge`) still fail loudly.
 - Generation-counter writes are best-effort; a failed write degrades to one missed stale-ref detection, never a hang (`src/generation.ts`).
 - Some `test/client.test.ts` cases exercise real SIGTERM/SIGKILL escalation timing and take a couple of seconds each; that is expected, not flakiness.

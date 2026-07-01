@@ -133,6 +133,9 @@ Save a screenshot to a file.
 args:
   <path>  File path to save the screenshot (required)
 
+Relative output paths resolve against the directory where you run the CLI.
+Output reports the resolved absolute path.
+
 flags:
   --uid @<uid>    Capture a specific element instead of the full viewport.
                   Refs are generation-tagged (e.g. @g3:12) - pass them back
@@ -508,6 +511,8 @@ flags:
   --response-file <path>  Save response body to file
   --request-file <path>   Save request body to file
 
+Relative output paths resolve against the directory where you run the CLI.
+
 examples:
   chrome-devtools-axi network-get 42
   chrome-devtools-axi network-get 42 --response-file ./response.json`,
@@ -521,6 +526,8 @@ flags:
   --mode <mode>          navigation (default) or snapshot
   --output-dir <path>    Directory for reports
 
+Relative output paths resolve against the directory where you run the CLI.
+
 examples:
   chrome-devtools-axi lighthouse
   chrome-devtools-axi lighthouse --device mobile --output-dir ./reports`,
@@ -533,6 +540,9 @@ flags:
   --no-auto-stop  Don't automatically stop the trace
   --file <path>   Save raw trace data to file
 
+Relative output paths resolve against the directory where you run the CLI.
+Output reports the resolved absolute path.
+
 examples:
   chrome-devtools-axi perf-start
   chrome-devtools-axi perf-start --no-reload --file trace.json.gz`,
@@ -542,6 +552,8 @@ Stop the active performance trace recording.
 
 flags:
   --file <path>  Save raw trace data to file
+
+Relative output paths resolve against the directory where you run the CLI.
 
 examples:
   chrome-devtools-axi perf-stop
@@ -563,6 +575,9 @@ Capture a heap snapshot for memory leak debugging.
 
 args:
   <path>  File path to save the .heapsnapshot file (required)
+
+Relative output paths resolve against the directory where you run the CLI.
+Output reports the resolved absolute path.
 
 examples:
   chrome-devtools-axi heap ./snapshot.heapsnapshot`,
