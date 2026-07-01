@@ -216,4 +216,14 @@ describe("main", () => {
       filePath: resolve("/caller/dir", "./trace.json.gz"),
     });
   });
+
+  it("handles perf-stop --file without a value without resolving it", async () => {
+    vi.spyOn(process, "cwd").mockReturnValue("/caller/dir");
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("trace data");
+
+    await main(["perf-stop", "--file"]);
+
+    expect(callTool).toHaveBeenCalledWith("performance_stop_trace", {});
+  });
 });

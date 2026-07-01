@@ -1622,7 +1622,7 @@ async function handlePerfStart(args: string[]): Promise<string> {
 async function handlePerfStop(args: string[]): Promise<string> {
   const toolArgs: Record<string, unknown> = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--file") {
+    if (args[i] === "--file" && i + 1 < args.length) {
       toolArgs.filePath = resolveOutputPath(args[++i]);
     }
   }
