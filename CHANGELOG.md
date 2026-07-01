@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.26](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.25...chrome-devtools-axi-v0.1.26) (2026-07-01)
+
+
+### Features
+
+* **bridge:** add CHROME_DEVTOOLS_AXI_CHANNEL to select a Chrome release channel ([#74](https://github.com/kunchenguid/chrome-devtools-axi/issues/74)) ([b738215](https://github.com/kunchenguid/chrome-devtools-axi/commit/b7382154fc2006a89b2c4cfb71de8f6e24169c87))
+* **sessions:** add CHROME_DEVTOOLS_AXI_SESSION for concurrent bridge isolation ([#75](https://github.com/kunchenguid/chrome-devtools-axi/issues/75)) ([eee2fb7](https://github.com/kunchenguid/chrome-devtools-axi/commit/eee2fb7ebfa8779fe9f5f8648cd50be9594792e4))
+
+
+### Bug Fixes
+
+* **cli:** resolve output paths from caller cwd ([#77](https://github.com/kunchenguid/chrome-devtools-axi/issues/77)) ([2b5a851](https://github.com/kunchenguid/chrome-devtools-axi/commit/2b5a8519c12f68c356f7434df4623727ac4283cd))
+
 ## [0.1.25](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.24...chrome-devtools-axi-v0.1.25) (2026-06-27)
 
 
