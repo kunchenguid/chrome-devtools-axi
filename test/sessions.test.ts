@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   DEFAULT_BASE_PORT,
   DEFAULT_SESSION_NAME,
@@ -9,6 +9,7 @@ import {
   resolveSessionPidFile,
   resolveSessionPort,
   resolveSessionStateDir,
+  resolveStateBaseDir,
   validateSessionName,
 } from "../src/sessions.js";
 
@@ -145,6 +146,20 @@ describe("resolveSessionPort", () => {
 });
 
 describe("session state paths", () => {
+  const saved = process.env.CHROME_DEVTOOLS_AXI_STATE_DIR;
+
+  beforeEach(() => {
+    delete process.env.CHROME_DEVTOOLS_AXI_STATE_DIR;
+  });
+
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_STATE_DIR;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = saved;
+    }
+  });
+
   it("keeps legacy paths for the default session", () => {
     expect(resolveSessionStateDir(DEFAULT_SESSION_NAME)).toBe(STATE_DIR);
     expect(resolveSessionPidFile(DEFAULT_SESSION_NAME)).toBe(
@@ -159,6 +174,60 @@ describe("session state paths", () => {
     expect(resolveSessionPidFile("worker-1")).toBe(
       join(STATE_DIR, "sessions", "worker-1", "bridge.pid"),
     );
+  });
+});
+
+describe("CHROME_DEVTOOLS_AXI_STATE_DIR override", () => {
+  const saved = process.env.CHROME_DEVTOOLS_AXI_STATE_DIR;
+
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_STATE_DIR;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = saved;
+    }
+  });
+
+  it("falls back to ~/.chrome-devtools-axi when unset", () => {
+    delete process.env.CHROME_DEVTOOLS_AXI_STATE_DIR;
+    expect(resolveStateBaseDir()).toBe(STATE_DIR);
+    expect(resolveSessionStateDir(DEFAULT_SESSION_NAME)).toBe(STATE_DIR);
+    expect(resolveSessionPidFile(DEFAULT_SESSION_NAME)).toBe(
+      join(STATE_DIR, "bridge.pid"),
+    );
+  });
+
+  it("overrides the base dir and pidfile for the default session", () => {
+    process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = "/tmp/crew-7/cdaxi";
+    expect(resolveStateBaseDir()).toBe("/tmp/crew-7/cdaxi");
+    expect(resolveSessionStateDir(DEFAULT_SESSION_NAME)).toBe(
+      "/tmp/crew-7/cdaxi",
+    );
+    expect(resolveSessionPidFile(DEFAULT_SESSION_NAME)).toBe(
+      join("/tmp/crew-7/cdaxi", "bridge.pid"),
+    );
+  });
+
+  it("nests named sessions under the overridden base", () => {
+    process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = "/tmp/crew-7/cdaxi";
+    expect(resolveSessionStateDir("worker-1")).toBe(
+      join("/tmp/crew-7/cdaxi", "sessions", "worker-1"),
+    );
+    expect(resolveSessionPidFile("worker-1")).toBe(
+      join("/tmp/crew-7/cdaxi", "sessions", "worker-1", "bridge.pid"),
+    );
+  });
+
+  it("resolves a relative override against the current directory", () => {
+    process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = "./cdaxi-state";
+    expect(resolveStateBaseDir()).toBe(resolve("./cdaxi-state"));
+  });
+
+  it("falls back to the default for an empty or whitespace-only override", () => {
+    process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = "   ";
+    expect(resolveStateBaseDir()).toBe(STATE_DIR);
+    process.env.CHROME_DEVTOOLS_AXI_STATE_DIR = "";
+    expect(resolveStateBaseDir()).toBe(STATE_DIR);
   });
 });
 

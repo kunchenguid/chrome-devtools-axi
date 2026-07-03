@@ -16,13 +16,21 @@
  *
  * Precedence:
  *   port      - CHROME_DEVTOOLS_AXI_PORT > deterministic hash of the session name
- *   state dir - always derived from the session name
+ *   state dir - CHROME_DEVTOOLS_AXI_STATE_DIR (base) > ~/.chrome-devtools-axi,
+ *               then the session name selects the subdirectory within that base
  *
  * The default session name is "default", which preserves prior behavior: port
  * 9224 and the legacy `~/.chrome-devtools-axi/` state paths.
+ *
+ * `CHROME_DEVTOOLS_AXI_STATE_DIR` overrides the base state directory so each
+ * caller can own an isolated `bridge.pid` (and every other file under the state
+ * root). Combined with a distinct `CHROME_DEVTOOLS_AXI_PORT`, this lets fully
+ * independent callers run concurrent bridges without hijacking each other's
+ * browser - the state dir isolates the pidfile; the unique port is still
+ * required because two bridges cannot share one TCP listener.
  */
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 export const DEFAULT_SESSION_NAME = "default";
@@ -103,14 +111,27 @@ export function resolveSessionPort(
 }
 
 /**
- * State directory for a session. The default session keeps the legacy
- * `~/.chrome-devtools-axi/` path so existing tools and older versions stay
- * compatible; named sessions live under a per-name subdirectory.
+ * Base state directory: `CHROME_DEVTOOLS_AXI_STATE_DIR` (resolved to an
+ * absolute path) when set, otherwise the legacy `~/.chrome-devtools-axi`. An
+ * empty or whitespace-only override falls back to the default. This isolates
+ * the entire state root - the pidfile, snapshot-generation counter, and any
+ * future per-session files ride along - so concurrent callers with distinct
+ * dirs (and ports) never share a bridge.
+ */
+export function resolveStateBaseDir(): string {
+  const override = process.env.CHROME_DEVTOOLS_AXI_STATE_DIR?.trim();
+  return override ? resolve(override) : join(homedir(), STATE_DIR_NAME);
+}
+
+/**
+ * State directory for a session. The default session keeps the base state dir
+ * directly so existing tools and older versions stay compatible; named
+ * sessions live under a per-name subdirectory within the same base.
  */
 export function resolveSessionStateDir(
   name: string = resolveSessionName(),
 ): string {
-  const base = join(homedir(), STATE_DIR_NAME);
+  const base = resolveStateBaseDir();
   return name === DEFAULT_SESSION_NAME ? base : join(base, "sessions", name);
 }
 
