@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>chrome-devtools-axi VISION.md rendered review</title>
+    <style>
+      :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+      body { margin: 0; background: #f6f8fa; color: #1f2328; }
+      main { box-sizing: border-box; max-width: 920px; min-height: 100vh; margin: 0 auto; padding: 48px 64px 72px; background: #fff; }
+      .source { margin: 0 0 28px; color: #59636e; font-size: 14px; }
+      h1 { margin: 0 0 24px; padding-bottom: 10px; border-bottom: 1px solid #d1d9e0; font-size: 2rem; }
+      h2 { margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #d1d9e0; font-size: 1.5rem; }
+      p { margin: 0 0 16px; line-height: 1.62; }
+      code { padding: 0.2em 0.4em; border-radius: 6px; background: #eff1f3; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 85%; }
+      @media (max-width: 700px) { main { padding: 32px 24px 48px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="source">Rendered reviewer evidence for the committed root-level <code>VISION.md</code></p>
+      <h1>Vision</h1>
+      <p><code>chrome-devtools-axi</code> is an agent-ergonomic interface to <code>chrome-devtools-mcp</code>.</p>
+      <h2>Scope</h2>
+      <p>We aim for full functional parity with <code>chrome-devtools-mcp</code>.<br />Every capability available through the server should eventually be accessible through an AXI-native interface.</p>
+      <p>We accept contributions that expose existing server capabilities more ergonomically.<br />We do not add browser functionality that <code>chrome-devtools-mcp</code> cannot provide.</p>
+      <h2>Interface</h2>
+      <p>The interface must follow validated AXI principles and optimize for autonomous agent use.</p>
+      <p>Output may be structured, but its structure exists for agent comprehension rather than as a stable API for imperative programs.<br />Human-oriented presentation and compatibility work primarily serving hand-written parsers are not goals.</p>
+      <p>The wrapper may reshape, combine, or simplify server operations when doing so improves agent ergonomics without expanding the underlying capability.</p>
+      <h2>Reliability</h2>
+      <p>Improvements to bridge lifecycle, session isolation, reference integrity, and error recovery are welcome when they make the wrapper a more faithful and reliable interface to the server.<br />They must not become an independent browser-automation implementation.</p>
+    </main>
+  </body>
+</html>
