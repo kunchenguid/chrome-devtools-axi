@@ -84,6 +84,11 @@ environment:
                                     run at once without colliding. Connection mode and profile are
                                     unchanged. Defaults to "default" (port 9224, legacy state paths).
                                     e.g. CHROME_DEVTOOLS_AXI_SESSION=worker-1
+  CHROME_DEVTOOLS_AXI_STATE_DIR     Base directory for bridge state (bridge.pid, snapshot-generation).
+                                    Overrides the default ~/.chrome-devtools-axi so independent callers
+                                    can own an isolated bridge. Pair with a distinct CHROME_DEVTOOLS_AXI_PORT
+                                    (two bridges cannot share one TCP port). Relative paths resolve against
+                                    the current directory. e.g. CHROME_DEVTOOLS_AXI_STATE_DIR=/tmp/crew-7/cdaxi
   CHROME_DEVTOOLS_AXI_BROWSER_URL   Connect to an existing Chrome instance instead of launching one.
                                     http(s):// uses --browserUrl (fetches /json/version).
                                     ws(s):// uses --wsEndpoint (direct WebSocket).
