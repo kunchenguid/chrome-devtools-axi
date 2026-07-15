@@ -73,6 +73,16 @@ environment:
                                     canary, or dev. Selects which installed Chrome --autoConnect
                                     attaches to, and which one is launched in the default and
                                     USER_DATA_DIR modes. Ignored with CHROME_DEVTOOLS_AXI_BROWSER_URL.
+  CHROME_DEVTOOLS_AXI_BROWSER_TARGET
+                                    Browser target: chrome (default) or comet. Comet enables
+                                    executablePath launch mode and startup page bootstrap because
+                                    fresh Comet profiles open chrome://perplexity-onboarding
+                                    before normal pages. For Comet, BROWSER_URL attach mode is
+                                    the most reliable path when direct launch is not supported.
+  CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH
+                                    Absolute path to a browser executable. Overrides target auto-detection.
+                                    For Comet on macOS this defaults to:
+                                      /Applications/Comet.app/Contents/MacOS/Comet
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
   CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
                                     (no shell-style quoting; flags with spaces are not supported)

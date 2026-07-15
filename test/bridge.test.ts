@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  bootstrapBrowserTarget,
   buildTransportArgs,
   detectGlobalMcpPath,
   extractHostHeaderHostname,
@@ -24,6 +25,7 @@ import {
   resolveTransportSpec,
   type BridgeClient,
 } from "../src/bridge.js";
+import { resolveBrowserTarget } from "../src/browser-targets.js";
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {
@@ -77,46 +79,31 @@ describe("resolveBridgeScript", () => {
 
 describe("buildTransportArgs", () => {
   const savedEnv: Record<string, string | undefined> = {};
+  const envKeys = [
+    "CHROME_DEVTOOLS_AXI_HEADED",
+    "CHROME_DEVTOOLS_AXI_CHROME_ARGS",
+    "CHROME_DEVTOOLS_AXI_BROWSER_URL",
+    "CHROME_DEVTOOLS_AXI_USER_DATA_DIR",
+    "CHROME_DEVTOOLS_AXI_AUTO_CONNECT",
+    "CHROME_DEVTOOLS_AXI_WS_HEADERS",
+    "CHROME_DEVTOOLS_AXI_CHANNEL",
+    "CHROME_DEVTOOLS_AXI_BROWSER_TARGET",
+    "CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH",
+  ];
 
   beforeEach(() => {
-    savedEnv.CHROME_DEVTOOLS_AXI_HEADED =
-      process.env.CHROME_DEVTOOLS_AXI_HEADED;
-    savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
-      process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
-    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL =
-      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR =
-      process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
-      process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
-    savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS =
-      process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
-    savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
-      process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
-    delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
-    delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
-    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
-    delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
-    delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    for (const key of envKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
   });
 
   afterEach(() => {
-    process.env.CHROME_DEVTOOLS_AXI_HEADED =
-      savedEnv.CHROME_DEVTOOLS_AXI_HEADED;
-    process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
-      savedEnv.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
-    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL =
-      savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL;
-    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR =
-      savedEnv.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
-    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
-      savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
-    process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
-      savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
-    process.env.CHROME_DEVTOOLS_AXI_CHANNEL =
-      savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL;
+    for (const key of envKeys) {
+      const value = savedEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   it("defaults to headless and isolated", () => {
@@ -345,6 +332,94 @@ describe("buildTransportArgs", () => {
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
   });
+
+  it("adds --executablePath for an explicit custom browser executable", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "/Applications/Browser";
+    const args = buildTransportArgs();
+    expect(args).toContain("--executablePath=/Applications/Browser");
+    expect(args).toContain("--isolated");
+    expect(args).toContain("--headless");
+  });
+
+  it("auto-detects Comet on macOS when the comet target is selected", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET = "comet";
+    const target = resolveBrowserTarget({
+      existsSync: (path) =>
+        path === "/Applications/Comet.app/Contents/MacOS/Comet",
+      homedir: () => "/Users/tester",
+    });
+
+    expect(target).toEqual({
+      name: "comet",
+      displayName: "Comet",
+      executablePath: "/Applications/Comet.app/Contents/MacOS/Comet",
+      bootstrapInitialPage: true,
+    });
+  });
+
+  it("auto-detects Comet in the user's Applications directory", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET = "comet";
+    const target = resolveBrowserTarget({
+      existsSync: (path) =>
+        path === "/Users/tester/Applications/Comet.app/Contents/MacOS/Comet",
+      homedir: () => "/Users/tester",
+    });
+
+    expect(target.executablePath).toBe(
+      "/Users/tester/Applications/Comet.app/Contents/MacOS/Comet",
+    );
+  });
+
+  it("fails loudly when Comet is selected but no executable is found", () => {
+    expect(() =>
+      buildTransportArgs({
+        name: "comet",
+        displayName: "Comet",
+        executablePath: null,
+        bootstrapInitialPage: true,
+      }),
+    ).toThrow(
+      "Could not find Comet. Set CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH to its browser executable.",
+    );
+  });
+
+  it("rejects unknown browser targets", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET = "safari";
+
+    expect(() => buildTransportArgs()).toThrow(
+      'Invalid CHROME_DEVTOOLS_AXI_BROWSER_TARGET "safari": use chrome or comet',
+    );
+  });
+
+  it("uses Comet's executable path when the comet target is selected", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET = "comet";
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH =
+      "/Applications/Comet.app/Contents/MacOS/Comet";
+    const args = buildTransportArgs();
+
+    expect(args).toContain(
+      "--executablePath=/Applications/Comet.app/Contents/MacOS/Comet",
+    );
+    expect(args).toContain("--isolated");
+  });
+
+  it("does not require a Comet executable when attaching via browserUrl", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET = "comet";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9227";
+    const args = buildTransportArgs();
+
+    expect(args).toContain("--browserUrl=http://127.0.0.1:9227");
+    expect(args.some((a) => a.startsWith("--executablePath="))).toBe(false);
+  });
+
+  it("rejects autoConnect for non-Chrome browser targets", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET = "comet";
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+
+    expect(() => buildTransportArgs()).toThrow(
+      "CHROME_DEVTOOLS_AXI_AUTO_CONNECT only supports the chrome browser target",
+    );
+  });
 });
 
 describe("resolveTransportSpec", () => {
@@ -361,11 +436,17 @@ describe("resolveTransportSpec", () => {
       process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
     savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
       process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_TARGET =
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET;
+    savedEnv.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH =
+      process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH;
     delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_TARGET;
+    delete process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH;
   });
 
   afterEach(() => {
@@ -568,6 +649,128 @@ describe("isBridgeTargetReachable", () => {
     if (!result.ok) {
       expect(result.reason).toContain("Target closed");
     }
+  });
+});
+
+describe("bootstrapBrowserTarget", () => {
+  it("does nothing for Chrome targets", async () => {
+    const calls: string[] = [];
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async ({ name }) => {
+        calls.push(name);
+        return { content: [] };
+      },
+      close: async () => {},
+    };
+
+    await bootstrapBrowserTarget(client, {
+      name: "chrome",
+      displayName: "Chrome",
+      executablePath: null,
+      bootstrapInitialPage: false,
+    });
+
+    expect(calls).toEqual([]);
+  });
+
+  it("does not create a page when Comet already has a normal page", async () => {
+    const calls: string[] = [];
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async ({ name }) => {
+        calls.push(name);
+        return { content: [{ type: "text", text: "1: Example [selected]" }] };
+      },
+      close: async () => {},
+    };
+
+    await bootstrapBrowserTarget(client, {
+      name: "comet",
+      displayName: "Comet",
+      executablePath: "/Applications/Comet.app/Contents/MacOS/Comet",
+      bootstrapInitialPage: true,
+    });
+
+    expect(calls).toEqual(["list_pages"]);
+  });
+
+  it("does not create a page when Comet already has about:blank", async () => {
+    const calls: string[] = [];
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async ({ name }) => {
+        calls.push(name);
+        return {
+          content: [{ type: "text", text: "0: about:blank [selected]" }],
+        };
+      },
+      close: async () => {},
+    };
+
+    await bootstrapBrowserTarget(client, {
+      name: "comet",
+      displayName: "Comet",
+      executablePath: "/Applications/Comet.app/Contents/MacOS/Comet",
+      bootstrapInitialPage: true,
+    });
+
+    expect(calls).toEqual(["list_pages"]);
+  });
+
+  it("creates an about:blank page when Comet has no MCP-visible page", async () => {
+    const calls: { name: string; arguments: Record<string, unknown> }[] = [];
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async (request) => {
+        calls.push(request);
+        return { content: [{ type: "text", text: "" }] };
+      },
+      close: async () => {},
+    };
+
+    await bootstrapBrowserTarget(client, {
+      name: "comet",
+      displayName: "Comet",
+      executablePath: "/Applications/Comet.app/Contents/MacOS/Comet",
+      bootstrapInitialPage: true,
+    });
+
+    expect(calls).toEqual([
+      { name: "list_pages", arguments: {} },
+      { name: "new_page", arguments: { url: "about:blank" } },
+    ]);
+  });
+
+  it("creates an about:blank page when Comet only has its onboarding page", async () => {
+    const calls: { name: string; arguments: Record<string, unknown> }[] = [];
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async (request) => {
+        calls.push(request);
+        return {
+          content: [
+            {
+              type: "text",
+              text: "0: chrome://perplexity-onboarding [selected]",
+            },
+          ],
+        };
+      },
+      close: async () => {},
+    };
+
+    await bootstrapBrowserTarget(client, {
+      name: "comet",
+      displayName: "Comet",
+      executablePath: "/Applications/Comet.app/Contents/MacOS/Comet",
+      bootstrapInitialPage: true,
+    });
+
+    expect(calls).toEqual([
+      { name: "list_pages", arguments: {} },
+      { name: "new_page", arguments: { url: "about:blank" } },
+    ]);
   });
 });
 

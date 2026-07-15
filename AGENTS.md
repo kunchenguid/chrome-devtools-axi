@@ -49,6 +49,9 @@ Teardown is careful about orphans: the bridge kills its own process group on exi
 
 `resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else an auto-detected global npm install (fast), else `npx -y chrome-devtools-mcp@latest` (slow first run).
 Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, `CHANNEL` (`--channel` to pick which installed Chrome release channel is attached to or launched, omitted in `BROWSER_URL`/`wsEndpoint` mode), and `HEADED`.
+Browser target selection lives in `src/browser-targets.ts`: `CHROME_DEVTOOLS_AXI_BROWSER_TARGET=chrome|comet` plus optional `CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH`.
+Comet target mode bootstraps a normal `about:blank` page if startup exposes only Comet's internal onboarding page; direct launch passes `--executablePath`, but `BROWSER_URL` attach mode is the reliable path for local Comet builds that exit under chrome-devtools-mcp launch flags.
+`AUTO_CONNECT` remains Chrome-only.
 
 The launch modes (`--isolated`/`--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS` so browsers we start cannot reach the machine owner's password store; attach modes deliberately omit them because that browser's keychain policy belongs to whoever started it.
 `test/keychain-isolation.test.ts` owns the regression rationale and structural invariant; README.md documents the user-facing behavior.

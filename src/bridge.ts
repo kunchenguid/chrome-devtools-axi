@@ -35,6 +35,11 @@ import {
   resolveSessionPidFile,
   resolveSessionPort,
 } from "./sessions.js";
+import {
+  requireLaunchExecutable,
+  resolveBrowserTarget,
+  type BrowserTarget,
+} from "./browser-targets.js";
 
 export interface BridgeContentBlock {
   type: string;
@@ -460,7 +465,9 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
   "--password-store=basic",
 ] as const;
 
-export function buildTransportArgs(): string[] {
+export function buildTransportArgs(
+  browserTarget: BrowserTarget = resolveBrowserTarget(),
+): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest"];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
@@ -469,6 +476,11 @@ export function buildTransportArgs(): string[] {
   const channel = process.env.CHROME_DEVTOOLS_AXI_CHANNEL?.trim();
 
   if (autoConnect) {
+    if (browserTarget.name !== "chrome") {
+      throw new Error(
+        "CHROME_DEVTOOLS_AXI_AUTO_CONNECT only supports the chrome browser target",
+      );
+    }
     // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
     // Connects to the user's running Chrome - no separate browser launched.
     args.push("--autoConnect");
@@ -503,6 +515,9 @@ export function buildTransportArgs(): string[] {
       args.push(`--browserUrl=${browserUrl}`);
     }
   } else {
+    if (browserTarget.name !== "chrome" || browserTarget.executablePath) {
+      args.push(`--executablePath=${requireLaunchExecutable(browserTarget)}`);
+    }
     if (userDataDir) {
       // Persistent profile — skip --isolated so the profile is preserved.
       args.push(`--userDataDir=${userDataDir}`);
@@ -524,7 +539,7 @@ export function buildTransportArgs(): string[] {
   // targets: the running instance --autoConnect attaches to, or the one launched
   // by default. It is irrelevant when attaching to an explicit endpoint, so it is
   // omitted in BROWSER_URL/wsEndpoint mode. Validation is left to chrome-devtools-mcp.
-  if (channel && !browserUrl) {
+  if (channel && !browserUrl && browserTarget.name === "chrome") {
     args.push(`--channel=${channel}`);
   }
 
@@ -536,6 +551,45 @@ export function buildTransportArgs(): string[] {
   }
 
   return args;
+}
+
+function hasUsableBrowserPage(pagesText: string): boolean {
+  for (const line of pagesText.split("\n")) {
+    const match = line.match(/^\s*\d+:\s+(\S+)/);
+    if (!match) continue;
+    if (/^(chrome|chrome-error|devtools):\/\//i.test(match[1])) continue;
+    return true;
+  }
+  return false;
+}
+
+export async function bootstrapBrowserTarget(
+  client: BridgeClient,
+  target: BrowserTarget = resolveBrowserTarget(),
+): Promise<void> {
+  if (!target.bootstrapInitialPage) return;
+
+  try {
+    const pagesResult = await client.callTool({
+      name: "list_pages",
+      arguments: {},
+    });
+    const pagesText = extractToolText(getToolContent(pagesResult));
+    if (hasUsableBrowserPage(pagesText)) return;
+  } catch {
+    // If listing pages fails during startup, still try to create a normal page.
+  }
+
+  try {
+    await client.callTool({
+      name: "new_page",
+      arguments: { url: "about:blank" },
+    });
+  } catch (error) {
+    logBridgeMessage(
+      `${target.displayName} startup page bootstrap skipped: ${getErrorMessage(error)}`,
+    );
+  }
 }
 
 /**
@@ -650,6 +704,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const client = createBridgeClient();
   await client.connect(transport);
   logBridgeMessage("Connected to chrome-devtools-mcp");
+  await bootstrapBrowserTarget(client);
 
   const sessionName = resolveSessionName();
   const server = createBridgeServer(client, sessionName);

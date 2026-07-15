@@ -312,6 +312,34 @@ On macOS this also means the browser can never raise the system "Keychain Not Fo
 Your own externally launched Chrome is unaffected: its saved passwords remain available and untouched because this tool does not read, write, move, or reset the login keychain or its `Chrome Safe Storage` item.
 The isolation flags apply only to browsers this tool starts and are deliberately not sent in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `CHROME_DEVTOOLS_AXI_BROWSER_URL`, and `wsEndpoint` modes, where the browser belongs to whoever launched it.
 
+### Browser targets
+
+Target Comet with `CHROME_DEVTOOLS_AXI_BROWSER_TARGET=comet`.
+The most reliable Comet path is to launch Comet with a remote debugging port and attach to it:
+
+```sh
+/Applications/Comet.app/Contents/MacOS/Comet \
+  --remote-debugging-port=9227 \
+  --user-data-dir=/tmp/comet-devtools-profile \
+  --no-first-run \
+  about:blank
+
+export CHROME_DEVTOOLS_AXI_BROWSER_TARGET=comet
+export CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9227
+chrome-devtools-axi open https://example.com
+```
+
+On macOS, the Comet executable is auto-detected at `/Applications/Comet.app/Contents/MacOS/Comet` or `~/Applications/Comet.app/Contents/MacOS/Comet`.
+When `CHROME_DEVTOOLS_AXI_BROWSER_URL` is unset, Comet launch mode uses chrome-devtools-mcp `--executablePath`; this depends on the local Comet build staying reachable under chrome-devtools-mcp's launch flags.
+Set `CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH` when Comet lives somewhere else, or to launch any explicit browser executable:
+
+```sh
+export CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH=/Applications/Comet.app/Contents/MacOS/Comet
+```
+
+Comet target mode bootstraps a normal `about:blank` page when a fresh Comet profile exposes only `chrome://perplexity-onboarding`.
+`CHROME_DEVTOOLS_AXI_AUTO_CONNECT` supports only the Chrome target.
+
 Run multiple isolated bridges at once with `CHROME_DEVTOOLS_AXI_SESSION` - one per agent session, worktree, or test worker:
 
 ```sh
