@@ -69,6 +69,7 @@ environment:
   CHROME_DEVTOOLS_AXI_AUTO_CONNECT  Set to 1 to connect to the user's running Chrome (144+)
                                     via chrome://inspect/#remote-debugging instead of launching
                                     a new browser. Requires remote debugging enabled in Chrome.
+                                    Chrome target only (not supported with BROWSER_TARGET=comet).
   CHROME_DEVTOOLS_AXI_CHANNEL       Chrome release channel to target: stable (default), beta,
                                     canary, or dev. Selects which installed Chrome --autoConnect
                                     attaches to, and which one is launched in the default and
