@@ -300,7 +300,7 @@ export CHROME_DEVTOOLS_AXI_CHANNEL=beta
 ```
 
 This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
-It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
+It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel, and when targeting a non-Chrome browser such as Comet.
 
 ### Keychain isolation
 
