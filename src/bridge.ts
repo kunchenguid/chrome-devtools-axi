@@ -129,6 +129,97 @@ export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Hostnames that identify the loopback interface. The bridge is a persistent
+ * unauthenticated loopback service on a known port, so it is the target of
+ * DNS-rebinding: a malicious page rebinds its own domain to 127.0.0.1 and the
+ * browser then issues same-origin requests that hit the bridge. Binding to
+ * 127.0.0.1 does NOT stop this - the packets still arrive on loopback. The one
+ * thing a rebound request cannot hide is that it carries the attacker's own
+ * domain in the `Host` (and `Origin`) header, and those are forbidden headers
+ * page JavaScript cannot forge. Requiring both to name loopback is therefore
+ * THE anti-rebinding control (see GHSA-x439-jhfh-v9x2).
+ */
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1"]);
+
+function isLoopbackHostname(hostname: string): boolean {
+  // Node's URL parser keeps IPv6 hostnames bracketed (`[::1]`); strip the
+  // brackets so the bare literal matches LOOPBACK_HOSTNAMES.
+  const normalized = hostname
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
+    .toLowerCase();
+  return LOOPBACK_HOSTNAMES.has(normalized);
+}
+
+/**
+ * Extract the hostname from a `Host` header value, dropping any `:port` suffix.
+ * Handles bracketed IPv6 (`[::1]:9224` -> `::1`) and bare IPv6 literals
+ * (`::1`). Returns null for an empty/whitespace-only value.
+ */
+export function extractHostHeaderHostname(hostHeader: string): string | null {
+  const trimmed = hostHeader.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.startsWith("[")) {
+    const end = trimmed.indexOf("]");
+    if (end === -1) return null;
+    // Anything after the closing bracket must be a `:port` suffix. Reject
+    // trailing garbage (e.g. "[::1]evil.com") instead of treating it as the
+    // loopback literal "::1" - this keeps the Host parser as strict as the
+    // Origin path (new URL(...).hostname), which already rejects the analogue.
+    const rest = trimmed.slice(end + 1);
+    if (rest.length > 0 && !rest.startsWith(":")) return null;
+    return trimmed.slice(1, end);
+  }
+  const firstColon = trimmed.indexOf(":");
+  if (firstColon === -1) return trimmed;
+  // A second colon means this is a bare (unbracketed) IPv6 literal with no
+  // port, not a host:port pair - keep the whole string as the hostname.
+  if (trimmed.indexOf(":", firstColon + 1) !== -1) return trimmed;
+  return trimmed.slice(0, firstColon);
+}
+
+/**
+ * True when the `Host` header is present and names the loopback interface.
+ * A missing Host, or one naming any other host (e.g. a rebound
+ * `evil.attacker.com`), is rejected.
+ */
+export function isAllowedBridgeHost(host: string | undefined): boolean {
+  if (host === undefined) return false;
+  const hostname = extractHostHeaderHostname(host);
+  if (hostname === null) return false;
+  return isLoopbackHostname(hostname);
+}
+
+/**
+ * True when the request carries no `Origin` (the CLI client sends none) or an
+ * `Origin` whose hostname is loopback. A present-but-non-loopback or
+ * unparseable Origin is rejected.
+ */
+export function isRequestOriginAllowed(req: IncomingMessage): boolean {
+  const rawOrigin = req.headers.origin;
+  if (rawOrigin === undefined) return true;
+  const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+  if (origin === undefined || origin.length === 0) return true;
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  return isLoopbackHostname(hostname);
+}
+
+/**
+ * Anti-rebinding gate: a request is allowed only when its `Host` header names
+ * loopback and any `Origin` header also names loopback. Checked FIRST on every
+ * route (health included) so a rebound request is refused before any CDP tool
+ * can run.
+ */
+export function isRequestAllowed(req: IncomingMessage): boolean {
+  return isAllowedBridgeHost(req.headers.host) && isRequestOriginAllowed(req);
+}
+
 export function extractToolText(content: BridgeContentBlock[]): string {
   return content
     .filter((block) => block.type === "text" && typeof block.text === "string")
@@ -231,8 +322,25 @@ export async function handleBridgeRequest(
   req: IncomingMessage,
   res: ServerResponse,
   sessionName?: string,
+  logForbidden?: (message: string) => void,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
+
+  // Reject rebound requests before any routing - see isRequestAllowed and
+  // GHSA-x439-jhfh-v9x2. This gate covers /health, /tools, and /call alike.
+  if (!isRequestAllowed(req)) {
+    // Log the refusal so an operator can tell a mis-configured client apart
+    // from an actual rebinding attempt. Injected (not a direct
+    // logBridgeMessage call) so unit tests stay quiet unless they opt in.
+    const rawOrigin = req.headers.origin;
+    const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+    logForbidden?.(
+      `Rejected request with disallowed host: host=${req.headers.host ?? ""} ` +
+        `origin=${origin ?? ""} ${req.method ?? ""} ${req.url ?? ""}`,
+    );
+    writeJson(res, 403, { error: "Forbidden host" });
+    return;
+  }
 
   if (
     req.method === "GET" &&
@@ -281,7 +389,7 @@ export function createBridgeServer(
   sessionName?: string,
 ): Server {
   return createServer((req, res) => {
-    void handleBridgeRequest(client, req, res, sessionName);
+    void handleBridgeRequest(client, req, res, sessionName, logBridgeMessage);
   });
 }
 

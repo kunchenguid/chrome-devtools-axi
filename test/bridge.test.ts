@@ -8,9 +8,13 @@ import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   buildTransportArgs,
   detectGlobalMcpPath,
+  extractHostHeaderHostname,
   extractToolText,
   getErrorMessage,
   handleBridgeRequest,
+  isAllowedBridgeHost,
+  isRequestAllowed,
+  isRequestOriginAllowed,
   handleBridgeServerError,
   isBridgeClientConnected,
   isBridgeTargetReachable,
@@ -554,10 +558,25 @@ describe("isBridgeTargetReachable", () => {
   });
 });
 
-function makeRequest(method: string, url: string): IncomingMessage {
+function makeRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string> = {},
+  body?: string,
+): IncomingMessage {
   const req = new IncomingMessage(new Socket());
   req.method = method;
   req.url = url;
+  // Real requests always carry a Host header; the CLI client sends
+  // "127.0.0.1:<port>". Default to loopback so the anti-rebinding gate lets
+  // these through, and let callers override to exercise rejection.
+  req.headers = { host: "127.0.0.1:9224", ...headers };
+  // Feed a request body so handlers that read the stream (e.g. /call) don't
+  // hang waiting on EOF. Rejected requests short-circuit before reading it.
+  if (body !== undefined) {
+    req.push(body);
+    req.push(null);
+  }
   return req;
 }
 
@@ -705,6 +724,244 @@ describe("handleBridgeRequest /health", () => {
 
     expect(captured.statusCode).toBe(200);
     expect(callToolCalls).toBe(0);
+  });
+});
+
+describe("extractHostHeaderHostname", () => {
+  it("drops the :port suffix from a host:port value", () => {
+    expect(extractHostHeaderHostname("127.0.0.1:9224")).toBe("127.0.0.1");
+    expect(extractHostHeaderHostname("localhost:9224")).toBe("localhost");
+  });
+
+  it("returns the bare hostname when no port is present", () => {
+    expect(extractHostHeaderHostname("localhost")).toBe("localhost");
+  });
+
+  it("unwraps a bracketed IPv6 host, with or without a port", () => {
+    expect(extractHostHeaderHostname("[::1]:9224")).toBe("::1");
+    expect(extractHostHeaderHostname("[::1]")).toBe("::1");
+  });
+
+  it("keeps a bare unbracketed IPv6 literal intact", () => {
+    expect(extractHostHeaderHostname("::1")).toBe("::1");
+  });
+
+  it("rejects trailing garbage after a bracketed IPv6 host", () => {
+    // "[::1]evil.com" must not be read as the loopback literal "::1".
+    expect(extractHostHeaderHostname("[::1]evil.com")).toBeNull();
+    expect(extractHostHeaderHostname("[::1]:9224evil")).toBe("::1");
+    expect(isAllowedBridgeHost("[::1]evil.com")).toBe(false);
+  });
+
+  it("returns null for an empty or whitespace-only value", () => {
+    expect(extractHostHeaderHostname("")).toBeNull();
+    expect(extractHostHeaderHostname("   ")).toBeNull();
+  });
+});
+
+describe("isAllowedBridgeHost", () => {
+  it("accepts loopback hosts (with and without port, any case)", () => {
+    expect(isAllowedBridgeHost("127.0.0.1:9224")).toBe(true);
+    expect(isAllowedBridgeHost("localhost:9224")).toBe(true);
+    expect(isAllowedBridgeHost("LOCALHOST")).toBe(true);
+    expect(isAllowedBridgeHost("[::1]:9224")).toBe(true);
+    expect(isAllowedBridgeHost("::1")).toBe(true);
+  });
+
+  it("rejects a missing Host header", () => {
+    expect(isAllowedBridgeHost(undefined)).toBe(false);
+  });
+
+  it("rejects a rebound attacker domain", () => {
+    expect(isAllowedBridgeHost("evil.attacker.com")).toBe(false);
+    expect(isAllowedBridgeHost("evil.attacker.com:9224")).toBe(false);
+    // A hostname that merely embeds a loopback label must not pass.
+    expect(isAllowedBridgeHost("127.0.0.1.evil.com")).toBe(false);
+    expect(isAllowedBridgeHost("localhost.evil.com")).toBe(false);
+  });
+});
+
+describe("isRequestOriginAllowed", () => {
+  it("allows a missing Origin (the CLI client sends none)", () => {
+    expect(isRequestOriginAllowed(makeRequest("POST", "/call"))).toBe(true);
+  });
+
+  it("allows an Origin whose hostname is loopback", () => {
+    expect(
+      isRequestOriginAllowed(
+        makeRequest("POST", "/call", { origin: "http://127.0.0.1:9224" }),
+      ),
+    ).toBe(true);
+    expect(
+      isRequestOriginAllowed(
+        makeRequest("POST", "/call", { origin: "http://localhost" }),
+      ),
+    ).toBe(true);
+    expect(
+      isRequestOriginAllowed(
+        makeRequest("POST", "/call", { origin: "http://[::1]:9224" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a present non-loopback Origin", () => {
+    expect(
+      isRequestOriginAllowed(
+        makeRequest("POST", "/call", {
+          origin: "https://evil.attacker.com",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects an unparseable Origin", () => {
+    expect(
+      isRequestOriginAllowed(
+        makeRequest("POST", "/call", { origin: "not a url" }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("handleBridgeRequest anti-rebinding gate", () => {
+  const client: BridgeClient = {
+    listTools: async () => ({ tools: [{ name: "take_snapshot" }] }),
+    callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    close: async () => {},
+  };
+
+  it("rejects a forged non-loopback Host with 403 on every route", async () => {
+    for (const [method, url] of [
+      ["GET", "/health"],
+      ["GET", "/tools"],
+      ["POST", "/call"],
+    ] as const) {
+      const { res, captured } = makeResponse();
+      await handleBridgeRequest(
+        client,
+        makeRequest(method, url, { host: "evil.attacker.com" }),
+        res,
+      );
+      expect(captured.statusCode).toBe(403);
+      expect(JSON.parse(captured.body)).toEqual({ error: "Forbidden host" });
+    }
+  });
+
+  it("rejects a request with no Host header", async () => {
+    const req = makeRequest("GET", "/health");
+    delete req.headers.host;
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(client, req, res);
+
+    expect(captured.statusCode).toBe(403);
+    expect(JSON.parse(captured.body)).toEqual({ error: "Forbidden host" });
+  });
+
+  it("rejects a forged non-loopback Origin even when Host is loopback", async () => {
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("POST", "/call", {
+        host: "127.0.0.1:9224",
+        origin: "https://evil.attacker.com",
+      }),
+      res,
+    );
+
+    expect(captured.statusCode).toBe(403);
+    expect(JSON.parse(captured.body)).toEqual({ error: "Forbidden host" });
+  });
+
+  it("does not invoke any CDP tool when a request is rejected", async () => {
+    let callToolCalls = 0;
+    const spyClient: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        callToolCalls++;
+        return { content: [] };
+      },
+      close: async () => {},
+    };
+    const { res } = makeResponse();
+
+    await handleBridgeRequest(
+      spyClient,
+      makeRequest("POST", "/call", { host: "evil.attacker.com" }),
+      res,
+    );
+
+    expect(callToolCalls).toBe(0);
+  });
+
+  it("allows a loopback Host with no Origin through to /call", async () => {
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/call",
+        { host: "127.0.0.1:9224" },
+        JSON.stringify({ name: "take_snapshot" }),
+      ),
+      res,
+    );
+
+    expect(captured.statusCode).toBe(200);
+    expect(JSON.parse(captured.body)).toEqual({ result: "ok" });
+  });
+
+  it("logs the refusal (host/origin/route) when a request is rejected", async () => {
+    const logs: string[] = [];
+    const { res } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("POST", "/call", {
+        host: "evil.attacker.com",
+        origin: "https://evil.attacker.com",
+      }),
+      res,
+      undefined,
+      (message) => logs.push(message),
+    );
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("evil.attacker.com");
+    expect(logs[0]).toContain("/call");
+  });
+
+  it("does not log when a request is allowed", async () => {
+    const logs: string[] = [];
+    const { res } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("GET", "/tools", { host: "127.0.0.1:9224" }),
+      res,
+      undefined,
+      (message) => logs.push(message),
+    );
+
+    expect(logs).toHaveLength(0);
+  });
+
+  it("allows a loopback Host + loopback Origin through to /tools", async () => {
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("GET", "/tools", {
+        host: "localhost:9224",
+        origin: "http://localhost:9224",
+      }),
+      res,
+    );
+
+    expect(captured.statusCode).toBe(200);
+    expect(isRequestAllowed(makeRequest("GET", "/tools"))).toBe(true);
   });
 });
 
