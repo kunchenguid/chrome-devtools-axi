@@ -1,0 +1,13 @@
+DNS rebinding bridge validation through real HTTP requests
+forged Host GET /health: 403 {"error":"Forbidden host"}
+forged Host GET /tools: 403 {"error":"Forbidden host"}
+forged Host POST /call: 403 {"error":"Forbidden host"}
+CDP calls after forged /call: 0
+forged Origin POST /call: 403 {"error":"Forbidden host"}
+CDP calls after forged Origin: 0
+present empty Origin POST /call: 200 {"result":"ok"}
+CDP calls after present empty Origin: 1
+CLI-shaped 127.0.0.1 /health: 200 {"status":"ok","session":"evidence"}
+localhost + loopback Origin /tools: 200 [{"name":"take_snapshot"}]
+IPv6 Host, missing Origin POST /call: 200 {"result":"ok"}
+CDP calls after legitimate /call: 2
