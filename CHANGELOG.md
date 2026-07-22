@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.27](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.26...chrome-devtools-axi-v0.1.27) (2026-07-22)
+
+
+### Bug Fixes
+
+* **bridge:** reject non-loopback Host/Origin to block DNS rebinding (GHSA-x439-jhfh-v9x2) ([4ee5a49](https://github.com/kunchenguid/chrome-devtools-axi/commit/4ee5a49bbdec0c7c0b43aa6d9d6775798fa97534))
+
 ## [0.1.26](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.25...chrome-devtools-axi-v0.1.26) (2026-07-01)
 
 
