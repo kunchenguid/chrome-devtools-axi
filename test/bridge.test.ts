@@ -126,13 +126,21 @@ describe("buildTransportArgs", () => {
       "chrome-devtools-mcp@latest",
       "--isolated",
       "--headless",
+      "--chrome-arg=--use-mock-keychain",
+      "--chrome-arg=--password-store=basic",
     ]);
   });
 
   it("omits --headless when CHROME_DEVTOOLS_AXI_HEADED=1", () => {
     process.env.CHROME_DEVTOOLS_AXI_HEADED = "1";
     const args = buildTransportArgs();
-    expect(args).toEqual(["-y", "chrome-devtools-mcp@latest", "--isolated"]);
+    expect(args).toEqual([
+      "-y",
+      "chrome-devtools-mcp@latest",
+      "--isolated",
+      "--chrome-arg=--use-mock-keychain",
+      "--chrome-arg=--password-store=basic",
+    ]);
   });
 
   it("forwards chrome args via --chrome-arg=", () => {
@@ -150,7 +158,12 @@ describe("buildTransportArgs", () => {
     expect(args).toContain("--chrome-arg=--flag-a");
     expect(args).toContain("--chrome-arg=--flag-b");
     expect(args).toContain("--chrome-arg=--flag-c");
-    expect(args.filter((a) => a.startsWith("--chrome-arg="))).toHaveLength(3);
+    expect(
+      args.filter(
+        (a) =>
+          a.startsWith("--chrome-arg=") && a.startsWith("--chrome-arg=--flag"),
+      ),
+    ).toHaveLength(3);
   });
 
   it("combines headed mode with chrome args", () => {

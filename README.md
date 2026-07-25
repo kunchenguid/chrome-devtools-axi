@@ -302,6 +302,14 @@ export CHROME_DEVTOOLS_AXI_CHANNEL=beta
 This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
 It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
 
+### Keychain isolation
+
+When chrome-devtools-axi launches Chrome itself - the default `--isolated` mode and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` - it always passes `--use-mock-keychain` and `--password-store=basic`.
+An automation browser has no business reading, writing, or offering to reset your OS password store, so it is kept off it entirely.
+On macOS this also means the browser can never raise the system "Keychain Not Found ... Reset To Defaults" panel, which Chrome triggers when it tries to store its `Chrome Safe Storage` key and no default keychain can be resolved for the process.
+
+Your own Chrome is unaffected: these flags apply only to browsers this tool starts, and are deliberately not sent in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `CHROME_DEVTOOLS_AXI_BROWSER_URL`, and `wsEndpoint` modes, where the browser belongs to whoever launched it.
+
 Run multiple isolated bridges at once with `CHROME_DEVTOOLS_AXI_SESSION` - one per agent session, worktree, or test worker:
 
 ```sh

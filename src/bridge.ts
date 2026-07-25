@@ -436,6 +436,30 @@ function writeReadySignal(): void {
   process.stdout.write("READY\n");
 }
 
+/**
+ * Chrome flags that keep a browser *we* launch away from the machine owner's
+ * login keychain.
+ *
+ * `--use-mock-keychain` makes Chromium's OSCrypt use an in-memory mock instead
+ * of the real `Chrome Safe Storage` keychain item; `--password-store=basic`
+ * keeps the password store off the platform secret service. Without them a
+ * launched Chrome calls `SecItemAdd` against the login keychain, and if that
+ * keychain is not resolvable for the browser process (for example because it
+ * was spawned with a redirected `HOME`) macOS answers `errSecNoDefaultKeychain`
+ * and raises the `system.keychain.create.loginkc` authorization panel -
+ * "Keychain Not Found ... Reset To Defaults" - on the machine owner's screen.
+ *
+ * Puppeteer happens to pass both flags in its own default set today, so this is
+ * currently belt-and-braces. It is stated explicitly because the isolation is a
+ * property we owe our users, not one we want to silently inherit from an
+ * upstream default that could change: an automation browser must never be able
+ * to reach - or offer to reset - the owner's password store.
+ */
+export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
+  "--use-mock-keychain",
+  "--password-store=basic",
+] as const;
+
 export function buildTransportArgs(): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest"];
 
@@ -487,6 +511,12 @@ export function buildTransportArgs(): string[] {
     }
     if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
       args.push("--headless");
+    }
+    // Launch modes only: `--chrome-arg` is ignored when chrome-devtools-mcp
+    // attaches to a browser somebody else started, and that browser's keychain
+    // policy is its owner's to decide, not ours.
+    for (const arg of KEYCHAIN_ISOLATION_CHROME_ARGS) {
+      args.push(`--chrome-arg=${arg}`);
     }
   }
 
