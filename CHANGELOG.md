@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.28](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.27...chrome-devtools-axi-v0.1.28) (2026-07-25)
+
+
+### Bug Fixes
+
+* **bridge:** enforce keychain isolation for launched Chrome ([#91](https://github.com/kunchenguid/chrome-devtools-axi/issues/91)) ([aa162e8](https://github.com/kunchenguid/chrome-devtools-axi/commit/aa162e87f1894593470fd833c36942bdb04b78a3))
+* execute every PR body compliance event ([#89](https://github.com/kunchenguid/chrome-devtools-axi/issues/89)) ([3a1aa04](https://github.com/kunchenguid/chrome-devtools-axi/commit/3a1aa04be8eaa7006211f0ee6d3ff46bbe77d68e))
+
 ## [0.1.27](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.26...chrome-devtools-axi-v0.1.27) (2026-07-22)
 
 
