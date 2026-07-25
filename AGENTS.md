@@ -51,9 +51,11 @@ Teardown is careful about orphans: the bridge kills its own process group on exi
 Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, `CHANNEL` (`--channel` to pick which installed Chrome release channel is attached to or launched, omitted in `BROWSER_URL`/`wsEndpoint` mode), and `HEADED`.
 
 The launch modes (`--isolated`/`--userDataDir`) also pass `KEYCHAIN_ISOLATION_CHROME_ARGS` - `--use-mock-keychain` and `--password-store=basic` - so a browser we start can never reach the machine owner's password store.
+Password autofill and saved-password access are intentionally unavailable inside those automation sessions.
 On macOS a Chrome that does reach it, from a process whose `HOME` has no login keychain, gets `errSecNoDefaultKeychain` and raises the `system.keychain.create.loginkc` panel ("Keychain Not Found ... Reset To Defaults") on the owner's screen; `test/keychain-isolation.test.ts` documents that chain and holds the invariant.
 Puppeteer passes both flags in its own defaults today, so this is defence in depth - stated explicitly because the isolation is ours to guarantee, not an upstream default to inherit silently.
-The attach modes deliberately omit them: `--chrome-arg` is inert when chrome-devtools-mcp does not launch the browser, and that browser's keychain policy belongs to whoever started it.
+The machine owner's externally launched Chrome retains its saved passwords unchanged because this tool never reads, writes, moves, or resets the login keychain or its `Chrome Safe Storage` item.
+The attach modes deliberately omit the isolation flags: `--chrome-arg` is inert when chrome-devtools-mcp does not launch the browser, and that browser's keychain policy belongs to whoever started it.
 
 Named sessions (`CHROME_DEVTOOLS_AXI_SESSION`, `src/sessions.ts`) give each name its own bridge - its own port (explicit `CHROME_DEVTOOLS_AXI_PORT`, else a deterministic FNV-1a hash of the name) and its own state dir under `~/.chrome-devtools-axi/sessions/<name>/` (PID file + generation counter) - so concurrent sessions don't share a bridge or each other's stale-ref tracking.
 The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-axi/` paths, so existing behavior is unchanged.
