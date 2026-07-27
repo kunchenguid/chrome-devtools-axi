@@ -133,7 +133,7 @@ pnpm link
 ```
 
 - **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation
-- **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, and reaps child processes on stop
+- **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, shuts down after 30 idle minutes, and reaps child processes on stop
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
 
@@ -272,6 +272,14 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 
 ```sh
 export CHROME_DEVTOOLS_AXI_PORT=9225
+```
+
+The bridge stays alive between commands, then shuts down its MCP and browser
+processes after 30 minutes without a request. Override that idle window in
+milliseconds when a workflow needs longer pauses:
+
+```sh
+export CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=7200000
 ```
 
 Connect to an existing Chrome instance instead of launching one:

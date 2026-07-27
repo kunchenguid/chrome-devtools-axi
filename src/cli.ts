@@ -100,6 +100,9 @@ environment:
                                       export CHROME_DEVTOOLS_AXI_MCP_PATH="\$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
+  CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
+                                    Shut down an unused bridge and its browser after this many ms
+                                    (default: 1800000 / 30 minutes, min: 1000)
 
 gpu:
   Headless Chrome cannot access hardware GPU on most Linux systems.

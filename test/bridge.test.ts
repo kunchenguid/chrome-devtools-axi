@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
   buildTransportArgs,
+  createBridgeIdleWatchdog,
+  createBridgeServer,
   detectGlobalMcpPath,
   extractHostHeaderHostname,
   extractToolText,
@@ -20,10 +23,90 @@ import {
   isBridgeTargetReachable,
   parseBridgeCallPayload,
   removePidFile,
+  resolveBridgeIdleTimeoutMs,
   resolveBridgeScript,
   resolveTransportSpec,
   type BridgeClient,
 } from "../src/bridge.js";
+
+describe("bridge idle lifecycle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("defaults to a 30-minute idle window and validates overrides", () => {
+    expect(resolveBridgeIdleTimeoutMs("")).toBe(DEFAULT_BRIDGE_IDLE_TIMEOUT_MS);
+    expect(resolveBridgeIdleTimeoutMs("60000")).toBe(60_000);
+    expect(() => resolveBridgeIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
+    expect(() => resolveBridgeIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
+  });
+
+  it("shuts down after inactivity but never during an active request", async () => {
+    vi.useFakeTimers();
+    const onIdle = vi.fn();
+    const watchdog = createBridgeIdleWatchdog(1000, onIdle);
+
+    const finishRequest = watchdog.beginRequest();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onIdle).not.toHaveBeenCalled();
+
+    finishRequest();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(onIdle).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it("resets the idle window after every completed request", async () => {
+    vi.useFakeTimers();
+    const onIdle = vi.fn();
+    const watchdog = createBridgeIdleWatchdog(1000, onIdle);
+
+    await vi.advanceTimersByTimeAsync(900);
+    watchdog.beginRequest()();
+    await vi.advanceTimersByTimeAsync(900);
+    expect(onIdle).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it("tracks each HTTP request through the server lifecycle", async () => {
+    let starts = 0;
+    let finishes = 0;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const server = createBridgeServer(client, "idle-test", {
+      beginRequest: () => {
+        starts++;
+        return () => {
+          finishes++;
+        };
+      },
+      stop: () => {},
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected an ephemeral TCP address");
+      }
+      const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+      expect(response.status).toBe(200);
+      expect(starts).toBe(1);
+      expect(finishes).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+});
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {

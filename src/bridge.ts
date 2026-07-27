@@ -60,6 +60,89 @@ export interface BridgeClient {
   close(): Promise<void>;
 }
 
+export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Resolve how long an unused bridge stays alive. The bridge is intentionally
+ * persistent across short-lived CLI invocations, but it must eventually reap
+ * its MCP/Chrome process tree when the owning agent disappears without
+ * running `stop`.
+ */
+export function resolveBridgeIdleTimeoutMs(
+  value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS,
+): number {
+  if (value === undefined || value === "") {
+    return DEFAULT_BRIDGE_IDLE_TIMEOUT_MS;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1000) {
+    throw new Error(
+      "CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS must be an integer >= 1000",
+    );
+  }
+  return parsed;
+}
+
+export interface BridgeIdleWatchdog {
+  beginRequest(): () => void;
+  stop(): void;
+}
+
+/**
+ * Shut down a bridge after a bounded period with no HTTP clients. In-flight
+ * requests suspend the timer, and every completed request starts a fresh idle
+ * window. The returned completion callback is idempotent so request error
+ * paths cannot accidentally underflow the active-request count.
+ */
+export function createBridgeIdleWatchdog(
+  timeoutMs: number,
+  onIdle: () => void | Promise<void>,
+): BridgeIdleWatchdog {
+  let activeRequests = 0;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearTimer = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
+  const arm = () => {
+    clearTimer();
+    if (stopped || activeRequests > 0) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (stopped || activeRequests > 0) return;
+      stopped = true;
+      void onIdle();
+    }, timeoutMs);
+    timer.unref();
+  };
+
+  arm();
+
+  return {
+    beginRequest() {
+      if (stopped) return () => {};
+      clearTimer();
+      activeRequests++;
+      let finished = false;
+      return () => {
+        if (finished || stopped) return;
+        finished = true;
+        activeRequests--;
+        arm();
+      };
+    },
+    stop() {
+      stopped = true;
+      clearTimer();
+    },
+  };
+}
+
 export async function isBridgeClientConnected(
   client: BridgeClient,
 ): Promise<boolean> {
@@ -387,9 +470,19 @@ export async function handleBridgeRequest(
 export function createBridgeServer(
   client: BridgeClient,
   sessionName?: string,
+  idleWatchdog?: BridgeIdleWatchdog,
 ): Server {
   return createServer((req, res) => {
-    void handleBridgeRequest(client, req, res, sessionName, logBridgeMessage);
+    const finishRequest = idleWatchdog?.beginRequest();
+    void handleBridgeRequest(
+      client,
+      req,
+      res,
+      sessionName,
+      logBridgeMessage,
+    ).finally(() => {
+      finishRequest?.();
+    });
   });
 }
 
@@ -640,6 +733,8 @@ async function closeServer(server: Server): Promise<void> {
 }
 
 export async function runBridge(port = resolveSessionPort()): Promise<void> {
+  const idleTimeoutMs = resolveBridgeIdleTimeoutMs();
+
   // Connect the MCP transport (which spawns chrome-devtools-mcp and launches
   // Chrome) before binding the port. A same-session bind race then self-heals:
   // both racers finish booting before listen(), so the loser's EADDRINUSE exit
@@ -652,26 +747,37 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
-  const server = createBridgeServer(client, sessionName);
+  let idleWatchdog: BridgeIdleWatchdog | undefined;
+  const requestActivity: BridgeIdleWatchdog = {
+    beginRequest: () => idleWatchdog?.beginRequest() ?? (() => {}),
+    stop: () => idleWatchdog?.stop(),
+  };
+  const server = createBridgeServer(client, sessionName, requestActivity);
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);
   });
-  server.listen(port, "127.0.0.1", () => {
-    writePidFile(port);
-    logBridgeMessage(`Listening on http://127.0.0.1:${port}`);
-    writeReadySignal();
-  });
 
   let shuttingDown = false;
-  const shutdown = async () => {
+  const shutdown = async (reason?: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    idleWatchdog?.stop();
+    if (reason) logBridgeMessage(reason);
     removePidFile();
     await closeServer(server);
     await client.close();
     await transport.close();
     process.exit(0);
   };
+
+  server.listen(port, "127.0.0.1", () => {
+    writePidFile(port);
+    logBridgeMessage(`Listening on http://127.0.0.1:${port}`);
+    writeReadySignal();
+    idleWatchdog = createBridgeIdleWatchdog(idleTimeoutMs, () =>
+      shutdown(`Idle for ${idleTimeoutMs}ms; shutting down`),
+    );
+  });
 
   // Kill our entire process group on exit so chrome-devtools-mcp children
   // don't survive as orphans. The bridge is spawned with detached:true,

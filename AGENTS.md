@@ -46,6 +46,7 @@ The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP to
 Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/bridge.ts`) **detached** as a process group leader and polls health until the `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` deadline (default 30s).
 
 The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
+Every request refreshes an idle watchdog (`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, 30 minutes by default); when the window expires with no request in flight, the bridge shuts down cleanly so its MCP, Chrome process tree, and temporary profile do not survive an abandoned agent.
 Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
 
 `resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else an auto-detected global npm install (fast), else `npx -y chrome-devtools-mcp@latest` (slow first run).
