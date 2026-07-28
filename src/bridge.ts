@@ -528,6 +528,18 @@ export function buildTransportArgs(): string[] {
     args.push(`--channel=${channel}`);
   }
 
+  // --executablePath names the exact browser binary chrome-devtools-mcp launches.
+  // Without it the launch modes fall back to a Puppeteer channel lookup, which
+  // cannot resolve a browser that is not installed through a Chrome distribution
+  // (a store path, a portable build, or a custom location). It is launch-only, so
+  // it is omitted when attaching to an endpoint, with --autoConnect, or when a
+  // --channel already selects an installed distribution. A blank value is treated
+  // as unset so an empty export never forces the engine onto an empty path.
+  const executablePath = process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH?.trim();
+  if (executablePath && !browserUrl && !autoConnect && !channel) {
+    args.push(`--executablePath=${executablePath}`);
+  }
+
   const extraChromeArgs = process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
   if (extraChromeArgs) {
     for (const arg of extraChromeArgs.trim().split(/\s+/)) {

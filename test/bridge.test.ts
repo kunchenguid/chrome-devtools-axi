@@ -93,6 +93,8 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
       process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    savedEnv.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH =
+      process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -100,6 +102,7 @@ describe("buildTransportArgs", () => {
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    delete process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH;
   });
 
   afterEach(() => {
@@ -266,6 +269,54 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
     expect(args).toContain("--channel=canary");
+  });
+
+  it("omits --executablePath by default", () => {
+    const args = buildTransportArgs();
+    expect(args.some((a) => a.startsWith("--executablePath"))).toBe(false);
+  });
+
+  it("appends --executablePath in the default launch mode", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "/opt/chromium/chrome";
+    const args = buildTransportArgs();
+    expect(args).toContain("--executablePath=/opt/chromium/chrome");
+  });
+
+  it("appends --executablePath alongside --userDataDir", () => {
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "/opt/chromium/chrome";
+    const args = buildTransportArgs();
+    expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
+    expect(args).toContain("--executablePath=/opt/chromium/chrome");
+  });
+
+  it("treats a blank --executablePath as unset", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "   ";
+    const args = buildTransportArgs();
+    expect(args.some((a) => a.startsWith("--executablePath"))).toBe(false);
+  });
+
+  it("ignores --executablePath when connecting via --browserUrl", () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "/opt/chromium/chrome";
+    const args = buildTransportArgs();
+    expect(args.some((a) => a.startsWith("--executablePath"))).toBe(false);
+  });
+
+  it("ignores --executablePath with --autoConnect", () => {
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "/opt/chromium/chrome";
+    const args = buildTransportArgs();
+    expect(args).toContain("--autoConnect");
+    expect(args.some((a) => a.startsWith("--executablePath"))).toBe(false);
+  });
+
+  it("ignores --executablePath when a channel selects the browser", () => {
+    process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH = "/opt/chromium/chrome";
+    const args = buildTransportArgs();
+    expect(args).toContain("--channel=beta");
+    expect(args.some((a) => a.startsWith("--executablePath"))).toBe(false);
   });
 
   it("ignores --channel when connecting via --browserUrl", () => {
