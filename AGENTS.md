@@ -25,6 +25,7 @@ Its frontmatter includes Hermes Agent metadata from `src/skill.ts`; update the g
 - Tests live in `test/*.test.ts` and run with Vitest.
 - Run `pnpm run build` and `pnpm test` before pushing.
 - Do not hand-edit generated files: `CHANGELOG.md` and `.release-please-manifest.json` (owned by release-please) or `skills/chrome-devtools-axi/SKILL.md` (owned by `build:skill`).
+- Every `pull_request` workflow (`ci.yml`, `guard-generated-files.yml`, `no-mistakes-required.yml`) uses `paths-ignore` for the release-please output set (`.release-please-manifest.json`, `CHANGELOG.md`, `package.json`) so release PRs create zero runs. Job-level bot `if`s stay as defense in depth. `test/release-ci-exclusions.test.ts` derives that set from `release-please-config.json` and fails if a workflow drifts; update the ignore lists when adding `extra-files` or changing `release-type`.
 - Generated files are listed in `.prettierignore`; validate them with their generator checks instead of formatting them directly.
 - Keep `skills/chrome-devtools-axi/` in the npm `files` list when changing package contents; the skill-first install path depends on it shipping with the package.
 - `pnpm-workspace.yaml` enforces a minimum release age for dependency updates as a supply-chain guard; `axi-sdk-js` and `chrome-devtools-axi` are exempt.
