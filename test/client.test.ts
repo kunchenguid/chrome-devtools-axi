@@ -15,6 +15,7 @@ import {
   ensureBridge,
   getSessionSnapshotIfRunning,
   mapErrorMessage,
+  resolveBridgeOwnerPid,
   resolveBridgeTimeoutMs,
   type SpawnedBridge,
   stopBridge,
@@ -78,6 +79,26 @@ describe("unsafe session names are rejected on action entry points", () => {
   it("getSessionSnapshotIfRunning degrades an invalid session to null instead of throwing", async () => {
     process.env.CHROME_DEVTOOLS_AXI_SESSION = "..";
     await expect(getSessionSnapshotIfRunning()).resolves.toBeNull();
+  });
+});
+
+describe("resolveBridgeOwnerPid", () => {
+  const savedOwnerPid = process.env.CHROME_DEVTOOLS_AXI_OWNER_PID;
+
+  afterEach(() => {
+    if (savedOwnerPid === undefined)
+      delete process.env.CHROME_DEVTOOLS_AXI_OWNER_PID;
+    else process.env.CHROME_DEVTOOLS_AXI_OWNER_PID = savedOwnerPid;
+  });
+
+  it("uses an explicit stable supervisor PID", () => {
+    process.env.CHROME_DEVTOOLS_AXI_OWNER_PID = "12345";
+    expect(resolveBridgeOwnerPid()).toBe(12345);
+  });
+
+  it("does not infer ownership from a transient shell", () => {
+    delete process.env.CHROME_DEVTOOLS_AXI_OWNER_PID;
+    expect(resolveBridgeOwnerPid()).toBeUndefined();
   });
 });
 

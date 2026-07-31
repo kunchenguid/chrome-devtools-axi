@@ -134,6 +134,7 @@ pnpm link
 
 - **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation
 - **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, and reaps child processes on stop
+- **Bounded lifetime** — the detached bridge receives a cryptographic lease token and reaps itself after 45 seconds without a lease refresh, or after 15 minutes without client activity. Set `CHROME_DEVTOOLS_AXI_OWNER_PID` to a stable agent supervisor PID to also reap after the owner exits. Configure these safeguards with `CHROME_DEVTOOLS_AXI_LEASE_TIMEOUT_MS` and `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`. This prevents an agent crash from leaving an immortal bridge and launched Chrome tree behind.
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
 

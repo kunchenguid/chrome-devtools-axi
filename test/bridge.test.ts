@@ -11,6 +11,7 @@ import {
   extractHostHeaderHostname,
   extractToolText,
   getErrorMessage,
+  getBridgeReapReason,
   handleBridgeRequest,
   isAllowedBridgeHost,
   isRequestAllowed,
@@ -24,6 +25,99 @@ import {
   resolveTransportSpec,
   type BridgeClient,
 } from "../src/bridge.js";
+
+describe("getBridgeReapReason", () => {
+  const options = { idleTimeoutMs: 100, leaseTimeoutMs: 50 };
+
+  it("reaps an idle bridge only when no request is in flight", () => {
+    expect(
+      getBridgeReapReason(
+        {
+          nowMs: 200,
+          lastLeaseMs: 190,
+          lastActivityMs: 99,
+          activeRequests: 0,
+          ownerAlive: true,
+        },
+        options,
+      ),
+    ).toBe("idle");
+    expect(
+      getBridgeReapReason(
+        {
+          nowMs: 200,
+          lastLeaseMs: 190,
+          lastActivityMs: 99,
+          activeRequests: 1,
+          ownerAlive: true,
+        },
+        options,
+      ),
+    ).toBeNull();
+  });
+
+  it("does not reap a recent in-flight request even when the owner is dead", () => {
+    expect(
+      getBridgeReapReason(
+        {
+          nowMs: 200,
+          lastLeaseMs: 149,
+          lastActivityMs: 99,
+          activeRequests: 1,
+          oldestActiveRequestMs: 190,
+          ownerAlive: false,
+        },
+        options,
+      ),
+    ).toBeNull();
+  });
+
+  it("allows a wedged request to be reaped after the hard request limit", () => {
+    expect(
+      getBridgeReapReason(
+        {
+          nowMs: 300,
+          lastLeaseMs: 149,
+          lastActivityMs: 99,
+          activeRequests: 1,
+          oldestActiveRequestMs: 100,
+          ownerAlive: false,
+        },
+        { ...options, maxRequestMs: 100 },
+      ),
+    ).toBe("idle");
+  });
+
+  it("reaps after a dead owner's lease expires", () => {
+    expect(
+      getBridgeReapReason(
+        {
+          nowMs: 200,
+          lastLeaseMs: 149,
+          lastActivityMs: 190,
+          activeRequests: 0,
+          ownerAlive: false,
+        },
+        options,
+      ),
+    ).toBe("lease-expired");
+  });
+
+  it("keeps a live owner and recent bridge alive", () => {
+    expect(
+      getBridgeReapReason(
+        {
+          nowMs: 120,
+          lastLeaseMs: 100,
+          lastActivityMs: 100,
+          activeRequests: 0,
+          ownerAlive: true,
+        },
+        options,
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {
@@ -619,6 +713,54 @@ function makeResponse(): { res: ServerResponse; captured: CapturedResponse } {
   }) as typeof res.end;
   return { res, captured };
 }
+
+describe("handleBridgeRequest /lease", () => {
+  it("refreshes a valid lease and rejects a wrong token", async () => {
+    let activity = 0;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+
+    const valid = makeResponse();
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/lease",
+        {},
+        JSON.stringify({ token: "secret", ownerPid: 123 }),
+      ),
+      valid.res,
+      undefined,
+      undefined,
+      {
+        leaseToken: "secret",
+        onActivity: () => activity++,
+        onOwnerChange: (pid) => expect(pid).toBe(123),
+      },
+    );
+    expect(valid.captured.statusCode).toBe(200);
+    expect(activity).toBe(1);
+
+    const invalid = makeResponse();
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/lease",
+        {},
+        JSON.stringify({ token: "wrong", ownerPid: 123 }),
+      ),
+      invalid.res,
+      undefined,
+      undefined,
+      { leaseToken: "secret" },
+    );
+    expect(invalid.captured.statusCode).toBe(403);
+  });
+});
 
 describe("handleBridgeRequest /health", () => {
   it("returns 200 ok for shallow /health when MCP is connected", async () => {

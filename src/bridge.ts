@@ -16,6 +16,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -23,6 +24,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -60,6 +62,61 @@ export interface BridgeClient {
   close(): Promise<void>;
 }
 
+export const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export const DEFAULT_LEASE_TIMEOUT_MS = 45 * 1000;
+
+export interface BridgeLivenessState {
+  nowMs: number;
+  lastLeaseMs: number;
+  lastActivityMs: number;
+  activeRequests: number;
+  oldestActiveRequestMs?: number;
+  ownerAlive: boolean;
+}
+
+export interface BridgeReapOptions {
+  idleTimeoutMs: number;
+  leaseTimeoutMs: number;
+  maxRequestMs?: number;
+}
+
+/** Pure timeout decision used by the watchdog and unit tests. */
+export function getBridgeReapReason(
+  state: BridgeLivenessState,
+  options: BridgeReapOptions,
+): "idle" | "lease-expired" | null {
+  const requestsExpired =
+    state.activeRequests > 0 &&
+    state.oldestActiveRequestMs !== undefined &&
+    options.maxRequestMs !== undefined &&
+    state.nowMs - state.oldestActiveRequestMs >= options.maxRequestMs;
+  if (state.activeRequests > 0 && !requestsExpired) return null;
+  if (state.nowMs - state.lastActivityMs >= options.idleTimeoutMs) {
+    return "idle";
+  }
+  if (
+    !state.ownerAlive &&
+    state.nowMs - state.lastLeaseMs >= options.leaseTimeoutMs
+  ) {
+    return "lease-expired";
+  }
+  return null;
+}
+
+export function resolveLivenessTimeout(
+  name: "IDLE" | "LEASE",
+  defaultMs: number,
+): number {
+  const raw = process.env[`CHROME_DEVTOOLS_AXI_${name}_TIMEOUT_MS`];
+  if (!raw) return defaultMs;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : defaultMs;
+}
+
+export function createLeaseToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
 export async function isBridgeClientConnected(
   client: BridgeClient,
 ): Promise<boolean> {
@@ -90,10 +147,19 @@ export async function isBridgeTargetReachable(
   }
 }
 
-function writePidFile(port: number): void {
+function writePidFile(port: number, leaseToken?: string): void {
   const pidFile = resolveSessionPidFile();
   mkdirSync(dirname(pidFile), { recursive: true });
-  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port }));
+  writeFileSync(
+    pidFile,
+    JSON.stringify({
+      pid: process.pid,
+      port,
+      ...(leaseToken ? { leaseToken } : {}),
+    }),
+    { mode: 0o600 },
+  );
+  chmodSync(pidFile, 0o600);
 }
 
 /**
@@ -227,6 +293,19 @@ export function extractToolText(content: BridgeContentBlock[]): string {
     .join("\n");
 }
 
+function monotonicNowMs(): number {
+  return Number(process.hrtime.bigint()) / 1_000_000;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getToolContent(result: unknown): BridgeContentBlock[] {
   if (
     !result ||
@@ -317,12 +396,61 @@ async function handleCallRequest(
   writeJson(res, 200, { result: extractToolText(getToolContent(result)) });
 }
 
+export interface BridgeRequestHooks {
+  onActivity?: () => void;
+  onLease?: () => void;
+  onRequestStart?: () => void;
+  onRequestEnd?: () => void;
+  leaseToken?: string;
+  onOwnerChange?: (pid: number | undefined) => void;
+}
+
+async function handleLeaseRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  hooks: BridgeRequestHooks,
+): Promise<void> {
+  const body = await readRequestBody(req);
+  let payload: { token?: unknown; ownerPid?: unknown };
+  try {
+    payload = JSON.parse(body) as { token?: unknown; ownerPid?: unknown };
+  } catch {
+    writeJson(res, 400, { error: "Invalid lease request payload" });
+    return;
+  }
+  if (!hooks.leaseToken || payload.token !== hooks.leaseToken) {
+    writeJson(res, 403, { error: "Invalid lease" });
+    return;
+  }
+  if (
+    payload.ownerPid !== undefined &&
+    payload.ownerPid !== null &&
+    (typeof payload.ownerPid !== "number" ||
+      !Number.isInteger(payload.ownerPid) ||
+      payload.ownerPid <= 0)
+  ) {
+    writeJson(res, 400, { error: "Invalid owner PID" });
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "ownerPid")) {
+    hooks.onOwnerChange?.(
+      payload.ownerPid === null
+        ? undefined
+        : (payload.ownerPid as number | undefined),
+    );
+  }
+  hooks.onLease?.();
+  hooks.onActivity?.();
+  writeJson(res, 200, { status: "ok" });
+}
+
 export async function handleBridgeRequest(
   client: BridgeClient,
   req: IncomingMessage,
   res: ServerResponse,
   sessionName?: string,
   logForbidden?: (message: string) => void,
+  hooks: BridgeRequestHooks = {},
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -366,30 +494,46 @@ export async function handleBridgeRequest(
     return;
   }
 
+  hooks.onRequestStart?.();
   try {
     if (req.method === "GET" && req.url === "/tools") {
+      hooks.onActivity?.();
       await handleToolsRequest(client, res);
       return;
     }
 
     if (req.method === "POST" && req.url === "/call") {
+      hooks.onActivity?.();
       await handleCallRequest(client, req, res);
       return;
     }
+
+    if (req.method === "POST" && req.url === "/lease") {
+      await handleLeaseRequest(req, res, hooks);
+      return;
+    }
+    writeJson(res, 404, { error: "not found" });
   } catch (error) {
     writeJson(res, 500, { error: getErrorMessage(error) });
-    return;
+  } finally {
+    hooks.onRequestEnd?.();
   }
-
-  writeJson(res, 404, { error: "not found" });
 }
 
 export function createBridgeServer(
   client: BridgeClient,
   sessionName?: string,
+  hooks: BridgeRequestHooks = {},
 ): Server {
   return createServer((req, res) => {
-    void handleBridgeRequest(client, req, res, sessionName, logBridgeMessage);
+    void handleBridgeRequest(
+      client,
+      req,
+      res,
+      sessionName,
+      logBridgeMessage,
+      hooks,
+    );
   });
 }
 
@@ -652,31 +796,95 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
-  const server = createBridgeServer(client, sessionName);
+  const leaseToken =
+    process.env.CHROME_DEVTOOLS_AXI_LEASE_TOKEN ?? createLeaseToken();
+  let ownerPid = Number.parseInt(
+    process.env.CHROME_DEVTOOLS_AXI_OWNER_PID ?? "",
+    10,
+  );
+  let lastLeaseMs = monotonicNowMs();
+  let lastActivityMs = lastLeaseMs;
+  let activeRequests = 0;
+  let oldestActiveRequestMs: number | undefined;
+  const server = createBridgeServer(client, sessionName, {
+    leaseToken,
+    onActivity: () => {
+      lastActivityMs = monotonicNowMs();
+    },
+    onRequestStart: () => {
+      activeRequests++;
+      oldestActiveRequestMs ??= monotonicNowMs();
+    },
+    onRequestEnd: () => {
+      activeRequests = Math.max(0, activeRequests - 1);
+      if (activeRequests === 0) oldestActiveRequestMs = undefined;
+    },
+    onLease: () => {
+      lastLeaseMs = monotonicNowMs();
+    },
+    onOwnerChange: (pid) => {
+      ownerPid = pid ?? Number.NaN;
+    },
+  });
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);
   });
   server.listen(port, "127.0.0.1", () => {
-    writePidFile(port);
+    writePidFile(port, leaseToken);
     logBridgeMessage(`Listening on http://127.0.0.1:${port}`);
     writeReadySignal();
   });
 
   let shuttingDown = false;
+  let watchdog: NodeJS.Timeout | undefined;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (watchdog) clearInterval(watchdog);
+    const forceExit = setTimeout(() => process.exit(0), 5_000);
+    forceExit.unref();
     removePidFile();
+    server.closeAllConnections();
     await closeServer(server);
     await client.close();
     await transport.close();
+    clearTimeout(forceExit);
     process.exit(0);
   };
+
+  watchdog = setInterval(() => {
+    const ownerAlive =
+      !Number.isInteger(ownerPid) || ownerPid <= 0 || isProcessAlive(ownerPid);
+    const reason = getBridgeReapReason(
+      {
+        nowMs: monotonicNowMs(),
+        lastLeaseMs,
+        lastActivityMs,
+        activeRequests,
+        oldestActiveRequestMs,
+        ownerAlive,
+      },
+      {
+        idleTimeoutMs: resolveLivenessTimeout("IDLE", DEFAULT_IDLE_TIMEOUT_MS),
+        leaseTimeoutMs: resolveLivenessTimeout(
+          "LEASE",
+          DEFAULT_LEASE_TIMEOUT_MS,
+        ),
+        maxRequestMs: 125_000,
+      },
+    );
+    if (reason) {
+      logBridgeMessage(`Self-reaping bridge: ${reason}`);
+      void shutdown().catch(() => process.exit(1));
+    }
+  }, 1000);
+  watchdog.unref();
 
   // Kill our entire process group on exit so chrome-devtools-mcp children
   // don't survive as orphans. The bridge is spawned with detached:true,
   // making it a process group leader — all children share our PGID.
   process.on("exit", () => {
+    if (watchdog) clearInterval(watchdog);
     removePidFile();
     try {
       process.kill(-process.pid, "SIGTERM");
@@ -686,9 +894,9 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   });
 
   process.on("SIGTERM", () => {
-    void shutdown();
+    void shutdown().catch(() => process.exit(1));
   });
   process.on("SIGINT", () => {
-    void shutdown();
+    void shutdown().catch(() => process.exit(1));
   });
 }

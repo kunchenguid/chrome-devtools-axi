@@ -6,7 +6,11 @@ import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
 import { AxiError } from "axi-sdk-js";
-import { BRIDGE_PORT_IN_USE_EXIT_CODE, resolveBridgeScript } from "./bridge.js";
+import {
+  BRIDGE_PORT_IN_USE_EXIT_CODE,
+  createLeaseToken,
+  resolveBridgeScript,
+} from "./bridge.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -17,6 +21,21 @@ const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
 const MIN_BRIDGE_TIMEOUT_MS = 1_000;
 const HEALTH_TIMEOUT_MS = 2_000;
 const DEEP_HEALTH_TIMEOUT_MS = 5_000;
+
+/**
+ * The CLI is short-lived. Use an explicit stable supervisor PID when the
+ * owner-death lease is wanted; otherwise the token lease is refreshed by CLI
+ * activity and the idle TTL remains the backstop.
+ */
+export function resolveBridgeOwnerPid(): number | undefined {
+  const configured = Number.parseInt(
+    process.env.CHROME_DEVTOOLS_AXI_OWNER_PID ?? "",
+    10,
+  );
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : undefined;
+}
 
 /**
  * Resolve the bridge readiness deadline in milliseconds.
@@ -56,6 +75,7 @@ export class CdpError extends AxiError {
 interface PidInfo {
   pid: number;
   port: number;
+  leaseToken?: string;
 }
 
 function readPidFile(
@@ -187,6 +207,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function refreshBridgeLease(
+  port: number,
+  leaseToken: string | undefined,
+  ownerPid = resolveBridgeOwnerPid(),
+): Promise<void> {
+  if (!leaseToken) return;
+  await httpPost(
+    port,
+    "/lease",
+    {
+      token: leaseToken,
+      ownerPid: ownerPid ?? null,
+    },
+    HEALTH_TIMEOUT_MS,
+  );
+}
+
 export async function waitForProcessExit(
   pid: number,
   timeoutMs: number,
@@ -284,6 +321,8 @@ export interface SpawnedBridge {
  */
 function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
   const bridgeScript = resolveBridgeScript(import.meta.dirname);
+  const leaseToken = createLeaseToken();
+  const ownerPid = resolveBridgeOwnerPid();
   const script = existsSync(bridgeScript.replace(/\.js$/, ".ts"))
     ? bridgeScript.replace(/\.js$/, ".ts")
     : bridgeScript;
@@ -298,6 +337,10 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
         ...process.env,
         CHROME_DEVTOOLS_AXI_PORT: String(port),
         CHROME_DEVTOOLS_AXI_SESSION: sessionName,
+        CHROME_DEVTOOLS_AXI_LEASE_TOKEN: leaseToken,
+        ...(ownerPid === undefined
+          ? {}
+          : { CHROME_DEVTOOLS_AXI_OWNER_PID: String(ownerPid) }),
       },
       detached: true,
     },
@@ -387,6 +430,13 @@ export async function ensureBridge(
         expectedSession: sessionName,
       })
     ) {
+      await refreshBridgeLease(
+        pidInfo.port,
+        pidInfo.leaseToken,
+        resolveBridgeOwnerPid(),
+      ).catch(() => {
+        // A lease refresh must not prevent reuse of a healthy bridge.
+      });
       return pidInfo.port;
     }
     await terminateBridgeProcess(pidInfo.pid, {
@@ -426,6 +476,14 @@ export async function ensureBridge(
         expectedSession: sessionName,
       })
     ) {
+      const leaseInfo = readPidFile(pidFile);
+      await refreshBridgeLease(
+        port,
+        leaseInfo?.leaseToken,
+        resolveBridgeOwnerPid(),
+      ).catch(() => {
+        // A lease refresh must not prevent a healthy bridge from being used.
+      });
       return port;
     }
     if (childExited) {
@@ -435,6 +493,14 @@ export async function ensureBridge(
           expectedSession: sessionName,
         })
       ) {
+        const leaseInfo = readPidFile(pidFile);
+        await refreshBridgeLease(
+          port,
+          leaseInfo?.leaseToken,
+          resolveBridgeOwnerPid(),
+        ).catch(() => {
+          // A lease refresh must not prevent a healthy bridge from being used.
+        });
         return port;
       }
       throw buildBridgeEarlyExitError(sessionName, port, exitCode, exitSignal);
