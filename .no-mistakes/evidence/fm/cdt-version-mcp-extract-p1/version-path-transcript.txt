@@ -1,0 +1,30 @@
+chrome-devtools-axi version-path end-to-end evidence
+Captured 2026-08-06 from target commit 01a50a1846f1ea241e817801fa0f65ff4a11360c
+
+The executable dist CLI was invoked as an end user would invoke it. An ESM load
+hook recorded the modules Node actually loaded. The bridge invocation is the
+negative control: it deliberately fails after static imports, while proving that
+the same tracer detects the MCP SDK on the process that legitimately uses it.
+
+version.command=node dist/bin/chrome-devtools-axi.js --version
+version.exit=0
+version.stdout="0.1.28\n"
+version.stderr=""
+
+timing.runs=7
+timing.statistic=median
+timing.node_floor_median_ms=17.19
+timing.version_median_ms=31.09
+timing.delta_ms=13.91
+
+trace.version.exit=0
+trace.version.modules_loaded=25
+trace.version.mcp_modules_loaded=0
+
+trace.help.exit=0
+trace.help.modules_loaded=25
+trace.help.mcp_modules_loaded=0
+
+trace.bridge_negative_control.exit=1
+trace.bridge_negative_control.modules_loaded=158
+trace.bridge_negative_control.mcp_modules_loaded=11
