@@ -27,6 +27,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -50,6 +51,8 @@ export interface BridgeCallPayload {
   routeSession?: string;
   routeIdleTimeoutMs?: number;
 }
+
+export const AMBIENT_SNAPSHOT_TOOL = "__axi_snapshot_if_owned";
 
 interface BridgeToolDescription {
   name: string;
@@ -87,6 +90,13 @@ export function resolveBridgeIdleTimeoutMs(
     );
   }
   return parsed;
+}
+
+export function resolvePhysicalBridgeIdleTimeoutMs(
+  pooled: boolean,
+  value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS,
+): number {
+  return resolveBridgeIdleTimeoutMs(pooled ? undefined : value);
 }
 
 /**
@@ -228,17 +238,32 @@ function writePidFile(port: number): void {
   const now = new Date().toISOString();
   const session = resolveSessionName();
   mkdirSync(dirname(pidFile), { recursive: true });
-  writeFileSync(
-    pidFile,
-    JSON.stringify({
-      pid: process.pid,
-      port,
-      session,
-      startedAt: now,
-      lastActivityAt: now,
-      owner: resolveOwnerMetadata(),
-    }),
-  );
+  replacePidFileAtomically(pidFile, {
+    pid: process.pid,
+    port,
+    session,
+    startedAt: now,
+    lastActivityAt: now,
+    owner: resolveOwnerMetadata(),
+  });
+}
+
+let pidFileWriteSequence = 0;
+
+export function replacePidFileAtomically(
+  pidFile: string,
+  data: Record<string, unknown>,
+): void {
+  const temporaryFile = `${pidFile}.${process.pid}.${pidFileWriteSequence++}.tmp`;
+  try {
+    writeFileSync(temporaryFile, JSON.stringify(data));
+    renameSync(temporaryFile, pidFile);
+  } catch (error) {
+    try {
+      unlinkSync(temporaryFile);
+    } catch {}
+    throw error;
+  }
 }
 
 function touchPidFileActivity(): void {
@@ -249,13 +274,10 @@ function touchPidFileActivity(): void {
       unknown
     >;
     if (existing.pid !== process.pid) return;
-    writeFileSync(
-      pidFile,
-      JSON.stringify({
-        ...existing,
-        lastActivityAt: new Date().toISOString(),
-      }),
-    );
+    replacePidFileAtomically(pidFile, {
+      ...existing,
+      lastActivityAt: new Date().toISOString(),
+    });
   } catch {
     // Best-effort observability only.
   }
@@ -543,6 +565,10 @@ export class BrowserPageRouter {
       return this.formatOwnedPages(routeSession, pages);
     }
 
+    if (payload.name === AMBIENT_SNAPSHOT_TOOL) {
+      return await this.snapshotOwnedPageIfPresent(routeSession, payload, call);
+    }
+
     this.activeRouteSessions.add(routeSession);
     try {
       if (payload.name === "select_page") {
@@ -678,6 +704,31 @@ export class BrowserPageRouter {
     }
     this.rememberPage(routeSession, target.id, true);
     return pages;
+  }
+
+  private async snapshotOwnedPageIfPresent(
+    routeSession: string,
+    payload: BridgeCallPayload,
+    call: BridgeToolCall,
+  ): Promise<string> {
+    const pages = await this.listPages(call);
+    this.forgetMissingPages(pages);
+    const ownedPages = this.pagesByRouteSession.get(routeSession);
+    const activePageId = this.activePageByRouteSession.get(routeSession);
+    const target =
+      activePageId === undefined
+        ? pages.find((page) => ownedPages?.has(page.id))
+        : pages.find(
+            (page) => page.id === activePageId && ownedPages?.has(page.id),
+          );
+    if (!target) return "";
+    if (!target.selected) {
+      await call("select_page", { pageId: target.id, bringToFront: false });
+    }
+    this.rememberPage(routeSession, target.id, true);
+    const result = await call("take_snapshot", payload.args);
+    this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
+    return result;
   }
 
   /**
@@ -1090,14 +1141,16 @@ export function createBridgeServer(
       );
       return;
     }
-    const requestedIdleTimeout = req.headers["x-axi-idle-timeout-ms"];
-    const rawIdleTimeout = Array.isArray(requestedIdleTimeout)
-      ? requestedIdleTimeout[0]
-      : requestedIdleTimeout;
-    if (rawIdleTimeout !== undefined) {
-      const parsed = Number(rawIdleTimeout);
-      if (Number.isInteger(parsed) && parsed >= 1000) {
-        idleWatchdog?.setTimeoutMs(parsed);
+    if (!router && req.method === "POST" && req.url === "/call") {
+      const requestedIdleTimeout = req.headers["x-axi-idle-timeout-ms"];
+      const rawIdleTimeout = Array.isArray(requestedIdleTimeout)
+        ? requestedIdleTimeout[0]
+        : requestedIdleTimeout;
+      if (rawIdleTimeout !== undefined) {
+        const parsed = Number(rawIdleTimeout);
+        if (Number.isInteger(parsed) && parsed >= 1000) {
+          idleWatchdog?.setTimeoutMs(parsed);
+        }
       }
     }
     touchPidFileActivity();
@@ -1430,7 +1483,8 @@ async function closeServer(server: Server): Promise<void> {
 }
 
 export async function runBridge(port = resolveSessionPort()): Promise<void> {
-  const idleTimeoutMs = resolveBridgeIdleTimeoutMs();
+  const poolSize = resolveBrowserPoolSize();
+  const idleTimeoutMs = resolvePhysicalBridgeIdleTimeoutMs(poolSize !== null);
 
   // Connect the MCP transport (which spawns chrome-devtools-mcp and launches
   // Chrome) before binding the port. A same-session bind race then self-heals:
@@ -1445,7 +1499,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
 
   const sessionName = resolveSessionName();
   const router =
-    resolveBrowserPoolSize() === null
+    poolSize === null
       ? undefined
       : new BrowserPageRouter(resolveRouteIdleTimeoutMs());
   let idleWatchdog: BridgeIdleWatchdog | undefined;

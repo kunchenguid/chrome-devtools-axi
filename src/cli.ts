@@ -1899,6 +1899,9 @@ export async function main(
     (previousIdleTimeout === undefined
       ? readSessionIdleTimeoutPolicy()
       : undefined);
+  if (idleTimeoutMs !== undefined && !runtime.sessionStart) {
+    writeSessionIdleTimeoutPolicy(idleTimeoutMs);
+  }
   if (idleTimeoutMs !== undefined) {
     process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = String(idleTimeoutMs);
   }

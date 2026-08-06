@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, extname, join, resolve } from "node:path";
 import {
   computeCodexConfigUpdate as computeAxiCodexConfigUpdate,
   computeSessionStartHookUpdate,
@@ -173,15 +173,38 @@ export function getHookTargets(): HookTarget[] {
  * A global symbol prevents duplicate lifecycle handlers when Fleet also loads
  * its generated extension into the same Pi process.
  */
-export function buildPiExtension(command: string): string {
+export function buildPiExtension(
+  command: string,
+  runtime: {
+    platform?: NodeJS.Platform;
+    nodeExecutable?: string;
+    windowsCommandShell?: string;
+  } = {},
+): string {
+  const platform = runtime.platform ?? process.platform;
+  const extension = extname(command).toLowerCase();
+  const launch =
+    extension === ".js" || extension === ".mjs" || extension === ".cjs"
+      ? {
+          executable: runtime.nodeExecutable ?? process.execPath,
+          prefixArgs: [command],
+        }
+      : platform === "win32" && (extension === ".cmd" || extension === ".bat")
+        ? {
+            executable:
+              runtime.windowsCommandShell ?? process.env.ComSpec ?? "cmd.exe",
+            prefixArgs: ["/d", "/s", "/c", command],
+          }
+        : { executable: command, prefixArgs: [] };
   return (
     `// Managed by chrome-devtools-axi setup hooks. Re-run setup to repair.\n` +
     `import { spawnSync } from "node:child_process";\n\n` +
-    `const AXI_COMMAND = ${JSON.stringify(command)};\n` +
+    `const AXI_EXECUTABLE = ${JSON.stringify(launch.executable)};\n` +
+    `const AXI_PREFIX_ARGS = ${JSON.stringify(launch.prefixArgs)};\n` +
     `const STATE_KEY = Symbol.for("chrome-devtools-axi.pi.lifecycle");\n\n` +
     `const shared = globalThis;\n\n` +
     `function run(args, timeout) {\n` +
-    `  const result = spawnSync(AXI_COMMAND, args, {\n` +
+    `  const result = spawnSync(AXI_EXECUTABLE, [...AXI_PREFIX_ARGS, ...args], {\n` +
     `    encoding: "utf8",\n` +
     `    stdio: ["ignore", "pipe", "ignore"],\n` +
     `    timeout,\n` +

@@ -126,7 +126,7 @@ export interface DoctorRuntime {
   unlinkFile?: (path: string) => void;
   stopSession?: (
     sessionName: string,
-    opts?: { physicalPool?: boolean },
+    opts?: { target?: "logical" | "dedicated" | "physical-pool" },
   ) => Promise<StopBridgeSessionResult>;
 }
 
@@ -461,9 +461,11 @@ async function inspectOneSession(
           const stopResult =
             kind === "pooled"
               ? await options.runtime.stopSession(session, {
-                  physicalPool: true,
+                  target: "physical-pool",
                 })
-              : await options.runtime.stopSession(session);
+              : await options.runtime.stopSession(session, {
+                  target: "dedicated",
+                });
           cleanup = { ...(cleanup ?? {}), stopResult };
           flags.push(`stop_unhealthy_${stopResult.replace("-", "_")}`);
         }

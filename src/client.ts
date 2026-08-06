@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
 import { AxiError } from "axi-sdk-js";
 import {
+  AMBIENT_SNAPSHOT_TOOL,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   MCP_PACKAGE_SPEC,
   resolveBridgeScript,
@@ -670,7 +671,7 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
       pidInfo.port,
       "/call",
       {
-        name: "take_snapshot",
+        name: isBrowserPoolEnabled() ? AMBIENT_SNAPSHOT_TOOL : "take_snapshot",
         args: {},
         routeSession: sessionName,
         routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
@@ -700,25 +701,34 @@ export type StopBridgeSessionResult =
   | "not-bridge"
   | "session-mismatch";
 
+export type StopBridgeSessionTarget = "logical" | "dedicated" | "physical-pool";
+
 /**
  * Stop one logical session after validating that its PID file still points at
- * the expected chrome-devtools-axi bridge process. Pooled logical cleanup asks
- * that bridge to release only the route's pages; `physicalPool` is reserved for
- * diagnostics that intentionally stop a validated pool-slot bridge. These
- * checks prevent cleanup from signaling an unrelated process after PID reuse.
+ * the expected chrome-devtools-axi bridge process. The target distinguishes a
+ * logical pooled route from diagnostics that intentionally stop a dedicated
+ * or physical pool-slot bridge. These checks prevent cleanup from signaling an
+ * unrelated process after PID reuse.
  */
 export async function stopBridgeSession(
   sessionName: string = resolveSessionName(),
-  opts: { physicalPool?: boolean } = {},
+  opts: { target?: StopBridgeSessionTarget; physicalPool?: boolean } = {},
 ): Promise<StopBridgeSessionResult> {
-  const isPoolBridgeSession = opts.physicalPool === true;
-  const bridgeSessionName = isPoolBridgeSession
-    ? sessionName
-    : resolveBridgeSessionName(sessionName);
+  const target = opts.physicalPool
+    ? "physical-pool"
+    : (opts.target ?? "logical");
+  const isPhysicalPool = target === "physical-pool";
+  const isDedicated = target === "dedicated";
+  const bridgeSessionName =
+    isPhysicalPool || isDedicated
+      ? sessionName
+      : resolveBridgeSessionName(sessionName);
   const pidInfo = readPidFile(
-    isPoolBridgeSession
+    isPhysicalPool
       ? resolveBridgePidFileForBridgeSession(sessionName, true)
-      : resolveBridgePidFile(sessionName),
+      : isDedicated
+        ? resolveBridgePidFileForBridgeSession(sessionName, false)
+        : resolveBridgePidFile(sessionName),
   );
   if (!pidInfo) return "not-running";
   if (!isProcessAlive(pidInfo.pid)) return "not-running";
@@ -727,7 +737,7 @@ export async function stopBridgeSession(
   }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
 
-  if (isBrowserPoolEnabled() && !isPoolBridgeSession) {
+  if (target === "logical" && isBrowserPoolEnabled()) {
     try {
       await httpPost(
         pidInfo.port,

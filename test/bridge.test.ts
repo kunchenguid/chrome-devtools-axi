@@ -1,10 +1,18 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AMBIENT_SNAPSHOT_TOOL,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   BrowserPageRouter,
   DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
@@ -25,8 +33,10 @@ import {
   isBridgeClientConnected,
   isBridgeTargetReachable,
   parseBridgeCallPayload,
+  replacePidFileAtomically,
   removePidFile,
   resolveBridgeIdleTimeoutMs,
+  resolvePhysicalBridgeIdleTimeoutMs,
   resolveBridgeScript,
   resolveRouteIdleTimeoutMs,
   resolveTransportSpec,
@@ -64,6 +74,13 @@ describe("bridge idle lifecycle", () => {
     expect(resolveRouteIdleTimeoutMs("60000")).toBe(60_000);
     expect(() => resolveRouteIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
     expect(() => resolveRouteIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
+  });
+
+  it("keeps a pooled bridge deadline independent from a caller policy", () => {
+    expect(resolvePhysicalBridgeIdleTimeoutMs(true, "120000")).toBe(
+      DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+    );
+    expect(resolvePhysicalBridgeIdleTimeoutMs(false, "120000")).toBe(120_000);
   });
 
   it("inherits a 2-minute Fleet bridge idle env when route idle is unset", () => {
@@ -168,6 +185,58 @@ describe("bridge idle lifecycle", () => {
       expect(forbidden.status).toBe(403);
       expect(starts).toBe(1);
       expect(finishes).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("keeps health and pooled route policies out of the bridge watchdog", async () => {
+    const setTimeoutMs = vi.fn();
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const server = createBridgeServer(
+      client,
+      "pool-0",
+      {
+        beginRequest: () => () => {},
+        setTimeoutMs,
+        stop: () => {},
+      },
+      new BrowserPageRouter(),
+    );
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected an ephemeral TCP address");
+      }
+      const url = `http://127.0.0.1:${address.port}`;
+      await fetch(`${url}/health`, {
+        headers: { "X-Axi-Idle-Timeout-Ms": "1000" },
+      });
+      await fetch(`${url}/call`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Axi-Idle-Timeout-Ms": "1000",
+        },
+        body: JSON.stringify({
+          name: "list_pages",
+          args: {},
+          routeSession: "worker-a",
+          routeIdleTimeoutMs: 1000,
+        }),
+      });
+
+      expect(setTimeoutMs).not.toHaveBeenCalled();
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
@@ -311,6 +380,24 @@ describe("BrowserPageRouter", () => {
       { id: 1, url: "https://a.example/", selected: true },
       { id: 2, url: "https://b.example/", selected: false },
     ]);
+  });
+
+  it("returns no ambient snapshot without creating an owned page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    const snapshot = await router.run(
+      {
+        name: AMBIENT_SNAPSHOT_TOOL,
+        args: {},
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(snapshot).toBe("");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+    expect(fake.calls.map((call) => call.name)).toEqual(["list_pages"]);
   });
 
   it("lists only pages owned by the requesting route", async () => {
@@ -1819,6 +1906,23 @@ describe("removePidFile ownership", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("replaces complete PID metadata without leaving a temporary file", () => {
+    writeFileSync(pidFile, JSON.stringify({ pid: 1, port: 9224 }));
+
+    replacePidFileAtomically(pidFile, {
+      pid: 2,
+      port: 9225,
+      lastActivityAt: "2026-08-05T12:00:00.000Z",
+    });
+
+    expect(JSON.parse(readFileSync(pidFile, "utf-8"))).toEqual({
+      pid: 2,
+      port: 9225,
+      lastActivityAt: "2026-08-05T12:00:00.000Z",
+    });
+    expect(readdirSync(dir)).toEqual(["bridge.pid"]);
   });
 
   it("leaves the winner's PID file intact when a same-session loser exits", () => {

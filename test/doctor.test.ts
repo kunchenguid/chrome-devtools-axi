@@ -190,7 +190,46 @@ describe("browser session diagnostics", () => {
     expect(worker?.status).toBe("unhealthy");
     expect(worker?.flags).toContain("deep_health_failed");
     expect(worker?.flags).toContain("stop_unhealthy_stopped");
-    expect(stopSession).toHaveBeenCalledWith("worker-1");
+    expect(stopSession).toHaveBeenCalledWith("worker-1", {
+      target: "dedicated",
+    });
+  });
+
+  it("preserves the dedicated cleanup target when pooling is configured", async () => {
+    const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    writePid("worker-1", {
+      pid: 222,
+      port: 9444,
+      session: "worker-1",
+    });
+    const stopSession = vi.fn(async () => "stopped" as const);
+
+    try {
+      await inspectBrowserSessions({
+        stopUnhealthy: true,
+        runtime: {
+          isProcessAlive: (pid) => pid === 222,
+          isBridgeProcess: () => true,
+          readProcessInfo: () => ({
+            pgid: 222,
+            command: "chrome-devtools-axi-bridge",
+          }),
+          checkHealth: async (_port, opts) => opts?.deep !== true,
+          stopSession,
+        },
+      });
+
+      expect(stopSession).toHaveBeenCalledWith("worker-1", {
+        target: "dedicated",
+      });
+    } finally {
+      if (savedPoolSize === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+      }
+    }
   });
 
   it("cleans stale PID files only when explicitly requested and the PID is dead", async () => {

@@ -160,6 +160,41 @@ describe("unsafe session names are rejected on action entry points", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("resolves an explicit dedicated target independently of pool settings", async () => {
+    const savedHome = process.env.HOME;
+    const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    const home = mkdtempSync(join(tmpdir(), "cda-dedicated-session-"));
+    try {
+      process.env.HOME = home;
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+      const pidFile = resolveSessionPidFile("worker-1");
+      mkdirSync(join(home, ".chrome-devtools-axi", "sessions", "worker-1"), {
+        recursive: true,
+      });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({
+          pid: process.pid,
+          port: 9444,
+          session: "worker-1",
+        }),
+      );
+
+      await expect(
+        stopBridgeSession("worker-1", { target: "dedicated" }),
+      ).resolves.toBe("not-bridge");
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedPoolSize === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("resolveBridgeTimeoutMs", () => {

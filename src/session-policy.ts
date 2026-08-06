@@ -19,19 +19,40 @@ function policyFile(): string {
   return join(resolveSessionStateDir(), POLICY_FILE);
 }
 
-export function readSessionIdleTimeoutPolicy(): number | undefined {
+export function readSessionIdleTimeoutPolicy(
+  nowMs = Date.now(),
+): number | undefined {
   try {
-    const value = Number(readFileSync(policyFile(), "utf-8").trim());
-    return Number.isInteger(value) && value >= 1000 ? value : undefined;
+    const file = policyFile();
+    const parsed = JSON.parse(readFileSync(file, "utf-8")) as {
+      timeoutMs?: unknown;
+      expiresAt?: unknown;
+    };
+    if (
+      !Number.isInteger(parsed.timeoutMs) ||
+      (parsed.timeoutMs as number) < 1000 ||
+      !Number.isFinite(parsed.expiresAt) ||
+      (parsed.expiresAt as number) <= nowMs
+    ) {
+      clearSessionIdleTimeoutPolicy();
+      return undefined;
+    }
+    return parsed.timeoutMs as number;
   } catch {
     return undefined;
   }
 }
 
-export function writeSessionIdleTimeoutPolicy(timeoutMs: number): void {
+export function writeSessionIdleTimeoutPolicy(
+  timeoutMs: number,
+  nowMs = Date.now(),
+): void {
   const file = policyFile();
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, String(timeoutMs));
+  writeFileSync(
+    file,
+    JSON.stringify({ timeoutMs, expiresAt: nowMs + timeoutMs }),
+  );
 }
 
 export function clearSessionIdleTimeoutPolicy(): void {

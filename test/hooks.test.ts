@@ -92,6 +92,35 @@ describe("buildPiExtension", () => {
     expect(source).toContain('pi.on("session_shutdown"');
     expect(source).not.toContain('pi.on("turn_end"');
   });
+
+  it("launches JavaScript entrypoints through the Node executable", () => {
+    const source = buildPiExtension("C:\\tools\\chrome-devtools-axi.js", {
+      platform: "win32",
+      nodeExecutable: "C:\\node\\node.exe",
+    });
+
+    expect(source).toContain(
+      'const AXI_EXECUTABLE = "C:\\\\node\\\\node.exe";',
+    );
+    expect(source).toContain(
+      'const AXI_PREFIX_ARGS = ["C:\\\\tools\\\\chrome-devtools-axi.js"]',
+    );
+  });
+
+  it("launches Windows npm shims through the command processor", () => {
+    const source = buildPiExtension("C:\\tools\\chrome-devtools-axi.cmd", {
+      platform: "win32",
+      windowsCommandShell: "C:\\Windows\\System32\\cmd.exe",
+    });
+
+    expect(source).toContain(
+      'const AXI_EXECUTABLE = "C:\\\\Windows\\\\System32\\\\cmd.exe";',
+    );
+    expect(source).toContain(
+      '["/d","/s","/c","C:\\\\tools\\\\chrome-devtools-axi.cmd"]',
+    );
+    expect(source).toContain("[...AXI_PREFIX_ARGS, ...args]");
+  });
 });
 
 describe("installHooksOrThrow", () => {
