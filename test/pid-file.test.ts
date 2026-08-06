@@ -1,5 +1,6 @@
 import {
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -204,5 +205,48 @@ describe("PID file locking", () => {
 
     expect(existsSync(takeoverPath)).toBe(true);
     expect(existsSync(reclaimPath)).toBe(true);
+  });
+
+  it("recovers and cleans an orphaned takeover anchor", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-orphaned-takeover-"));
+    roots.push(root);
+    const pidFile = join(root, "bridge.pid");
+    const lockPath = `${pidFile}.lock`;
+    const reclaimPath = `${lockPath}.reclaim`;
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, token: "stale-owner" }),
+    );
+    const staleLock = lstatSync(lockPath);
+    const deadReclaimer = {
+      dev: staleLock.dev,
+      ino: staleLock.ino,
+      owner: { pid: 99999999, token: "dead-reclaimer" },
+    };
+    const reclaimCandidatePath = `${reclaimPath}.dead-reclaimer`;
+    writeFileSync(reclaimCandidatePath, JSON.stringify(deadReclaimer));
+    linkSync(reclaimCandidatePath, reclaimPath);
+    const staleReclaim = lstatSync(reclaimPath);
+    const takeoverPath = `${reclaimPath}.takeover-${staleReclaim.dev}-${staleReclaim.ino}`;
+    const deadTakeover = {
+      dev: staleLock.dev,
+      ino: staleLock.ino,
+      owner: { pid: 99999999, token: "dead-takeover" },
+    };
+    const takeoverCandidatePath = `${reclaimPath}.dead-takeover`;
+    writeFileSync(takeoverCandidatePath, JSON.stringify(deadTakeover));
+    linkSync(takeoverCandidatePath, takeoverPath);
+
+    let entered = false;
+    withPidFileLock(pidFile, () => {
+      entered = true;
+    });
+
+    expect(entered).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(reclaimPath)).toBe(false);
+    expect(existsSync(reclaimCandidatePath)).toBe(false);
+    expect(existsSync(takeoverPath)).toBe(false);
+    expect(existsSync(takeoverCandidatePath)).toBe(false);
   });
 });

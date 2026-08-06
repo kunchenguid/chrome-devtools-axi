@@ -147,7 +147,7 @@ function readReclaimSnapshot(path: string): ReclaimSnapshot | undefined {
       !Number.isInteger(parsed.owner?.pid) ||
       (parsed.owner?.pid as number) <= 0 ||
       typeof parsed.owner?.token !== "string" ||
-      parsed.owner.token.length === 0
+      !/^[A-Za-z0-9_-]+$/.test(parsed.owner.token)
     ) {
       return undefined;
     }
@@ -165,6 +165,52 @@ function readReclaimSnapshot(path: string): ReclaimSnapshot | undefined {
     };
   } catch {
     return undefined;
+  }
+}
+
+function sameReclaimTarget(
+  left: ReclaimSnapshot,
+  right: ReclaimSnapshot,
+): boolean {
+  return left.claim.dev === right.claim.dev && left.claim.ino === right.claim.ino;
+}
+
+function sameReclaimIdentity(
+  left: ReclaimSnapshot | undefined,
+  right: ReclaimSnapshot,
+): boolean {
+  return (
+    left?.dev === right.dev &&
+    left.ino === right.ino &&
+    left.claim.dev === right.claim.dev &&
+    left.claim.ino === right.claim.ino &&
+    left.claim.owner.pid === right.claim.owner.pid &&
+    left.claim.owner.token === right.claim.owner.token
+  );
+}
+
+function removeReclaimCandidateAlias(
+  reclaimPath: string,
+  snapshot: ReclaimSnapshot,
+): void {
+  const candidatePath = `${reclaimPath}.${snapshot.claim.owner.token}`;
+  if (sameFileIdentity(readLockSnapshot(candidatePath), snapshot)) {
+    try {
+      unlinkSync(candidatePath);
+    } catch {}
+  }
+}
+
+function removeReclaimAnchor(
+  reclaimPath: string,
+  anchorPath: string,
+  snapshot: ReclaimSnapshot,
+): void {
+  removeReclaimCandidateAlias(reclaimPath, snapshot);
+  if (sameReclaimIdentity(readReclaimSnapshot(anchorPath), snapshot)) {
+    try {
+      unlinkSync(anchorPath);
+    } catch {}
   }
 }
 
@@ -222,18 +268,40 @@ function takeOverReclaimClaim(
     owner,
   };
   const candidatePath = `${reclaimPath}.${owner.token}`;
-  const takeoverPath = `${reclaimPath}.takeover-${stale.dev}-${stale.ino}`;
+  let predecessor = stale;
+  let takeoverPath = "";
   let ownsTakeover = false;
+  const staleAnchors: Array<{
+    path: string;
+    snapshot: ReclaimSnapshot;
+  }> = [];
+  const visited = new Set([`${stale.dev}:${stale.ino}`]);
   try {
     writeFileSync(candidatePath, JSON.stringify(claim), {
       flag: "wx",
       mode: 0o600,
     });
-    try {
-      linkSync(candidatePath, takeoverPath);
-      ownsTakeover = true;
-    } catch {}
-    if (!ownsTakeover) return undefined;
+    while (!ownsTakeover) {
+      takeoverPath = `${reclaimPath}.takeover-${predecessor.dev}-${predecessor.ino}`;
+      try {
+        linkSync(candidatePath, takeoverPath);
+        ownsTakeover = true;
+      } catch {
+        const occupied = readReclaimSnapshot(takeoverPath);
+        if (
+          !occupied ||
+          !sameReclaimTarget(occupied, stale) ||
+          isAlive(occupied.claim.owner.pid)
+        ) {
+          return undefined;
+        }
+        const identity = `${occupied.dev}:${occupied.ino}`;
+        if (visited.has(identity)) return undefined;
+        visited.add(identity);
+        staleAnchors.push({ path: takeoverPath, snapshot: occupied });
+        predecessor = occupied;
+      }
+    }
 
     const current = readReclaimSnapshot(reclaimPath);
     if (
@@ -245,6 +313,10 @@ function takeOverReclaimClaim(
     }
 
     renameSync(candidatePath, reclaimPath);
+    removeReclaimCandidateAlias(reclaimPath, stale);
+    for (const anchor of staleAnchors.reverse()) {
+      removeReclaimAnchor(reclaimPath, anchor.path, anchor.snapshot);
+    }
     return { reclaimPath, anchorPath: takeoverPath, claim };
   } catch {
     return undefined;
