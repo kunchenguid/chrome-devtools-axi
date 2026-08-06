@@ -138,7 +138,7 @@ Use Node `20.19+`, `22.12+`, or `23+`; this matches the packaged `chrome-devtool
 ```
 
 - **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation
-- **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, shuts down after 30 idle minutes, and reaps child processes on stop
+- **Auto-lifecycle** — the bridge starts on first command, writes an observable PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, shuts down after 30 idle minutes, and reaps child processes on stop
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
 
@@ -221,6 +221,7 @@ For large request or response bodies, prefer `network-get <id> --response-file <
 | ------------- | ----------------------------- |
 | `start`       | Start the bridge server       |
 | `stop`        | Stop the bridge server        |
+| `sessions`    | Inspect bridge session state  |
 | `setup hooks` | Install or repair agent hooks |
 
 ### Maintenance
@@ -349,10 +350,14 @@ Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT`
 
 State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`):
 
-| File                  | Purpose                               |
-| --------------------- | ------------------------------------- |
-| `bridge.pid`          | PID and port of the running bridge    |
-| `snapshot-generation` | Counter used to detect stale uid refs |
+| File                  | Purpose                                                                         |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `bridge.pid`          | PID, port, session, owner, start time, and last activity for the running bridge |
+| `snapshot-generation` | Counter used to detect stale uid refs                                           |
+
+Use `chrome-devtools-axi sessions` to inspect bridge state without starting a browser. It inventories the default session plus named and pooled sessions such as `pool-3` when they have bridge PID state; reports PID/process-group liveness, bridge health, page count and selected URL when reachable, and flags stale PID files, reused non-bridge PIDs, health failures, session mismatches, and orphan symptoms. `--json` prints machine-readable output for watchdogs.
+
+Cleanup is opt-in. `chrome-devtools-axi sessions --clean-stale` removes only well-formed `bridge.pid` files whose recorded PID is confirmed dead, and `--stop-unhealthy` stops only live PIDs that still validate as `chrome-devtools-axi-bridge` processes.
 
 ## Development
 

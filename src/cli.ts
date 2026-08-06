@@ -31,6 +31,11 @@ import {
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
 import { resolveOutputPath } from "./paths.js";
+import {
+  formatBrowserSessionsReport,
+  inspectBrowserSessions,
+  parseSessionsArgs,
+} from "./doctor.js";
 
 export const HOME_DESCRIPTION =
   "Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.";
@@ -52,7 +57,7 @@ export type MainOptions = {
 };
 
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
-commands[35]:
+commands[36]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
   run,
@@ -60,7 +65,7 @@ commands[35]:
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
-  perf-insight <set> <name>, heap <path>, start, stop, setup hooks
+  perf-insight <set> <name>, heap <path>, start, stop, sessions, setup hooks
 
 flags[2]:
   --help, -v/-V/--version
@@ -319,6 +324,19 @@ Stop the bridge server and close the browser.
 
 examples:
   chrome-devtools-axi stop`,
+
+  sessions: `usage: chrome-devtools-axi sessions [--json] [--clean-stale] [--stop-unhealthy]
+Inventory bridge session state without starting a browser.
+
+flags:
+  --json            Print machine-readable JSON for watchdogs/Fleet
+  --clean-stale     Remove stale bridge.pid files only after the recorded PID is confirmed dead
+  --stop-unhealthy  Stop live bridge PIDs that validate as chrome-devtools-axi bridges but fail health
+
+examples:
+  chrome-devtools-axi sessions
+  chrome-devtools-axi sessions --json
+  chrome-devtools-axi sessions --clean-stale`,
 
   // Page management
   pages: `usage: chrome-devtools-axi pages
@@ -1365,6 +1383,15 @@ async function handleStop(): Promise<string> {
   return formatStopOutput(wasStopped);
 }
 
+async function handleSessions(args: string[]): Promise<string> {
+  const parsed = parseSessionsArgs(args);
+  const report = await inspectBrowserSessions({
+    cleanStale: parsed.cleanStale,
+    stopUnhealthy: parsed.stopUnhealthy,
+  });
+  return formatBrowserSessionsReport(report, { json: parsed.json });
+}
+
 // --- Page management handlers ---
 
 async function handlePages(): Promise<string> {
@@ -1781,6 +1808,7 @@ const COMMANDS: Record<string, CommandFn> = {
   heap: withoutFullFlag(handleHeap),
   start: async () => handleStart(),
   stop: async () => handleStop(),
+  sessions: withoutFullFlag(handleSessions),
   setup: withoutFullFlag(handleSetup),
 };
 

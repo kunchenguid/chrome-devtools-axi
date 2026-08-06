@@ -31,6 +31,16 @@ export const DEFAULT_BASE_PORT = 9224;
 const SESSION_PORT_RANGE = 1000; // 9225..10224 reserved for named sessions
 const STATE_DIR_NAME = ".chrome-devtools-axi";
 
+/** Root directory for all chrome-devtools-axi session state. */
+export function resolveStateRoot(): string {
+  return join(homedir(), STATE_DIR_NAME);
+}
+
+/** Directory containing per-name session state directories. */
+export function resolveNamedSessionsDir(): string {
+  return join(resolveStateRoot(), "sessions");
+}
+
 /**
  * Resolve the active session name from `CHROME_DEVTOOLS_AXI_SESSION`. Returns
  * DEFAULT_SESSION_NAME when unset, empty, or whitespace.
@@ -110,7 +120,7 @@ export function resolveSessionPort(
 export function resolveSessionStateDir(
   name: string = resolveSessionName(),
 ): string {
-  const base = join(homedir(), STATE_DIR_NAME);
+  const base = resolveStateRoot();
   return name === DEFAULT_SESSION_NAME ? base : join(base, "sessions", name);
 }
 

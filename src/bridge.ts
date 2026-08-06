@@ -16,6 +16,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execSync } from "node:child_process";
+import { hostname, userInfo } from "node:os";
 import {
   createServer,
   type IncomingMessage,
@@ -174,10 +175,58 @@ export async function isBridgeTargetReachable(
   }
 }
 
+function resolveOwnerMetadata(): Record<string, unknown> {
+  const owner: Record<string, unknown> = {
+    pid: process.pid,
+    ppid: process.ppid,
+    hostname: hostname(),
+    cwd: process.cwd(),
+  };
+  if (typeof process.getuid === "function") owner.uid = process.getuid();
+  try {
+    owner.user = userInfo().username;
+  } catch {
+    // userInfo can fail in restricted environments; the PID file remains useful.
+  }
+  return owner;
+}
+
 function writePidFile(port: number): void {
   const pidFile = resolveSessionPidFile();
+  const now = new Date().toISOString();
+  const session = resolveSessionName();
   mkdirSync(dirname(pidFile), { recursive: true });
-  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port }));
+  writeFileSync(
+    pidFile,
+    JSON.stringify({
+      pid: process.pid,
+      port,
+      session,
+      startedAt: now,
+      lastActivityAt: now,
+      owner: resolveOwnerMetadata(),
+    }),
+  );
+}
+
+function touchPidFileActivity(): void {
+  const pidFile = resolveSessionPidFile();
+  try {
+    const existing = JSON.parse(readFileSync(pidFile, "utf-8")) as Record<
+      string,
+      unknown
+    >;
+    if (existing.pid !== process.pid) return;
+    writeFileSync(
+      pidFile,
+      JSON.stringify({
+        ...existing,
+        lastActivityAt: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    // Best-effort observability only.
+  }
 }
 
 /**
@@ -474,6 +523,7 @@ export function createBridgeServer(
   idleWatchdog?: BridgeIdleWatchdog,
 ): Server {
   return createServer((req, res) => {
+    touchPidFileActivity();
     const finishRequest = idleWatchdog?.beginRequest();
     void handleBridgeRequest(
       client,

@@ -36,7 +36,7 @@ Skip it when a plain `fetch`/`curl` suffices - ordinary web search, curl-able pa
 ## Commands
 
 ```
-commands[35]:
+commands[36]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
   run,
@@ -44,7 +44,7 @@ commands[35]:
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
-  perf-insight <set> <name>, heap <path>, start, stop, setup hooks
+  perf-insight <set> <name>, heap <path>, start, stop, sessions, setup hooks
 
 built-in:
   update: Upgrade chrome-devtools-axi to the latest published npm version

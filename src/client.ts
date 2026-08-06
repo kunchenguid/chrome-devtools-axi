@@ -57,12 +57,16 @@ export class CdpError extends AxiError {
   }
 }
 
-interface PidInfo {
+export interface PidInfo {
   pid: number;
   port: number;
+  session?: string;
+  startedAt?: string;
+  lastActivityAt?: string;
+  owner?: unknown;
 }
 
-function readPidFile(
+export function readPidFile(
   pidFile: string = resolveSessionPidFile(),
 ): PidInfo | null {
   try {
@@ -77,7 +81,7 @@ function readPidFile(
   }
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -203,7 +207,7 @@ export async function waitForProcessExit(
   return !isProcessAlive(pid);
 }
 
-function isBridgeProcess(pid: number): boolean {
+export function isBridgeProcess(pid: number): boolean {
   try {
     const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
       encoding: "utf-8",
@@ -591,11 +595,25 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
  * than orphaned. Resolves once the bridge process is gone.
  */
 export async function stopBridge(): Promise<boolean> {
-  const pidInfo = readPidFile();
-  if (!pidInfo) return false;
-  if (!isProcessAlive(pidInfo.pid)) return false;
+  return (await stopBridgeSession()) === "stopped";
+}
+
+export type StopBridgeSessionResult = "stopped" | "not-running" | "not-bridge";
+
+/**
+ * Stop one named bridge session after validating that the PID file still points
+ * at a chrome-devtools-axi bridge process. This keeps cleanup actions from
+ * signaling an unrelated process after PID reuse.
+ */
+export async function stopBridgeSession(
+  sessionName: string = resolveSessionName(),
+): Promise<StopBridgeSessionResult> {
+  const pidInfo = readPidFile(resolveSessionPidFile(sessionName));
+  if (!pidInfo) return "not-running";
+  if (!isProcessAlive(pidInfo.pid)) return "not-running";
+  if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
   await terminateBridgeProcess(pidInfo.pid, {
-    killProcessGroup: isBridgeProcess(pidInfo.pid),
+    killProcessGroup: true,
   });
-  return true;
+  return "stopped";
 }

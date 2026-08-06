@@ -7,6 +7,10 @@ const { installHooks, installHooksOrThrow, runAxiCli } = vi.hoisted(() => ({
   runAxiCli: vi.fn(),
 }));
 
+const { inspectBrowserSessions } = vi.hoisted(() => ({
+  inspectBrowserSessions: vi.fn(),
+}));
+
 vi.mock("axi-sdk-js", async () => {
   const actual =
     await vi.importActual<typeof import("axi-sdk-js")>("axi-sdk-js");
@@ -23,6 +27,17 @@ vi.mock("../src/hooks.js", async () => {
     ...actual,
     installHooks,
     installHooksOrThrow,
+  };
+});
+
+vi.mock("../src/doctor.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../src/doctor.js")>(
+      "../src/doctor.js",
+    );
+  return {
+    ...actual,
+    inspectBrowserSessions,
   };
 });
 
@@ -121,6 +136,29 @@ describe("main CLI runtime", () => {
     expect(output).toContain("hooks:");
     expect(output).toContain("status: installed");
     expect(output).toContain("Restart your agent session");
+  });
+
+  it("runs the sessions diagnostic in JSON mode without starting browser commands", async () => {
+    inspectBrowserSessions.mockResolvedValueOnce({
+      generatedAt: "2026-08-06T12:00:00.000Z",
+      stateRoot: "/tmp/state",
+      sessions: [],
+    });
+
+    await main();
+
+    const options = vi.mocked(runAxiCli).mock.calls[0]?.[0];
+    const output = await options.commands.sessions(["--json"]);
+
+    expect(inspectBrowserSessions).toHaveBeenCalledWith({
+      cleanStale: false,
+      stopUnhealthy: false,
+    });
+    expect(JSON.parse(output)).toEqual({
+      generatedAt: "2026-08-06T12:00:00.000Z",
+      stateRoot: "/tmp/state",
+      sessions: [],
+    });
   });
 
   it("surfaces explicit hook setup failures", async () => {
