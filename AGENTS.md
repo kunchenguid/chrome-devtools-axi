@@ -85,6 +85,7 @@ Only the script's own `console.log` output reaches stdout: handlers return text 
 ## Things to know when editing
 
 - The bridge resolves its own script path at runtime (`resolveBridgeScript`): it prefers a sibling `.ts` (dev mode, run via tsx) and falls back to the built `.js`, so dev and dist behave the same without flags.
+- The CLI module graph must stay free of `@modelcontextprotocol/sdk` (~45ms); only the bridge subprocess constructs an MCP client. That is why `resolveBridgeScript`/`BRIDGE_PORT_IN_USE_EXIT_CODE` live in the node-builtins-only `src/bridge-script.ts` (re-exported from `src/bridge.ts`) rather than beside the SDK imports. `test/version-path.test.ts` enforces it by tracing the loaded module graph.
 - `resolveOutputPath` (`src/paths.ts`) is the chokepoint for local output artifacts sent to the bridge.
   Use it for any new command or flag that asks the bridge/MCP to write a caller-supplied output file or directory, so relative paths resolve against the invoking CLI's `process.cwd()` and output can report the absolute path.
 - `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists; it also degrades an invalid `CHROME_DEVTOOLS_AXI_SESSION` to null here, while action commands (`ensureBridge`/`stopBridge`) still fail loudly.

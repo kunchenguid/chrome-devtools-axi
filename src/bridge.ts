@@ -31,10 +31,18 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
+  BRIDGE_PORT_IN_USE_EXIT_CODE,
+  resolveBridgeScript,
+} from "./bridge-script.js";
+import {
   resolveSessionName,
   resolveSessionPidFile,
   resolveSessionPort,
 } from "./sessions.js";
+
+// Re-exported so existing bridge consumers keep a single import surface; the
+// definitions live in the MCP-free ./bridge-script.js (see its header).
+export { BRIDGE_PORT_IN_USE_EXIT_CODE, resolveBridgeScript };
 
 export interface BridgeContentBlock {
   type: string;
@@ -262,15 +270,6 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
   return { name: payload.name, args: payload.args as Record<string, unknown> };
 }
 
-export function resolveBridgeScript(importMetaDir: string): string {
-  const builtScript = resolve(
-    importMetaDir,
-    "../bin/chrome-devtools-axi-bridge.js",
-  );
-  const sourceScript = builtScript.replace(/\.js$/, ".ts");
-  return existsSync(sourceScript) ? sourceScript : builtScript;
-}
-
 async function readRequestBody(req: IncomingMessage): Promise<string> {
   let body = "";
   for await (const chunk of req) {
@@ -396,14 +395,6 @@ export function createBridgeServer(
 function logBridgeMessage(message: string): void {
   process.stderr.write(`[chrome-devtools-axi] ${message}\n`);
 }
-
-/**
- * Distinct exit code the bridge uses for an EADDRINUSE bind failure. A generic
- * non-zero exit is ambiguous (npx/MCP launch failures exit non-zero too), so
- * `ensureBridge` keys on this sentinel to attribute an early death to a genuine
- * port collision versus a startup failure and tailor its error accordingly.
- */
-export const BRIDGE_PORT_IN_USE_EXIT_CODE = 48;
 
 /**
  * Handle a fatal HTTP server error by logging it and exiting non-zero. An

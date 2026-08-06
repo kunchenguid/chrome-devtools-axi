@@ -6,7 +6,10 @@ import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
 import { AxiError } from "axi-sdk-js";
-import { BRIDGE_PORT_IN_USE_EXIT_CODE, resolveBridgeScript } from "./bridge.js";
+import {
+  BRIDGE_PORT_IN_USE_EXIT_CODE,
+  resolveBridgeScript,
+} from "./bridge-script.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
