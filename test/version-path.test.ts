@@ -65,9 +65,10 @@ function lowContentionDeltaMs(actualArgs: string[], runs = 11): number {
   const floorArgs = ["-e", ""];
   const deltas: number[] = [];
   for (let i = 0; i < runs; i++) {
-    // Start each clock inside the child after Node and the instrumentation
-    // preload initialize. Parent-side spawn latency is irrelevant to the CLI
-    // import path and varies dramatically when Vitest workers contend in CI.
+    // Start each CPU clock inside the child after Node and the instrumentation
+    // preload initialize. Parent-side spawn latency and time spent descheduled
+    // are irrelevant to the CLI import path and vary dramatically when Vitest
+    // workers contend in CI.
     // Keep each floor measurement adjacent and alternate their order so any
     // remaining short-lived load does not consistently penalize one command.
     const floorFirst = i % 2 === 0;
@@ -76,9 +77,9 @@ function lowContentionDeltaMs(actualArgs: string[], runs = 11): number {
     deltas.push(floorFirst ? second - first : first - second);
   }
   deltas.sort((a, b) => a - b);
-  // Wall-clock process timings include unrelated scheduler delays. Use the
-  // lower quartile rather than a single minimum so several observations must
-  // demonstrate the fast path while contended samples cannot dominate it.
+  // CPU timings can still include short-lived host noise. Use the lower
+  // quartile rather than a single minimum so several observations must
+  // demonstrate the fast path while noisy samples cannot dominate it.
   return deltas[Math.floor((deltas.length - 1) / 4)]!;
 }
 
@@ -126,11 +127,11 @@ describe("--version path", () => {
   });
 
   it("runs within a small delta of the node process floor", () => {
-    // An absolute wall-clock budget is flaky across machines; measure the bare
-    // node floor in the same process and assert the delta. Post-fix overhead is
-    // ~3-5ms; 15ms leaves headroom for slow CI while still catching a heavy
-    // static import (axi-sdk-js alone is ~5.5ms, the MCP SDK ~45ms).
-    expect(lowContentionDeltaMs([CLI_BIN, "--version"])).toBeLessThan(15);
+    // An absolute wall-clock budget is flaky across machines; measure child CPU
+    // time above the bare node floor and assert the delta. The retained CLI
+    // dependencies cost about 18ms on Node 24; 30ms leaves cross-platform
+    // headroom while still catching the MCP SDK's additional ~45ms.
+    expect(lowContentionDeltaMs([CLI_BIN, "--version"])).toBeLessThan(30);
   }, 60_000);
 
   it("does not load the MCP SDK", () => {
