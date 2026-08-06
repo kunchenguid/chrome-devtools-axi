@@ -26,6 +26,10 @@ const TIMING_REGISTER = join(
   "fixtures",
   "process-timing-register.mjs",
 );
+const MCP_IMPORT_ARGS = [
+  "-e",
+  "import('@modelcontextprotocol/sdk/client/index.js')",
+];
 
 beforeAll(() => {
   // The test spawns the built CLI, so `pnpm test` on a fresh checkout has to
@@ -61,20 +65,23 @@ function runtimeMs(args: string[]): number {
   }
 }
 
-function lowContentionDeltaMs(actualArgs: string[], runs = 11): number {
-  const floorArgs = ["-e", ""];
+function lowContentionDeltaMs(
+  actualArgs: string[],
+  baselineArgs = ["-e", ""],
+  runs = 11,
+): number {
   const deltas: number[] = [];
   for (let i = 0; i < runs; i++) {
     // Start each CPU clock inside the child after Node and the instrumentation
     // preload initialize. Parent-side spawn latency and time spent descheduled
     // are irrelevant to the CLI import path and vary dramatically when Vitest
     // workers contend in CI.
-    // Keep each floor measurement adjacent and alternate their order so any
+    // Keep each baseline measurement adjacent and alternate their order so any
     // remaining short-lived load does not consistently penalize one command.
-    const floorFirst = i % 2 === 0;
-    const first = runtimeMs(floorFirst ? floorArgs : actualArgs);
-    const second = runtimeMs(floorFirst ? actualArgs : floorArgs);
-    deltas.push(floorFirst ? second - first : first - second);
+    const baselineFirst = i % 2 === 0;
+    const first = runtimeMs(baselineFirst ? baselineArgs : actualArgs);
+    const second = runtimeMs(baselineFirst ? actualArgs : baselineArgs);
+    deltas.push(baselineFirst ? second - first : first - second);
   }
   deltas.sort((a, b) => a - b);
   // CPU timings can still include short-lived host noise. Use the lower
@@ -126,12 +133,18 @@ describe("--version path", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("runs within a small delta of the node process floor", () => {
+  it("runs substantially faster than loading the MCP SDK", () => {
     // An absolute wall-clock budget is flaky across machines; measure child CPU
-    // time above the bare node floor and assert the delta. The retained CLI
-    // dependencies cost about 18ms on Node 24; 30ms leaves cross-platform
-    // headroom while still catching the MCP SDK's additional ~45ms.
-    expect(lowContentionDeltaMs([CLI_BIN, "--version"])).toBeLessThan(30);
+    // time inside the child instead. Even CPU time varies between Node builds
+    // and operating systems, so measure the MCP import's delta over the CLI on
+    // the same runner. Adjacent, alternating samples keep changing host load
+    // from consistently favoring either path. Reintroducing the SDK into the
+    // CLI path removes this gap.
+    const mcpImportDelta = lowContentionDeltaMs(MCP_IMPORT_ARGS, [
+      CLI_BIN,
+      "--version",
+    ]);
+    expect(mcpImportDelta).toBeGreaterThan(10);
   }, 60_000);
 
   it("does not load the MCP SDK", () => {
