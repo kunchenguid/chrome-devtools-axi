@@ -1663,8 +1663,9 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     shuttingDown = true;
     idleWatchdog?.stop();
     if (reason) logBridgeMessage(reason);
-    if (process.platform === "win32" && reapOwnedBridgeProcessTree()) {
-      return;
+    if (process.platform === "win32") {
+      removePidFile();
+      if (reapOwnedBridgeProcessTree()) return;
     }
     try {
       await closeBridgeResources(server, client, transport);

@@ -1,4 +1,5 @@
 import {
+  existsSync,
   linkSync,
   lstatSync,
   readFileSync,
@@ -25,11 +26,17 @@ type LockSnapshot = {
   owner: LockOwner | undefined;
 };
 
+type ReclaimClaim = {
+  dev: number;
+  ino: number;
+};
+
 function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     return false;
   }
 }
@@ -66,12 +73,16 @@ function readLockSnapshot(lockPath: string): LockSnapshot | undefined {
   try {
     const stat = lstatSync(lockPath);
     const ownerPath = stat.isDirectory() ? `${lockPath}/owner` : lockPath;
+    let owner: LockOwner | undefined;
+    try {
+      owner = parseOwner(readFileSync(ownerPath, "utf-8"));
+    } catch {}
     return {
       dev: stat.dev,
       ino: stat.ino,
       isDirectory: stat.isDirectory(),
       mtimeMs: stat.mtimeMs,
-      owner: parseOwner(readFileSync(ownerPath, "utf-8")),
+      owner,
     };
   } catch {
     return undefined;
@@ -82,17 +93,58 @@ function readLockOwner(lockPath: string): LockOwner | undefined {
   return readLockSnapshot(lockPath)?.owner;
 }
 
-function sameSnapshot(
-  left: LockSnapshot | undefined,
-  right: LockSnapshot,
+function sameFileIdentity(
+  snapshot: LockSnapshot | undefined,
+  expected: ReclaimClaim,
 ): boolean {
+  return snapshot?.dev === expected.dev && snapshot.ino === expected.ino;
+}
+
+function isStaleSnapshot(
+  snapshot: LockSnapshot,
+  isAlive: (pid: number) => boolean,
+): boolean {
+  if (snapshot.owner) return !isAlive(snapshot.owner.pid);
   return (
-    left?.dev === right.dev &&
-    left.ino === right.ino &&
-    left.isDirectory === right.isDirectory &&
-    left.owner?.pid === right.owner?.pid &&
-    left.owner?.token === right.owner?.token
+    snapshot.isDirectory && Date.now() - snapshot.mtimeMs > LEGACY_STALE_LOCK_MS
   );
+}
+
+function readReclaimClaim(path: string): ReclaimClaim | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8")) as {
+      dev?: unknown;
+      ino?: unknown;
+    };
+    if (typeof parsed.dev !== "number" || typeof parsed.ino !== "number") {
+      return undefined;
+    }
+    return { dev: parsed.dev, ino: parsed.ino };
+  } catch {
+    return undefined;
+  }
+}
+
+function publishReclaimClaim(
+  reclaimPath: string,
+  snapshot: LockSnapshot,
+): void {
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const candidatePath = `${reclaimPath}.${token}`;
+  try {
+    writeFileSync(
+      candidatePath,
+      JSON.stringify({ dev: snapshot.dev, ino: snapshot.ino }),
+      { flag: "wx", mode: 0o600 },
+    );
+    try {
+      linkSync(candidatePath, reclaimPath);
+    } catch {}
+  } finally {
+    try {
+      unlinkSync(candidatePath);
+    } catch {}
+  }
 }
 
 export function removeStalePidFileLock(
@@ -101,28 +153,26 @@ export function removeStalePidFileLock(
 ): void {
   try {
     const snapshot = readLockSnapshot(lockPath);
-    if (!snapshot) return;
-    const { owner } = snapshot;
-    if (owner) {
-      if (
-        !isAlive(owner.pid) &&
-        sameSnapshot(readLockSnapshot(lockPath), snapshot)
-      ) {
-        rmSync(lockPath, { recursive: true, force: true });
-      }
-      return;
-    }
+    if (!snapshot || !isStaleSnapshot(snapshot, isAlive)) return;
 
-    // Current writers publish a fully populated lock file atomically. This
-    // age check only migrates ownerless directories left by the older
-    // mkdir-then-write implementation; a lock with a live owner is never
-    // evicted merely because the machine slept or the holder was paused.
+    const reclaimPath = `${lockPath}.reclaim`;
+    publishReclaimClaim(reclaimPath, snapshot);
+    const claim = readReclaimClaim(reclaimPath);
+    if (!claim) return;
+
+    const current = readLockSnapshot(lockPath);
     if (
-      snapshot.isDirectory &&
-      Date.now() - snapshot.mtimeMs > LEGACY_STALE_LOCK_MS &&
-      sameSnapshot(readLockSnapshot(lockPath), snapshot)
+      sameFileIdentity(current, claim) &&
+      current !== undefined &&
+      isStaleSnapshot(current, isAlive)
     ) {
       rmSync(lockPath, { recursive: true, force: true });
+    }
+
+    if (!sameFileIdentity(readLockSnapshot(lockPath), claim)) {
+      try {
+        unlinkSync(reclaimPath);
+      } catch {}
     }
   } catch {}
 }
@@ -133,6 +183,7 @@ function sameOwner(left: LockOwner | undefined, right: LockOwner): boolean {
 
 export function withPidFileLock<T>(pidFile: string, action: () => T): T {
   const lockPath = `${pidFile}.lock`;
+  const reclaimPath = `${lockPath}.reclaim`;
   const owner: LockOwner = {
     pid: process.pid,
     token: `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -150,6 +201,13 @@ export function withPidFileLock<T>(pidFile: string, action: () => T): T {
         // The hard link publishes a complete owner record and acquires the
         // well-known lock path in one atomic filesystem operation.
         linkSync(candidatePath, lockPath);
+        if (existsSync(reclaimPath)) {
+          if (sameOwner(readLockOwner(lockPath), owner)) {
+            unlinkSync(lockPath);
+          }
+          Atomics.wait(sleeper, 0, 0, LOCK_RETRY_MS);
+          continue;
+        }
         break;
       } catch (error) {
         removeStalePidFileLock(lockPath);

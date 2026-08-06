@@ -79,6 +79,18 @@ describe("PID file locking", () => {
     expect(existsSync(lockPath)).toBe(false);
   });
 
+  it("reclaims an old ownerless legacy directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-ownerless-legacy-lock-"));
+    roots.push(root);
+    const lockPath = join(root, "bridge.pid.lock");
+    mkdirSync(lockPath);
+    utimesSync(lockPath, new Date(0), new Date(0));
+
+    removeStalePidFileLock(lockPath);
+
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
   it("does not remove a replacement installed during stale-owner recovery", () => {
     const root = mkdtempSync(join(tmpdir(), "axi-replaced-pid-lock-"));
     roots.push(root);
