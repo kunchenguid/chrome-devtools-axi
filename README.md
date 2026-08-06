@@ -46,7 +46,6 @@ npx skills add kunchenguid/chrome-devtools-axi --skill chrome-devtools-axi -g
 
 That is the entire setup - no npm install needed.
 The skill teaches your agent to run chrome-devtools-axi through `npx -y chrome-devtools-axi`, so the CLI comes along on demand.
-chrome-devtools-axi ships a pinned `chrome-devtools-mcp` dependency, so after that package install the persistent bridge starts MCP from its own dependency graph instead of resolving `chrome-devtools-mcp` through `npx` for every new browser session.
 
 The skill is not a user-facing slash command (`user-invocable: false`).
 Just ask for anything that needs a real browser - opening a page, clicking through a flow, extracting page content, debugging console or network, auditing performance - and the agent loads the skill on its own when it recognizes the task.
@@ -90,8 +89,6 @@ Just tell your agent:
 Execute `npx -y chrome-devtools-axi` to get browser automation tools.
 ```
 
-The first `npx` invocation still has to download chrome-devtools-axi itself, but the MCP server it wraps is installed as part of that package and is pinned to the tested version.
-
 ### Session hook
 
 Want ambient browser context - including the live page state of an active session - fed into every agent session instead of loading on demand?
@@ -119,7 +116,7 @@ pnpm run build
 pnpm link
 ```
 
-Use Node `20.19+`, `22.12+`, or `23+`; this matches the packaged `chrome-devtools-mcp` runtime requirement.
+Use a Node version allowed by the `engines.node` declaration in `package.json`; it matches the packaged `chrome-devtools-mcp` runtime requirement.
 
 ## How It Works
 
@@ -182,13 +179,13 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 
 ### Page Management
 
-| Command           | Description                     |
-| ----------------- | ------------------------------- |
-| `pages`           | List tabs owned by this session |
-| `newpage <url>`   | Open a new tab                  |
-| `selectpage <id>` | Switch to a tab by ID           |
-| `closepage <id>`  | Close a tab by ID               |
-| `resize <w> <h>`  | Resize the browser viewport     |
+| Command           | Description                              |
+| ----------------- | ---------------------------------------- |
+| `pages`           | List tabs; caller-owned tabs when pooled |
+| `newpage <url>`   | Open a new tab                           |
+| `selectpage <id>` | Switch to a tab by ID                    |
+| `closepage <id>`  | Close a tab by ID                        |
+| `resize <w> <h>`  | Resize the browser viewport              |
 
 ### Emulation
 
@@ -243,7 +240,7 @@ session is active or the no-session status/help block when one is not.
 | --------------------------- | ------------------------------------------- |
 | `--help`                    | Show usage information                      |
 | `-v`, `-V`, `--version`     | Show the installed CLI version              |
-| `--idle-timeout-ms <ms>`    | Set bridge and pooled-route idle timeout    |
+| `--idle-timeout-ms <ms>`    | Set unpooled bridge or pooled-route timeout |
 | `--check`                   | Check for available updates (update)        |
 | `--full`                    | Show complete output without truncation     |
 | `--background`              | Open new page in background (newpage)       |
@@ -267,9 +264,6 @@ session is active or the no-session status/help block when one is not.
 | `--file <path>`             | Save trace data to file (perf-start/stop)   |
 | `--response-file <path>`    | Save response body (network-get)            |
 | `--request-file <path>`     | Save request body (network-get)             |
-| `--json`                    | Emit machine-readable session diagnostics   |
-| `--clean-stale`             | Remove confirmed-dead session PID files     |
-| `--stop-unhealthy`          | Stop validated but unhealthy bridges        |
 
 Local output paths for `screenshot`, `heap`, `network-get --response-file`/`--request-file`, `lighthouse --output-dir`, and `perf-start`/`perf-stop --file` resolve against the directory where you invoke the CLI.
 Saved-path output uses the resolved absolute path.
@@ -286,9 +280,9 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
-The bridge stays alive between commands, then shuts down its MCP and browser
-processes after 30 minutes without a request. Override that idle window in
-milliseconds when a workflow needs longer pauses:
+An unpooled bridge stays alive between commands, then shuts down its MCP and
+browser processes after 30 minutes without a request. Override that idle
+window in milliseconds when a workflow needs longer pauses:
 
 ```sh
 export CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=7200000
@@ -297,14 +291,15 @@ export CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=7200000
 Agent-facing integrations installed by `chrome-devtools-axi setup hooks`
 persist a 120-second idle policy for the logical agent session, and the packaged
 skill passes the equivalent portable `--idle-timeout-ms=120000` option on every
-command. Direct CLI users keep the 30-minute default unless they set
-`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS` themselves.
+command. Direct CLI users keep the 30-minute default unless they pass the flag
+or set `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS` themselves.
 
 The effective timeout precedence is the command-line flag, then
 `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, then a persisted agent-session policy,
-then 30 minutes. A request carrying an effective timeout updates the running
-bridge watchdog; in pooled mode it also applies that window to the calling
-logical session's routed pages.
+then 30 minutes. In unpooled mode, a request carrying an effective timeout
+updates the running bridge watchdog. In pooled mode, it updates only the
+calling logical session's route deadline; it never shortens another route or
+the physical pool-slot watchdog, which retains the 30-minute default.
 
 Normal installs start the pinned `chrome-devtools-mcp` binary from
 chrome-devtools-axi's dependency graph. `CHROME_DEVTOOLS_AXI_MCP_PATH` is an
@@ -382,7 +377,7 @@ CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.or
 With pooling enabled, logical session state still lives under `sessions/<name>/`, but browser traffic hashes onto `pool-0` through `pool-(N-1)`.
 Each pooled bridge serializes its own browser calls and restores the logical session's selected page before every routed operation, so text/code agent concurrency stays high while browser concurrency is bounded by the pool size. `pages`, `selectpage`, and `closepage` are scoped to pages owned by the calling session, and pages opened as click or script side effects are claimed by that same owner.
 `chrome-devtools-axi stop` in pooled mode releases all pages owned by the calling logical session, including claimed popups: it closes them when another page exists, or navigates the last remaining page to `about:blank` because upstream cannot close the last tab. The physical pooled bridge stays available to other logical sessions.
-If an agent exits without running `stop`, the route idle timeout releases that logical session's pages even while other sessions keep the pooled bridge alive. It defaults to the effective bridge idle timeout; `CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS` changes the pooled bridge's default, while a caller's `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, `--idle-timeout-ms`, or persisted agent policy overrides it for that logical route.
+If an agent exits without running `stop`, the route idle timeout releases that logical session's pages even while other sessions keep the pooled bridge alive. `CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS` sets the pool-slot route fallback; otherwise the fallback is the effective caller timeout captured when that slot starts. A caller's `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, `--idle-timeout-ms`, or persisted agent policy overrides that fallback only for its logical route.
 If `CHROME_DEVTOOLS_AXI_PORT` is set with a pool, it is treated as the base port and each pool slot uses `base + slot`; leaving it unset uses the normal derived pool-slot ports.
 
 State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`; pooled bridge PID files nest under `pools/pool-<slot>/`):
@@ -391,7 +386,7 @@ State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `session
 | --------------------- | ------------------------------------------------------------------------------- |
 | `bridge.pid`          | PID, port, session, owner, start time, and last activity for the running bridge |
 | `snapshot-generation` | Per-logical-session counter used to detect stale uid refs                       |
-| `agent-idle-timeout`  | Per-logical-session timeout policy installed by agent lifecycle hooks           |
+| `agent-idle-timeout`  | Renewable per-logical-session policy from lifecycle hooks or the timeout flag   |
 
 Use `chrome-devtools-axi sessions` to inspect bridge state without starting a browser. It inventories the default session plus named and pooled sessions such as `pool-3` when they have bridge PID state; reports PID/process-group liveness, bridge health, page count and selected URL when reachable, and flags stale PID files, reused non-bridge PIDs, health failures, session mismatches, and orphan symptoms. `--json` prints machine-readable output for watchdogs.
 

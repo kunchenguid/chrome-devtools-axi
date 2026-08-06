@@ -168,13 +168,14 @@ environment:
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
   CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
-                                    Shut down an unused bridge and its browser after this many ms
+                                    Shut down an unused unpooled bridge, or set the caller's pooled
+                                    route deadline, after this many ms
                                     (default: 1800000 / 30 minutes, min: 1000)
   CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS
                                     In pooled mode, release a logical session's routed pages after
                                     this many ms without that session's browser activity, even if
                                     other sessions keep the pooled bridge alive
-                                    (default: effective bridge idle timeout, min: 1000)
+                                    (default: caller idle timeout captured at pool start, min: 1000)
 
 gpu:
   Headless Chrome cannot access hardware GPU on most Linux systems.

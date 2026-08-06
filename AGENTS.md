@@ -21,7 +21,7 @@ Its frontmatter includes Hermes Agent metadata from `src/skill.ts`; update the g
 
 ## Project Conventions
 
-- Node `20.19+`, `22.12+`, or `23+`, TypeScript, ESM-only (`"type": "module"`, module resolution `Node16` - relative imports use `.js` extensions even from `.ts` files).
+- Use a Node version allowed by `package.json`'s `engines.node` declaration. The project is TypeScript and ESM-only (`"type": "module"`, module resolution `Node16` - relative imports use `.js` extensions even from `.ts` files).
 - Tests live in `test/*.test.ts` and run with Vitest.
 - Run `pnpm run build` and `pnpm test` before pushing.
 - Do not hand-edit generated files: `CHANGELOG.md` and `.release-please-manifest.json` (owned by release-please) or `skills/chrome-devtools-axi/SKILL.md` (owned by `build:skill`).
@@ -46,7 +46,7 @@ The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP to
 Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/bridge.ts`) **detached** as a process group leader and polls health until the `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` deadline (default 30s).
 
 The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
-Every request refreshes an idle watchdog (`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, 30 minutes by default); when the window expires with no request in flight, the bridge shuts down cleanly so its MCP, Chrome process tree, and temporary profile do not survive an abandoned agent. A pooled route has its own idle release timer (`CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS`, defaulting to the effective bridge timeout), and a request-scoped idle policy overrides that route's window.
+Every request refreshes the physical bridge watchdog. An unpooled request may update that watchdog through its effective idle policy, but a pooled request applies its policy only to its logical route; the pool-slot watchdog remains independent so one route cannot shorten another route's work. `resolvePhysicalBridgeIdleTimeoutMs` and `resolveRouteIdleTimeoutMs` own those defaults, and `BrowserPageRouter` owns per-route overrides.
 Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
 
 `resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else the package-owned pinned dependency, else an auto-detected global npm install, else `npx -y chrome-devtools-mcp@<pinned version>`.

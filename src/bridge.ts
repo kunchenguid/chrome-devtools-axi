@@ -101,9 +101,10 @@ export function resolvePhysicalBridgeIdleTimeoutMs(
 
 /**
  * Resolve the default idle window for a logical route in a pooled bridge.
- * An explicit route timeout wins; otherwise route cleanup inherits the bridge
- * idle window so one lifecycle policy bounds both physical and logical state.
- * Individual requests may still supply a shorter or longer route timeout.
+ * An explicit route timeout wins; otherwise route cleanup inherits the caller
+ * idle policy captured when the pool slot starts. This is deliberately
+ * independent from the physical pooled bridge watchdog, and individual
+ * requests may still supply a shorter or longer timeout for their route only.
  */
 export function resolveRouteIdleTimeoutMs(
   value = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS,

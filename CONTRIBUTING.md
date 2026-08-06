@@ -33,7 +33,7 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 
 ## Repo conventions
 
-- Node `20.19+`, `22.12+`, or `23+`; this matches the packaged chrome-devtools-mcp runtime requirement.
+- Use a Node version allowed by the `engines.node` declaration in `package.json`; it matches the packaged chrome-devtools-mcp runtime requirement.
 - Unit tests use Vitest and are co-located as `*.test.ts`.
 - Use pnpm for package scripts.
 - Run `pnpm run build` and `pnpm test` before pushing.
