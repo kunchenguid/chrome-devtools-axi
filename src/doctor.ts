@@ -117,7 +117,10 @@ export interface DoctorRuntime {
   ) => Promise<boolean>;
   listPages?: (port: number) => Promise<DoctorPageSummary>;
   unlinkFile?: (path: string) => void;
-  stopSession?: (sessionName: string) => Promise<StopBridgeSessionResult>;
+  stopSession?: (
+    sessionName: string,
+    opts?: { physicalPool?: boolean },
+  ) => Promise<StopBridgeSessionResult>;
 }
 
 export interface InspectBrowserSessionsOptions {
@@ -149,13 +152,18 @@ export function parseSessionsArgs(args: string[]): SessionsCommandArgs {
   };
 }
 
-function classifySessionKind(session: string): SessionKind {
-  if (session === DEFAULT_SESSION_NAME) return "default";
-  return isPooledBridgeSessionName(session) ? "pooled" : "named";
+interface SessionInventoryEntry {
+  session: string;
+  kind: SessionKind;
 }
 
-function listSessionNames(): string[] {
-  const names = new Set<string>([DEFAULT_SESSION_NAME]);
+function listSessionEntries(): SessionInventoryEntry[] {
+  const entries = new Map<string, SessionInventoryEntry>([
+    [
+      `default:${DEFAULT_SESSION_NAME}`,
+      { session: DEFAULT_SESSION_NAME, kind: "default" },
+    ],
+  ]);
   const sessionsDir = resolveNamedSessionsDir();
   try {
     for (const entry of readdirSync(sessionsDir, { withFileTypes: true })) {
@@ -167,7 +175,7 @@ function listSessionNames(): string[] {
       } catch {
         continue;
       }
-      names.add(name);
+      entries.set(`named:${name}`, { session: name, kind: "named" });
     }
   } catch {
     // No named sessions yet.
@@ -179,15 +187,15 @@ function listSessionNames(): string[] {
       const name = entry.name;
       if (!isPooledBridgeSessionName(name)) continue;
       if (!existsSync(join(poolsDir, name, "bridge.pid"))) continue;
-      names.add(name);
+      entries.set(`pooled:${name}`, { session: name, kind: "pooled" });
     }
   } catch {
     // Pooling may never have been enabled.
   }
-  return [...names].sort((a, b) => {
-    if (a === DEFAULT_SESSION_NAME) return -1;
-    if (b === DEFAULT_SESSION_NAME) return 1;
-    return a.localeCompare(b);
+  return [...entries.values()].sort((a, b) => {
+    if (a.kind === "default") return -1;
+    if (b.kind === "default") return 1;
+    return a.session.localeCompare(b.session) || a.kind.localeCompare(b.kind);
   });
 }
 
@@ -354,17 +362,17 @@ function ageMs(now: Date, value: string | undefined): number | undefined {
 
 async function inspectOneSession(
   session: string,
+  kind: SessionKind,
   options: ResolvedInspectBrowserSessionsOptions,
 ): Promise<BrowserSessionDiagnostic> {
   const now = options.runtime.now();
-  const kind = classifySessionKind(session);
   const stateDir =
     kind === "pooled"
       ? resolveBridgeStateDirForBridgeSession(session, true)
       : resolveSessionStateDir(session);
   const pidFilePath =
     kind === "pooled"
-      ? resolveBridgePidFileForBridgeSession(session)
+      ? resolveBridgePidFileForBridgeSession(session, true)
       : resolveSessionPidFile(session);
   const { pidFile, parsed } = readPidFileForDoctor(pidFilePath);
   const flags: string[] = [];
@@ -443,7 +451,12 @@ async function inspectOneSession(
       } else {
         status = "unhealthy";
         if (options.stopUnhealthy && !sessionMismatch) {
-          const stopResult = await options.runtime.stopSession(session);
+          const stopResult =
+            kind === "pooled"
+              ? await options.runtime.stopSession(session, {
+                  physicalPool: true,
+                })
+              : await options.runtime.stopSession(session);
           cleanup = { ...(cleanup ?? {}), stopResult };
           flags.push(`stop_unhealthy_${stopResult.replace("-", "_")}`);
         }
@@ -496,7 +509,9 @@ export async function inspectBrowserSessions(
     runtime,
   };
   const sessions = await Promise.all(
-    listSessionNames().map((session) => inspectOneSession(session, options)),
+    listSessionEntries().map(({ session, kind }) =>
+      inspectOneSession(session, kind, options),
+    ),
   );
   return {
     generatedAt: runtime.now().toISOString(),

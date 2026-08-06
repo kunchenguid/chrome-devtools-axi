@@ -29,7 +29,12 @@ import {
   truncateText,
 } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
-import { installHooksOrThrow } from "./hooks.js";
+import { AGENT_BRIDGE_IDLE_TIMEOUT_MS, installHooksOrThrow } from "./hooks.js";
+import {
+  clearSessionIdleTimeoutPolicy,
+  readSessionIdleTimeoutPolicy,
+  writeSessionIdleTimeoutPolicy,
+} from "./session-policy.js";
 import { resolveOutputPath } from "./paths.js";
 import {
   formatBrowserSessionsReport,
@@ -56,6 +61,59 @@ export type MainOptions = {
   stdout?: CliStdout;
 };
 
+export function parseRuntimeOptions(argv: string[]): {
+  argv: string[];
+  idleTimeoutMs?: number;
+  sessionStart: boolean;
+  sessionEnd: boolean;
+} {
+  const remaining: string[] = [];
+  let idleTimeoutMs: number | undefined;
+  let sessionStart = false;
+  let sessionEnd = false;
+  let parsingRuntimeOptions = true;
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (parsingRuntimeOptions && arg === "--agent-session-start") {
+      sessionStart = true;
+      continue;
+    }
+    if (parsingRuntimeOptions && arg === "--agent-session-end") {
+      sessionEnd = true;
+      continue;
+    }
+    const inline = parsingRuntimeOptions
+      ? arg.match(/^--idle-timeout-ms=(.+)$/)
+      : null;
+    if (inline) {
+      idleTimeoutMs = parseRuntimeIdleTimeout(inline[1]);
+      continue;
+    }
+    if (parsingRuntimeOptions && arg === "--idle-timeout-ms") {
+      const value = argv[++index];
+      if (value === undefined) {
+        throw new Error("--idle-timeout-ms requires a value");
+      }
+      idleTimeoutMs = parseRuntimeIdleTimeout(value);
+      continue;
+    }
+    remaining.push(arg);
+    parsingRuntimeOptions = false;
+  }
+  if (sessionStart && sessionEnd) {
+    throw new Error("Agent session cannot start and end in one invocation");
+  }
+  return { argv: remaining, idleTimeoutMs, sessionStart, sessionEnd };
+}
+
+function parseRuntimeIdleTimeout(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1000) {
+    throw new Error("--idle-timeout-ms must be an integer >= 1000");
+  }
+  return parsed;
+}
+
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
 commands[36]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
@@ -67,8 +125,8 @@ commands[36]:
   network-get [id], lighthouse, perf-start, perf-stop,
   perf-insight <set> <name>, heap <path>, start, stop, sessions, setup hooks
 
-flags[2]:
-  --help, -v/-V/--version
+flags[3]:
+  --help, -v/-V/--version, --idle-timeout-ms=<milliseconds>
 
 environment:
   CHROME_DEVTOOLS_AXI_AUTO_CONNECT  Set to 1 to connect to the user's running Chrome (144+)
@@ -1826,20 +1884,48 @@ export async function main(
   options: MainOptions | string[] = {},
 ): Promise<void> {
   const normalized = normalizeMainOptions(options);
-  const requestedArgv = resolveArgv(normalized.argv);
+  const rawArgv = resolveArgv(normalized.argv);
+  const runtime = parseRuntimeOptions(rawArgv);
+  if (runtime.sessionStart) {
+    writeSessionIdleTimeoutPolicy(AGENT_BRIDGE_IDLE_TIMEOUT_MS);
+  }
+  const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  const idleTimeoutMs =
+    runtime.idleTimeoutMs ??
+    (previousIdleTimeout === undefined
+      ? readSessionIdleTimeoutPolicy()
+      : undefined);
+  if (idleTimeoutMs !== undefined) {
+    process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = String(idleTimeoutMs);
+  }
+  const requestedArgv = runtime.argv;
   const homeFull = shouldRenderFullHome(requestedArgv);
-  const argv = homeFull ? [] : normalized.argv;
+  const runtimeOptionsRemoved = runtime.argv.length !== rawArgv.length;
+  const argv = homeFull
+    ? []
+    : normalized.argv === undefined && !runtimeOptionsRemoved
+      ? undefined
+      : requestedArgv;
   const stdout = wrapStdout(normalized.stdout, argv);
 
-  await runAxiCli({
-    ...(argv ? { argv } : {}),
-    ...(stdout ? { stdout } : {}),
-    description: HOME_DESCRIPTION,
-    version: VERSION,
-    topLevelHelp: TOP_HELP,
-    home: async (args) => handleHome(homeFull || splitFullFlag(args).full),
-    commands: COMMANDS,
-    getCommandHelp,
-    renderUnknownCommand,
-  });
+  try {
+    await runAxiCli({
+      ...(argv ? { argv } : {}),
+      ...(stdout ? { stdout } : {}),
+      description: HOME_DESCRIPTION,
+      version: VERSION,
+      topLevelHelp: TOP_HELP,
+      home: async (args) => handleHome(homeFull || splitFullFlag(args).full),
+      commands: COMMANDS,
+      getCommandHelp,
+      renderUnknownCommand,
+    });
+  } finally {
+    if (runtime.sessionEnd) clearSessionIdleTimeoutPolicy();
+    if (previousIdleTimeout === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = previousIdleTimeout;
+    }
+  }
 }

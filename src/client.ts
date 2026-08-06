@@ -10,10 +10,10 @@ import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   MCP_PACKAGE_SPEC,
   resolveBridgeScript,
+  validateBrowserPoolConnectionMode,
 } from "./bridge.js";
 import {
   isBrowserPoolEnabled,
-  isPooledBridgeSessionName,
   resolveBridgePidFile,
   resolveBridgePidFileForBridgeSession,
   resolveBridgePort,
@@ -101,7 +101,14 @@ function httpGet(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = request(
-      { hostname: "127.0.0.1", port, path, method: "GET", timeout: timeoutMs },
+      {
+        hostname: "127.0.0.1",
+        port,
+        path,
+        method: "GET",
+        timeout: timeoutMs,
+        headers: idleTimeoutHeaders(),
+      },
       (res) => {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
@@ -135,6 +142,7 @@ function httpPost(
         headers: {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(payload),
+          ...idleTimeoutHeaders(),
         },
       },
       (res) => {
@@ -157,6 +165,18 @@ function httpPost(
     req.write(payload);
     req.end();
   });
+}
+
+function idleTimeoutHeaders(): Record<string, string> {
+  const value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  return value ? { "X-Axi-Idle-Timeout-Ms": value } : {};
+}
+
+function requestedRouteIdleTimeoutMs(): number | undefined {
+  const value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1000 ? parsed : undefined;
 }
 
 /**
@@ -213,14 +233,34 @@ export async function waitForProcessExit(
 
 export function isBridgeProcess(pid: number): boolean {
   try {
-    const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
-      encoding: "utf-8",
-      timeout: 1000,
-    });
+    const command = readProcessCommand(pid);
     return command.includes("chrome-devtools-axi-bridge");
   } catch {
     return false;
   }
+}
+
+export function readProcessCommand(
+  pid: number,
+  platform = process.platform,
+  run: typeof execFileSync = execFileSync,
+): string {
+  if (platform === "win32") {
+    return run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\").CommandLine`,
+      ],
+      { encoding: "utf-8", timeout: 1000 },
+    );
+  }
+  return run("ps", ["-p", String(pid), "-o", "command="], {
+    encoding: "utf-8",
+    timeout: 1000,
+  });
 }
 
 /**
@@ -236,6 +276,23 @@ export async function terminateBridgeProcess(
 ): Promise<void> {
   if (!isProcessAlive(pid)) return;
   const killProcessGroup = opts.killProcessGroup === true;
+
+  if (process.platform === "win32" && killProcessGroup) {
+    try {
+      execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        timeout: 5000,
+        stdio: "ignore",
+      });
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        return;
+      }
+    }
+    await waitForProcessExit(pid, 1000);
+    return;
+  }
 
   // Give the bridge a chance to run its own shutdown handler (which kills its
   // process group on `exit`).
@@ -385,6 +442,7 @@ export async function ensureBridge(
     sessionName: string,
   ) => SpawnedBridge = spawnBridgeProcess,
 ): Promise<number> {
+  validateBrowserPoolConnectionMode();
   const sessionName = resolveSessionName();
   const bridgeSessionName = resolveBridgeSessionName(sessionName);
   const port = resolveBridgePort(sessionName);
@@ -523,7 +581,12 @@ export async function callTool(
   const routeSession = resolveSessionName();
 
   try {
-    const resp = await httpPost(port, "/call", { name, args, routeSession });
+    const resp = await httpPost(port, "/call", {
+      name,
+      args,
+      routeSession,
+      routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
+    });
     const data = JSON.parse(resp);
     if (data.error) {
       throw new Error(data.error);
@@ -601,7 +664,12 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     const resp = await httpPost(
       pidInfo.port,
       "/call",
-      { name: "take_snapshot", args: {}, routeSession: sessionName },
+      {
+        name: "take_snapshot",
+        args: {},
+        routeSession: sessionName,
+        routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
+      },
       5000,
     );
     const data = JSON.parse(resp);
@@ -635,14 +703,15 @@ export type StopBridgeSessionResult =
  */
 export async function stopBridgeSession(
   sessionName: string = resolveSessionName(),
+  opts: { physicalPool?: boolean } = {},
 ): Promise<StopBridgeSessionResult> {
-  const isPoolBridgeSession = isPooledBridgeSessionName(sessionName);
+  const isPoolBridgeSession = opts.physicalPool === true;
   const bridgeSessionName = isPoolBridgeSession
     ? sessionName
     : resolveBridgeSessionName(sessionName);
   const pidInfo = readPidFile(
     isPoolBridgeSession
-      ? resolveBridgePidFileForBridgeSession(sessionName)
+      ? resolveBridgePidFileForBridgeSession(sessionName, true)
       : resolveBridgePidFile(sessionName),
   );
   if (!pidInfo) return "not-running";
@@ -657,7 +726,12 @@ export async function stopBridgeSession(
       await httpPost(
         pidInfo.port,
         "/call",
-        { name: "__axi_release_session", args: {}, routeSession: sessionName },
+        {
+          name: "__axi_release_session",
+          args: {},
+          routeSession: sessionName,
+          routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
+        },
         10_000,
       );
       return "stopped";

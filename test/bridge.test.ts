@@ -118,6 +118,18 @@ describe("bridge idle lifecycle", () => {
     expect(onIdle).toHaveBeenCalledOnce();
   });
 
+  it("updates the idle window for a later agent request", async () => {
+    vi.useFakeTimers();
+    const onIdle = vi.fn();
+    const watchdog = createBridgeIdleWatchdog(10_000, onIdle);
+
+    watchdog.setTimeoutMs(1000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(onIdle).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
   it("tracks each HTTP request through the server lifecycle", async () => {
     let starts = 0;
     let finishes = 0;
@@ -133,6 +145,7 @@ describe("bridge idle lifecycle", () => {
           finishes++;
         };
       },
+      setTimeoutMs: () => {},
       stop: () => {},
     });
 
@@ -146,6 +159,13 @@ describe("bridge idle lifecycle", () => {
       }
       const response = await fetch(`http://127.0.0.1:${address.port}/health`);
       expect(response.status).toBe(200);
+      expect(starts).toBe(1);
+      expect(finishes).toBe(1);
+
+      const forbidden = await fetch(`http://127.0.0.1:${address.port}/health`, {
+        headers: { Origin: "https://attacker.example" },
+      });
+      expect(forbidden.status).toBe(403);
       expect(starts).toBe(1);
       expect(finishes).toBe(1);
     } finally {
@@ -437,6 +457,32 @@ describe("BrowserPageRouter", () => {
     expect(snapshot).toBe("snapshot:1");
   });
 
+  it("does not claim another route's selected page for a first background page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "new_page",
+        args: { url: "https://background.example/", background: true },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const owned = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    expect(owned).toBe("1: https://background.example/");
+
+    await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
   it("owns and releases a popup opened as a side effect of a routed call", async () => {
     const router = new BrowserPageRouter();
     const fake = new FakeMcpPages();
@@ -653,6 +699,66 @@ describe("BrowserPageRouter", () => {
       vi.useRealTimers();
     }
   });
+
+  it("applies a request-specific idle timeout to an existing pooled route", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(10_000);
+      const fake = new FakeMcpPages();
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+          routeIdleTimeoutMs: 1000,
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries idle release after a transient MCP failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(1000);
+      const fake = new FakeMcpPages();
+      let closeFailures = 1;
+      const flakyCall = async (
+        name: string,
+        args: Record<string, unknown>,
+      ): Promise<string> => {
+        if (name === "close_page" && closeFailures-- > 0) {
+          throw new Error("transient close failure");
+        }
+        return fake.call(name, args);
+      };
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+        },
+        flakyCall,
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fake.pages.some((page) => page.id === 1)).toBe(true);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("getErrorMessage", () => {
@@ -691,6 +797,8 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
       process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    savedEnv.CHROME_DEVTOOLS_AXI_POOL_SIZE =
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -698,6 +806,7 @@ describe("buildTransportArgs", () => {
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
   });
 
   afterEach(() => {
@@ -715,6 +824,12 @@ describe("buildTransportArgs", () => {
       savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL =
       savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL;
+    if (savedEnv.CHROME_DEVTOOLS_AXI_POOL_SIZE === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE =
+        savedEnv.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    }
   });
 
   it("defaults to headless and isolated", () => {
@@ -778,6 +893,16 @@ describe("buildTransportArgs", () => {
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).not.toContain("--isolated");
     expect(args).not.toContain("--headless");
+  });
+
+  it("rejects pooled attachment to an externally managed browser", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    expect(() => buildTransportArgs()).toThrow(/cannot be combined/);
+
+    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    expect(() => buildTransportArgs()).toThrow(/cannot be combined/);
   });
 
   it("passes chrome args alongside --browserUrl", () => {

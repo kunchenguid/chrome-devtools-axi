@@ -228,12 +228,10 @@ export function resolveBridgePidFile(
 
 export function resolveBridgePidFileForBridgeSession(
   bridgeSessionName: string = resolveSessionName(),
+  pooled: boolean = isBrowserPoolEnabled(),
 ): string {
   return join(
-    resolveBridgeStateDirForBridgeSession(
-      bridgeSessionName,
-      isPooledBridgeSessionName(bridgeSessionName),
-    ),
+    resolveBridgeStateDirForBridgeSession(bridgeSessionName, pooled),
     "bridge.pid",
   );
 }

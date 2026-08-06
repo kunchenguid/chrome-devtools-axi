@@ -44,6 +44,7 @@ export const AGENT_BRIDGE_IDLE_TIMEOUT_MS = 120_000;
 const HOOK_TIMEOUT_SECONDS = 10;
 export const SESSION_END_HOOK_TIMEOUT_SECONDS = 3;
 export const PI_EXTENSION_FILENAME = "chrome-devtools-axi.ts";
+const OPENCODE_PLUGIN_FILENAME = `axi-${HOOK_MARKER}.js`;
 
 /**
  * Only install hooks from packaged or installed entrypoints.
@@ -58,7 +59,7 @@ export function shouldInstallHooksForExecPath(execPath: string): boolean {
 }
 
 export function withAgentBridgeIdleTimeout(command: string): string {
-  return `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} ${command}`;
+  return `${command} --agent-session-start`;
 }
 
 function isManagedHook(hook: HookEntry, marker = HOOK_MARKER): boolean {
@@ -177,7 +178,6 @@ export function buildPiExtension(command: string): string {
     `// Managed by chrome-devtools-axi setup hooks. Re-run setup to repair.\n` +
     `import { spawnSync } from "node:child_process";\n\n` +
     `const AXI_COMMAND = ${JSON.stringify(command)};\n` +
-    `const AXI_IDLE_TIMEOUT_MS = ${AGENT_BRIDGE_IDLE_TIMEOUT_MS};\n` +
     `const STATE_KEY = Symbol.for("chrome-devtools-axi.pi.lifecycle");\n\n` +
     `const shared = globalThis;\n\n` +
     `function run(args, timeout) {\n` +
@@ -187,7 +187,6 @@ export function buildPiExtension(command: string): string {
     `    timeout,\n` +
     `    env: {\n` +
     `      ...process.env,\n` +
-    `      CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS: String(AXI_IDLE_TIMEOUT_MS),\n` +
     `    },\n` +
     `  });\n` +
     `  if (result.error || result.status !== 0) return "";\n` +
@@ -199,7 +198,7 @@ export function buildPiExtension(command: string): string {
     `  if (state.owner) return;\n` +
     `  state.owner = owner;\n\n` +
     `  pi.on("session_start", () => {\n` +
-    `    state.context = run([], 10000);\n` +
+    `    state.context = run(["--agent-session-start"], 10000);\n` +
     `  });\n\n` +
     `  pi.on("before_agent_start", (event) => {\n` +
     `    if (state.owner !== owner || !state.context) return;\n` +
@@ -207,7 +206,7 @@ export function buildPiExtension(command: string): string {
     `  });\n\n` +
     `  pi.on("session_shutdown", () => {\n` +
     `    if (state.owner !== owner) return;\n` +
-    `    run(["stop"], 3000);\n` +
+    `    run(["--agent-session-end", "stop"], 3000);\n` +
     `    state.context = undefined;\n` +
     `    state.owner = undefined;\n` +
     `  });\n` +
@@ -224,19 +223,19 @@ export function computeHookUpdate(
   settings: HookSettings,
   execPath: string,
 ): [HookSettings, boolean] {
-  const baseCommand = withAgentBridgeIdleTimeout(execPath);
+  const startCommand = withAgentBridgeIdleTimeout(execPath);
   const [withSessionStart, sessionStartChanged] = computeSessionStartHookUpdate(
     settings,
     {
       marker: HOOK_MARKER,
-      command: baseCommand,
+      command: startCommand,
       timeoutSeconds: HOOK_TIMEOUT_SECONDS,
     },
   ) as [HookSettings, boolean];
   const [updated, sessionEndChanged] = computeEventHookUpdate(
     withSessionStart,
     "SessionEnd",
-    `${baseCommand} stop`,
+    `${execPath} --agent-session-end stop`,
     SESSION_END_HOOK_TIMEOUT_SECONDS,
   );
   const [withoutBadStop, removedBadStop] = removeManagedEventHooks(
@@ -327,6 +326,37 @@ function installPiExtension(
   }
 }
 
+export function addOpenCodeSessionPolicy(source: string): string {
+  const original = "spawn(command, [], {";
+  const managed = 'spawn(command, ["--agent-session-start"], {';
+  if (source.includes(managed)) return source;
+  if (!source.includes(original)) {
+    throw new Error("managed OpenCode plugin has an unsupported format");
+  }
+  return source.replace(original, managed);
+}
+
+function installOpenCodeSessionPolicy(
+  onError: (message: string) => void,
+): void {
+  const target = join(
+    homedir(),
+    ".config",
+    "opencode",
+    "plugins",
+    OPENCODE_PLUGIN_FILENAME,
+  );
+  try {
+    if (!existsSync(target)) return;
+    const current = readFileSync(target, "utf-8");
+    const updated = addOpenCodeSessionPolicy(current);
+    if (updated !== current) writeFileSync(target, updated, "utf-8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    onError(`${target}: ${message}`);
+  }
+}
+
 /**
  * Pure function: ensure Codex hooks are enabled in config.toml.
  * Returns [updatedToml, changed].
@@ -357,6 +387,11 @@ export function installHooksOrThrow(): void {
       errors.push(message);
     },
   });
+  if (errors.length === 0) {
+    installOpenCodeSessionPolicy((message) => {
+      errors.push(message);
+    });
+  }
   const command = resolveInstalledHookCommand();
   if (command) {
     installJsonHooks(command, (message) => {

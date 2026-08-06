@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { installHooks, installHooksOrThrow, runAxiCli } = vi.hoisted(() => ({
@@ -41,7 +43,7 @@ vi.mock("../src/doctor.js", async () => {
   };
 });
 
-import { main, TOP_HELP } from "../src/cli.js";
+import { main, parseRuntimeOptions, TOP_HELP } from "../src/cli.js";
 
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -60,6 +62,21 @@ describe("main CLI runtime", () => {
   it("documents explicit hook setup in help output", () => {
     expect(TOP_HELP).toContain("setup hooks");
     expect(TOP_HELP).not.toContain("CHROME_DEVTOOLS_AXI_DISABLE_HOOKS");
+  });
+
+  it("parses runtime options only before the command", () => {
+    expect(
+      parseRuntimeOptions([
+        "--idle-timeout-ms=120000",
+        "eval",
+        "--idle-timeout-ms=literal",
+      ]),
+    ).toEqual({
+      argv: ["eval", "--idle-timeout-ms=literal"],
+      idleTimeoutMs: 120000,
+      sessionStart: false,
+      sessionEnd: false,
+    });
   });
 
   it("passes bare top-level help argv through to axi-sdk-js", async () => {
@@ -124,6 +141,40 @@ describe("main CLI runtime", () => {
     }
 
     expect(vi.mocked(runAxiCli).mock.calls[0]?.[0]).not.toHaveProperty("hooks");
+  });
+
+  it("applies a persisted agent idle policy to later browser commands", async () => {
+    const originalHome = process.env.HOME;
+    const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    const home = mkdtempSync(join(tmpdir(), "axi-agent-policy-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "worker-1";
+    let observedTimeout: string | undefined;
+    try {
+      await main({ argv: ["--agent-session-start"] });
+      runAxiCli.mockImplementationOnce(async () => {
+        observedTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      });
+      await main({ argv: ["snapshot"] });
+      expect(observedTimeout).toBe("120000");
+
+      await main({ argv: ["--agent-session-end", "stop"] });
+      observedTimeout = undefined;
+      runAxiCli.mockImplementationOnce(async () => {
+        observedTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      });
+      await main({ argv: ["snapshot"] });
+      expect(observedTimeout).toBeUndefined();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = originalSession;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("installs session hooks from the explicit setup command", async () => {

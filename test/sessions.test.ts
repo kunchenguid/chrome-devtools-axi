@@ -234,6 +234,14 @@ describe("browser pool resolution", () => {
       join(STATE_DIR, "pools", "pool-1", "bridge.pid"),
     );
   });
+
+  it("keeps a logical pool-number name in named session state when pooling is disabled", () => {
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "pool-1";
+
+    expect(resolveActiveBridgePidFile()).toBe(
+      join(STATE_DIR, "sessions", "pool-1", "bridge.pid"),
+    );
+  });
 });
 
 describe("session state paths", () => {

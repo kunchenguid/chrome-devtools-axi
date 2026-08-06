@@ -17,7 +17,7 @@ vi.mock("axi-sdk-js", async () => {
 });
 
 import {
-  AGENT_BRIDGE_IDLE_TIMEOUT_MS,
+  addOpenCodeSessionPolicy,
   buildPiExtension,
   computeCodexConfigUpdate,
   computeHookUpdate,
@@ -27,6 +27,16 @@ import {
   shouldInstallHooksForExecPath,
   withAgentBridgeIdleTimeout,
 } from "../src/hooks.js";
+
+describe("addOpenCodeSessionPolicy", () => {
+  it("adds the portable session-start argument idempotently", () => {
+    const source = "const child = spawn(command, [], { shell: false });";
+    const updated = addOpenCodeSessionPolicy(source);
+
+    expect(updated).toContain('spawn(command, ["--agent-session-start"], {');
+    expect(addOpenCodeSessionPolicy(updated)).toBe(updated);
+  });
+});
 
 describe("buildPiExtension", () => {
   it("maps Pi startup context and shutdown to the inherited AXI session", async () => {
@@ -69,8 +79,8 @@ describe("buildPiExtension", () => {
     }
 
     expect(readFileSync(log, "utf-8")).toBe(
-      `start\tfleet-pi-owned\t${AGENT_BRIDGE_IDLE_TIMEOUT_MS}\n` +
-        `stop\tfleet-pi-owned\t${AGENT_BRIDGE_IDLE_TIMEOUT_MS}\n`,
+      `--agent-session-start\tfleet-pi-owned\t\n` +
+        `--agent-session-end\tfleet-pi-owned\t\n`,
     );
   });
 
@@ -108,13 +118,11 @@ describe("computeHookUpdate", () => {
     expect(updated.hooks!.SessionStart).toBeDefined();
     expect(updated.hooks!.SessionStart!.length).toBeGreaterThan(0);
     const hookCmd = JSON.stringify(updated);
-    expect(hookCmd).toContain(
-      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS}`,
-    );
+    expect(hookCmd).toContain("--agent-session-start");
     expect(hookCmd).toContain("chrome-devtools-axi");
     expect(updated.hooks!.SessionEnd).toBeDefined();
     expect(JSON.stringify(updated.hooks!.SessionEnd)).toContain(
-      "chrome-devtools-axi stop",
+      "chrome-devtools-axi --agent-session-end stop",
     );
     expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBe(
       SESSION_END_HOOK_TIMEOUT_SECONDS,
@@ -176,7 +184,8 @@ describe("computeHookUpdate", () => {
             hooks: [
               {
                 type: "command" as const,
-                command: `${command} stop`,
+                command:
+                  "/usr/bin/chrome-devtools-axi --agent-session-end stop",
                 timeout: SESSION_END_HOOK_TIMEOUT_SECONDS,
               },
             ],
@@ -215,10 +224,10 @@ describe("computeHookUpdate", () => {
 
     expect(changed).toBe(true);
     const str = JSON.stringify(updated);
+    expect(str).toContain("/usr/bin/chrome-devtools-axi --agent-session-start");
     expect(str).toContain(
-      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} /usr/bin/chrome-devtools-axi`,
+      "/usr/bin/chrome-devtools-axi --agent-session-end stop",
     );
-    expect(str).toContain("/usr/bin/chrome-devtools-axi stop");
     expect(str).toContain("SessionEnd");
     expect(str).not.toContain('"Stop"');
   });
@@ -261,7 +270,7 @@ describe("computeHookUpdate", () => {
 
     expect(changed).toBe(true);
     expect(JSON.stringify(updated.hooks!.SessionEnd)).toContain(
-      `${command} stop`,
+      "/usr/bin/chrome-devtools-axi --agent-session-end stop",
     );
     expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBe(
       SESSION_END_HOOK_TIMEOUT_SECONDS,
@@ -300,7 +309,7 @@ describe("computeHookUpdate", () => {
 
     expect(changed).toBe(true);
     expect(JSON.stringify(updated.hooks!.SessionEnd)).toContain(
-      `${command} stop`,
+      "/usr/bin/chrome-devtools-axi --agent-session-end stop",
     );
     expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBeLessThanOrEqual(
       3,
@@ -335,7 +344,7 @@ describe("computeHookUpdate", () => {
     expect(changed).toBe(true);
     const str = JSON.stringify(updated);
     expect(str).toContain(
-      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} /new/path/chrome-devtools-axi`,
+      "/new/path/chrome-devtools-axi --agent-session-start",
     );
     expect(str).not.toContain("/old/path/");
   });
@@ -390,7 +399,7 @@ describe("computeHookUpdate", () => {
     );
     expect(changed).toBe(true);
     expect(JSON.stringify(updated)).toContain(
-      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} /Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts`,
+      "/Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts --agent-session-start",
     );
   });
 });

@@ -48,6 +48,7 @@ export interface BridgeCallPayload {
   name: string;
   args: Record<string, unknown>;
   routeSession?: string;
+  routeIdleTimeoutMs?: number;
 }
 
 interface BridgeToolDescription {
@@ -106,6 +107,7 @@ export function resolveRouteIdleTimeoutMs(
 
 export interface BridgeIdleWatchdog {
   beginRequest(): () => void;
+  setTimeoutMs(timeoutMs: number): void;
   stop(): void;
 }
 
@@ -116,9 +118,10 @@ export interface BridgeIdleWatchdog {
  * paths cannot accidentally underflow the active-request count.
  */
 export function createBridgeIdleWatchdog(
-  timeoutMs: number,
+  initialTimeoutMs: number,
   onIdle: () => void | Promise<void>,
 ): BridgeIdleWatchdog {
+  let timeoutMs = initialTimeoutMs;
   let activeRequests = 0;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -156,6 +159,10 @@ export function createBridgeIdleWatchdog(
         activeRequests--;
         arm();
       };
+    },
+    setTimeoutMs(nextTimeoutMs) {
+      timeoutMs = nextTimeoutMs;
+      arm();
     },
     stop() {
       stopped = true;
@@ -392,7 +399,12 @@ function getToolContent(result: unknown): BridgeContentBlock[] {
 }
 
 export function parseBridgeCallPayload(body: string): BridgeCallPayload {
-  let payload: { name?: unknown; args?: unknown; routeSession?: unknown };
+  let payload: {
+    name?: unknown;
+    args?: unknown;
+    routeSession?: unknown;
+    routeIdleTimeoutMs?: unknown;
+  };
   try {
     payload = JSON.parse(body) as { name?: unknown; args?: unknown };
   } catch {
@@ -401,6 +413,10 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
   if (typeof payload.name !== "string" || payload.name.length === 0) {
     throw new Error("Invalid bridge request payload");
   }
+  const routeIdleTimeoutMs =
+    payload.routeIdleTimeoutMs === undefined
+      ? undefined
+      : parseIdleTimeout(payload.routeIdleTimeoutMs);
   if (payload.args === undefined) {
     return {
       name: payload.name,
@@ -409,6 +425,7 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
         typeof payload.routeSession === "string"
           ? payload.routeSession
           : undefined,
+      routeIdleTimeoutMs,
     };
   }
   if (
@@ -425,7 +442,15 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
       typeof payload.routeSession === "string"
         ? payload.routeSession
         : undefined,
+    routeIdleTimeoutMs,
   };
+}
+
+function parseIdleTimeout(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1000) {
+    throw new Error("Invalid idle timeout");
+  }
+  return value;
 }
 
 interface ParsedPage {
@@ -469,6 +494,7 @@ export class BrowserPageRouter {
   private readonly routeSessionByPage = new Map<number, string>();
   private readonly lastActivityByRouteSession = new Map<string, number>();
   private readonly activeRouteSessions = new Set<string>();
+  private readonly idleTimeoutByRouteSession = new Map<string, number>();
   private readonly routeIdleTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -507,7 +533,7 @@ export class BrowserPageRouter {
     if (payload.name === "list_pages") {
       const pages = await this.listPages(call);
       this.forgetMissingPages(pages);
-      this.touchRoute(routeSession, call);
+      this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
       return this.formatOwnedPages(routeSession, pages);
     }
 
@@ -519,7 +545,7 @@ export class BrowserPageRouter {
         await this.requireOwnedPage(routeSession, pageId);
         const result = await call(payload.name, payload.args);
         this.activePageByRouteSession.set(routeSession, pageId);
-        this.touchRoute(routeSession, call);
+        this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
         return result;
       }
 
@@ -529,7 +555,7 @@ export class BrowserPageRouter {
           payload.args,
           call,
         );
-        this.touchRoute(routeSession, call);
+        this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
         return result;
       }
 
@@ -539,7 +565,7 @@ export class BrowserPageRouter {
           payload.args,
           call,
         );
-        this.touchRoute(routeSession, call);
+        this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
         return result;
       }
 
@@ -560,11 +586,11 @@ export class BrowserPageRouter {
         } catch {
           // The original MCP error is more useful than a follow-up list failure.
         }
-        this.touchRoute(routeSession, call);
+        this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
         throw error;
       }
       await this.reconcilePagesAfterCall(routeSession, pagesBeforeCall, call);
-      this.touchRoute(routeSession, call);
+      this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
       return result;
     } finally {
       this.activeRouteSessions.delete(routeSession);
@@ -690,17 +716,21 @@ export class BrowserPageRouter {
       this.rememberPage(routeSession, page.id, args.background !== true);
     }
 
-    if (args.background === true && previousActive !== undefined) {
-      const previous = after.find((page) => page.id === previousActive);
-      if (previous && !previous.selected) {
-        await call("select_page", {
-          pageId: previous.id,
-          bringToFront: false,
-        });
+    if (args.background === true) {
+      if (previousActive !== undefined) {
+        const previous = after.find((page) => page.id === previousActive);
+        if (previous && !previous.selected) {
+          await call("select_page", {
+            pageId: previous.id,
+            bringToFront: false,
+          });
+        }
+        if (previous) {
+          this.activePageByRouteSession.set(routeSession, previousActive);
+        }
       }
-      this.activePageByRouteSession.set(routeSession, previousActive);
     } else {
-      const selected = after.find((page) => page.selected) ?? created.at(-1);
+      const selected = created.find((page) => page.selected) ?? created.at(-1);
       if (selected) this.rememberPage(routeSession, selected.id, true);
     }
 
@@ -814,7 +844,14 @@ export class BrowserPageRouter {
     return `Released session "${routeSession}" (${reason}); closed ${closed}, blanked ${blanked}.`;
   }
 
-  private touchRoute(routeSession: string, call: BridgeToolCall): void {
+  private touchRoute(
+    routeSession: string,
+    call: BridgeToolCall,
+    idleTimeoutMs?: number,
+  ): void {
+    if (idleTimeoutMs !== undefined) {
+      this.idleTimeoutByRouteSession.set(routeSession, idleTimeoutMs);
+    }
     this.lastActivityByRouteSession.set(routeSession, Date.now());
     this.armRouteIdleTimer(routeSession, call);
   }
@@ -822,9 +859,13 @@ export class BrowserPageRouter {
   private armRouteIdleTimer(routeSession: string, call: BridgeToolCall): void {
     const existing = this.routeIdleTimers.get(routeSession);
     if (existing) clearTimeout(existing);
-    const timer = setTimeout(() => {
-      void this.enqueueIdleRelease(routeSession, call);
-    }, this.routeIdleTimeoutMs);
+    const timer = setTimeout(
+      () => {
+        void this.enqueueIdleRelease(routeSession, call);
+      },
+      this.idleTimeoutByRouteSession.get(routeSession) ??
+        this.routeIdleTimeoutMs,
+    );
     timer.unref();
     this.routeIdleTimers.set(routeSession, timer);
   }
@@ -840,11 +881,20 @@ export class BrowserPageRouter {
         this.armRouteIdleTimer(routeSession, call);
         return;
       }
-      if (Date.now() - lastActivity < this.routeIdleTimeoutMs) {
+      const idleTimeoutMs =
+        this.idleTimeoutByRouteSession.get(routeSession) ??
+        this.routeIdleTimeoutMs;
+      if (Date.now() - lastActivity < idleTimeoutMs) {
         this.armRouteIdleTimer(routeSession, call);
         return;
       }
-      await this.releaseSession(routeSession, call, "idle");
+      try {
+        await this.releaseSession(routeSession, call, "idle");
+      } catch {
+        if (this.lastActivityByRouteSession.has(routeSession)) {
+          this.armRouteIdleTimer(routeSession, call);
+        }
+      }
     });
     this.queue = run.then(
       () => {},
@@ -876,6 +926,7 @@ export class BrowserPageRouter {
     if (timer) clearTimeout(timer);
     this.routeIdleTimers.delete(routeSession);
     this.lastActivityByRouteSession.delete(routeSession);
+    this.idleTimeoutByRouteSession.delete(routeSession);
     this.activePageByRouteSession.delete(routeSession);
     for (const pageId of this.pagesByRouteSession.get(routeSession) ?? []) {
       this.routeSessionByPage.delete(pageId);
@@ -1022,6 +1073,27 @@ export function createBridgeServer(
   router?: BrowserPageRouter,
 ): Server {
   return createServer((req, res) => {
+    if (!isRequestAllowed(req)) {
+      void handleBridgeRequest(
+        client,
+        req,
+        res,
+        sessionName,
+        logBridgeMessage,
+        router,
+      );
+      return;
+    }
+    const requestedIdleTimeout = req.headers["x-axi-idle-timeout-ms"];
+    const rawIdleTimeout = Array.isArray(requestedIdleTimeout)
+      ? requestedIdleTimeout[0]
+      : requestedIdleTimeout;
+    if (rawIdleTimeout !== undefined) {
+      const parsed = Number(rawIdleTimeout);
+      if (Number.isInteger(parsed) && parsed >= 1000) {
+        idleWatchdog?.setTimeoutMs(parsed);
+      }
+    }
     touchPidFileActivity();
     const finishRequest = idleWatchdog?.beginRequest();
     void handleBridgeRequest(
@@ -1110,7 +1182,20 @@ export const MCP_PACKAGE_SPEC = `${MCP_PACKAGE_NAME}@${MCP_PACKAGE_VERSION}`;
 
 const requireFromBridge = createRequire(import.meta.url);
 
+export function validateBrowserPoolConnectionMode(
+  poolSize = resolveBrowserPoolSize(),
+  browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL,
+  autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1",
+): void {
+  if (poolSize !== null && (browserUrl || autoConnect)) {
+    throw new Error(
+      "CHROME_DEVTOOLS_AXI_POOL_SIZE cannot be combined with CHROME_DEVTOOLS_AXI_BROWSER_URL or CHROME_DEVTOOLS_AXI_AUTO_CONNECT because pooled page ownership cannot be recovered after an attached-browser bridge restart",
+    );
+  }
+}
+
 export function buildTransportArgs(): string[] {
+  validateBrowserPoolConnectionMode();
   const args = ["-y", MCP_PACKAGE_SPEC];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
@@ -1360,6 +1445,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   let idleWatchdog: BridgeIdleWatchdog | undefined;
   const requestActivity: BridgeIdleWatchdog = {
     beginRequest: () => idleWatchdog?.beginRequest() ?? (() => {}),
+    setTimeoutMs: (timeoutMs) => idleWatchdog?.setTimeoutMs(timeoutMs),
     stop: () => idleWatchdog?.stop(),
   };
   const server = createBridgeServer(

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
@@ -22,6 +22,7 @@ import {
   getSessionSnapshotIfRunning,
   mapErrorMessage,
   resolveBridgeTimeoutMs,
+  readProcessCommand,
   type SpawnedBridge,
   stopBridge,
   stopBridgeSession,
@@ -59,6 +60,50 @@ describe("mapErrorMessage", () => {
 
     expect(error.code).toBe("BROWSER_ERROR");
     expect(error.message).toBe("Page crashed");
+  });
+});
+
+describe("readProcessCommand", () => {
+  it("uses PowerShell process inspection on Windows", () => {
+    const run = vi.fn(() => "node chrome-devtools-axi-bridge.js") as never;
+
+    expect(readProcessCommand(42, "win32", run)).toContain(
+      "chrome-devtools-axi-bridge",
+    );
+    expect(run).toHaveBeenCalledWith(
+      "powershell.exe",
+      expect.arrayContaining([expect.stringContaining("ProcessId = 42")]),
+      expect.objectContaining({ encoding: "utf-8" }),
+    );
+  });
+});
+
+describe("external browser pool validation", () => {
+  const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+  const savedBrowserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+
+  afterEach(() => {
+    if (savedPoolSize === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+    }
+    if (savedBrowserUrl === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = savedBrowserUrl;
+    }
+  });
+
+  it("fails before reusing or spawning an externally attached pooled bridge", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    const spawnBridge = vi.fn();
+
+    await expect(ensureBridge(spawnBridge)).rejects.toThrow(
+      /cannot be combined/,
+    );
+    expect(spawnBridge).not.toHaveBeenCalled();
   });
 });
 

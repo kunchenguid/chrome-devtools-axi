@@ -102,7 +102,7 @@ npm install -g chrome-devtools-axi
 chrome-devtools-axi setup hooks
 ```
 
-This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and usage guidance at the start of each session. **Pi** gets the equivalent native extension: `session_start` captures ambient AXI context for its agent prompt, and `session_shutdown` stops the owned browser session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown. Every managed integration uses a 120-second bridge idle timeout as a backstop for abandoned headless Chrome sessions.
+This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and records a 120-second idle policy for later browser commands in that agent session. **Pi** gets the equivalent native extension: `session_start` captures ambient AXI context for its agent prompt, and `session_shutdown` stops the owned browser session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown and clears the policy.
 
 Pi installs into `${PI_CODING_AGENT_DIR:-~/.pi/agent}/extensions/chrome-devtools-axi.ts`. Run setup with `PI_CODING_AGENT_DIR` set when you use an isolated Pi profile such as Fleet's `~/.pi-fleet` profile.
 **Restart your agent session after running this** so the new hook takes effect.
@@ -290,17 +290,22 @@ milliseconds when a workflow needs longer pauses:
 export CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=7200000
 ```
 
-Agent-facing integrations installed by `chrome-devtools-axi setup hooks`, and
-the packaged `chrome-devtools-axi` skill, use
-`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=120000` so abandoned agent browser sessions
-are reaped sooner. Direct CLI users keep the 30-minute default unless they set
-the variable themselves.
+Agent-facing integrations installed by `chrome-devtools-axi setup hooks`
+persist a 120-second idle policy for the logical agent session, and the packaged
+skill passes the equivalent portable `--idle-timeout-ms=120000` option on every
+command. Direct CLI users keep the 30-minute default unless they set
+`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS` themselves.
 
 Connect to an existing Chrome instance instead of launching one:
 
 ```sh
 export CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222
 ```
+
+Browser pooling can't be combined with `CHROME_DEVTOOLS_AXI_BROWSER_URL` or
+`CHROME_DEVTOOLS_AXI_AUTO_CONNECT`: an attached browser survives bridge
+restarts, but its page ownership does not, so cleanup could no longer identify
+which logical session owns each tab.
 
 `CHROME_DEVTOOLS_AXI_BROWSER_URL` accepts both `http://` or `https://` URLs and `ws://` or `wss://` endpoints:
 

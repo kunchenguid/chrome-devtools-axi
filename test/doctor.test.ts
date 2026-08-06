@@ -111,6 +111,33 @@ describe("browser session diagnostics", () => {
     });
   });
 
+  it("keeps a named pool-number session distinct from a physical pool slot", async () => {
+    const namedDir = join(home, ".chrome-devtools-axi", "sessions", "pool-1");
+    const pooledDir = join(home, ".chrome-devtools-axi", "pools", "pool-1");
+    mkdirSync(namedDir, { recursive: true });
+    mkdirSync(pooledDir, { recursive: true });
+    writeFileSync(
+      join(namedDir, "bridge.pid"),
+      JSON.stringify({ pid: 101, port: 9301, session: "pool-1" }),
+    );
+    writeFileSync(
+      join(pooledDir, "bridge.pid"),
+      JSON.stringify({ pid: 202, port: 9401, session: "pool-1" }),
+    );
+
+    const report = await inspectBrowserSessions({
+      runtime: { isProcessAlive: () => false },
+    });
+    expect(
+      report.sessions.filter((entry) => entry.session === "pool-1"),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "named", pid: 101, port: 9301 }),
+        expect.objectContaining({ kind: "pooled", pid: 202, port: 9401 }),
+      ]),
+    );
+  });
+
   it("flags session mismatches and failed deep health as unhealthy", async () => {
     writePid("worker-1", { pid: 222, port: 9444 });
     const stopSession = vi.fn();

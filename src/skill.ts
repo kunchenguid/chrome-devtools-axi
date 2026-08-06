@@ -52,7 +52,7 @@ export const SKILL_HERMES_TAGS = [
 export const SKILL_HERMES_CATEGORY = "automation";
 
 export function createSkillMarkdown(): string {
-  const agentCommandPrefix = `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} npx -y chrome-devtools-axi`;
+  const agentCommandPrefix = `npx -y chrome-devtools-axi --idle-timeout-ms=${AGENT_BRIDGE_IDLE_TIMEOUT_MS}`;
   return `---
 name: chrome-devtools-axi
 description: ${yamlDoubleQuote(SKILL_DESCRIPTION)}
