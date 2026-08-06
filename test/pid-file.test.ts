@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -51,5 +52,30 @@ describe("PID file locking", () => {
     removeStalePidFileLock(lockPath);
 
     expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("retains an old directory lock with a live numeric owner", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-live-legacy-pid-lock-"));
+    roots.push(root);
+    const lockPath = join(root, "bridge.pid.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "owner"), String(process.pid));
+    utimesSync(lockPath, new Date(0), new Date(0));
+
+    removeStalePidFileLock(lockPath);
+
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("reclaims an old directory lock with a dead numeric owner", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-dead-legacy-pid-lock-"));
+    roots.push(root);
+    const lockPath = join(root, "bridge.pid.lock");
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, "owner"), "99999999");
+
+    removeStalePidFileLock(lockPath);
+
+    expect(existsSync(lockPath)).toBe(false);
   });
 });

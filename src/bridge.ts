@@ -16,6 +16,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { hostname, userInfo } from "node:os";
 import {
   createServer,
@@ -254,7 +255,7 @@ function resolveOwnerMetadata(): Record<string, unknown> {
   return owner;
 }
 
-function writePidFile(port: number): void {
+function writePidFile(port: number, instanceId: string): void {
   const pidFile = resolveActiveBridgePidFile();
   const now = new Date().toISOString();
   const session = resolveSessionName();
@@ -263,6 +264,7 @@ function writePidFile(port: number): void {
     pid: process.pid,
     port,
     session,
+    instanceId,
     startedAt: now,
     lastActivityAt: now,
     owner: resolveOwnerMetadata(),
@@ -1090,6 +1092,7 @@ export async function handleBridgeRequest(
   sessionName?: string,
   logForbidden?: (message: string) => void,
   router?: BrowserPageRouter,
+  instanceId?: string,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -1113,8 +1116,16 @@ export async function handleBridgeRequest(
     req.method === "GET" &&
     (req.url === "/health" || req.url?.startsWith("/health?"))
   ) {
+    const identity = {
+      ...(sessionName === undefined ? {} : { session: sessionName }),
+      ...(instanceId === undefined ? {} : { instanceId, pid: process.pid }),
+    };
     if (!(await isBridgeClientConnected(client))) {
-      writeJson(res, 503, { status: "error", error: "Not connected" });
+      writeJson(res, 503, {
+        status: "error",
+        error: "Not connected",
+        ...identity,
+      });
       return;
     }
     const deep = req.url.includes("deep=1");
@@ -1125,11 +1136,12 @@ export async function handleBridgeRequest(
           status: "error",
           error: "CDP target unreachable",
           reason: probe.reason,
+          ...identity,
         });
         return;
       }
     }
-    writeJson(res, 200, { status: "ok", session: sessionName });
+    writeJson(res, 200, { status: "ok", ...identity });
     return;
   }
 
@@ -1156,6 +1168,7 @@ export function createBridgeServer(
   sessionName?: string,
   idleWatchdog?: BridgeIdleWatchdog,
   router?: BrowserPageRouter,
+  instanceId?: string,
 ): Server {
   return createServer((req, res) => {
     if (!isRequestAllowed(req)) {
@@ -1166,6 +1179,7 @@ export function createBridgeServer(
         sessionName,
         logBridgeMessage,
         router,
+        instanceId,
       );
       return;
     }
@@ -1190,6 +1204,7 @@ export function createBridgeServer(
       sessionName,
       logBridgeMessage,
       router,
+      instanceId,
     ).finally(() => {
       finishRequest?.();
     });
@@ -1527,6 +1542,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
+  const instanceId = randomUUID();
   const router =
     poolSize === null
       ? undefined
@@ -1542,6 +1558,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     sessionName,
     requestActivity,
     router,
+    instanceId,
   );
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);
@@ -1561,7 +1578,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   };
 
   server.listen(port, "127.0.0.1", () => {
-    writePidFile(port);
+    writePidFile(port, instanceId);
     logBridgeMessage(`Listening on http://127.0.0.1:${port}`);
     writeReadySignal();
     idleWatchdog = createBridgeIdleWatchdog(idleTimeoutMs, () =>

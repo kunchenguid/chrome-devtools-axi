@@ -1565,6 +1565,58 @@ describe("handleBridgeRequest /health", () => {
     });
   });
 
+  it("stamps bridge identity into healthy and unhealthy responses", async () => {
+    const connected: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const healthy = makeResponse();
+
+    await handleBridgeRequest(
+      connected,
+      makeRequest("GET", "/health"),
+      healthy.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+    );
+
+    expect(JSON.parse(healthy.captured.body)).toMatchObject({
+      status: "ok",
+      session: "worker-1",
+      instanceId: "instance-1",
+      pid: process.pid,
+    });
+
+    const disconnected: BridgeClient = {
+      listTools: async () => {
+        throw new Error("Not connected");
+      },
+      callTool: async () => ({}),
+      close: async () => {},
+    };
+    const unhealthy = makeResponse();
+
+    await handleBridgeRequest(
+      disconnected,
+      makeRequest("GET", "/health"),
+      unhealthy.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+    );
+
+    expect(JSON.parse(unhealthy.captured.body)).toMatchObject({
+      status: "error",
+      session: "worker-1",
+      instanceId: "instance-1",
+      pid: process.pid,
+    });
+  });
+
   it("returns 503 when MCP server is disconnected", async () => {
     const client: BridgeClient = {
       listTools: async () => {

@@ -17,6 +17,7 @@ import { BRIDGE_PORT_IN_USE_EXIT_CODE } from "../src/bridge.js";
 import {
   buildBridgeEarlyExitError,
   CdpError,
+  checkBridgeIdentity,
   checkBridgeHealth,
   ensureBridge,
   getSessionSnapshotIfRunning,
@@ -223,6 +224,54 @@ describe("unsafe session names are rejected on action entry points", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("refuses to signal a reused PID when the bridge nonce differs", async () => {
+    const savedHome = process.env.HOME;
+    const home = mkdtempSync(join(tmpdir(), "cda-reused-pid-"));
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)", "chrome-devtools-axi-bridge"],
+      { stdio: "ignore" },
+    );
+    const pid = child.pid as number;
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: "worker-1",
+      instanceId: "replacement-instance",
+      pid,
+    });
+
+    try {
+      process.env.HOME = home;
+      const pidFile = resolveSessionPidFile("worker-1");
+      mkdirSync(join(home, ".chrome-devtools-axi", "sessions", "worker-1"), {
+        recursive: true,
+      });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({
+          pid,
+          port: fake.port,
+          session: "worker-1",
+          instanceId: "stale-instance",
+        }),
+      );
+
+      expect(readProcessCommand(pid)).toContain("chrome-devtools-axi-bridge");
+      await expect(stopBridgeSession("worker-1")).resolves.toBe("not-bridge");
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      rmSync(home, { recursive: true, force: true });
+      await fake.close();
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+  });
 });
 
 describe("resolveBridgeTimeoutMs", () => {
@@ -273,6 +322,8 @@ interface FakeBridgeOptions {
   deep: "ok" | "error";
   deepDelayMs?: number;
   session?: string;
+  instanceId?: string;
+  pid?: number;
 }
 
 function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
@@ -289,7 +340,14 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
         const sendResponse = () => {
           if (outcome === "ok") {
             res.statusCode = 200;
-            res.end(JSON.stringify({ status: "ok", session: opts.session }));
+            res.end(
+              JSON.stringify({
+                status: "ok",
+                session: opts.session,
+                instanceId: opts.instanceId,
+                pid: opts.pid,
+              }),
+            );
           } else {
             res.statusCode = 503;
             res.end(JSON.stringify({ status: "error" }));
@@ -401,6 +459,34 @@ describe("checkBridgeHealth (deep probe)", () => {
       expect(
         await checkBridgeHealth(fake.port, { expectedSession: "worker-1" }),
       ).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("requires the recorded nonce and PID when verifying bridge identity", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: "worker-1",
+      instanceId: "instance-1",
+      pid: 12345,
+    });
+    try {
+      await expect(
+        checkBridgeIdentity(fake.port, {
+          session: "worker-1",
+          instanceId: "instance-1",
+          pid: 12345,
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        checkBridgeIdentity(fake.port, {
+          session: "worker-1",
+          instanceId: "stale-instance",
+          pid: 12345,
+        }),
+      ).resolves.toBe(false);
     } finally {
       await fake.close();
     }

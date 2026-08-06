@@ -28,14 +28,22 @@ function processIsAlive(pid: number): boolean {
 
 function parseOwner(value: string): LockOwner | undefined {
   try {
-    const parsed = JSON.parse(value) as Partial<LockOwner>;
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0) {
+      return { pid: parsed, token: "legacy" };
+    }
     if (
-      Number.isInteger(parsed.pid) &&
-      (parsed.pid as number) > 0 &&
-      typeof parsed.token === "string" &&
-      parsed.token.length > 0
+      parsed !== null &&
+      typeof parsed === "object" &&
+      Number.isInteger((parsed as Partial<LockOwner>).pid) &&
+      ((parsed as Partial<LockOwner>).pid as number) > 0 &&
+      typeof (parsed as Partial<LockOwner>).token === "string" &&
+      ((parsed as Partial<LockOwner>).token as string).length > 0
     ) {
-      return { pid: parsed.pid as number, token: parsed.token };
+      return {
+        pid: (parsed as Partial<LockOwner>).pid as number,
+        token: (parsed as Partial<LockOwner>).token as string,
+      };
     }
   } catch {
     const legacyPid = Number.parseInt(value, 10);

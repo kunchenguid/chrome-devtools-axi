@@ -68,6 +68,7 @@ export interface PidInfo {
   pid: number;
   port: number;
   session?: string;
+  instanceId?: string;
   startedAt?: string;
   lastActivityAt?: string;
   owner?: unknown;
@@ -202,7 +203,12 @@ export function requestedRouteIdleTimeoutMs(): number | undefined {
  */
 export async function checkBridgeHealth(
   port: number,
-  opts: { deep?: boolean; expectedSession?: string } = {},
+  opts: {
+    deep?: boolean;
+    expectedSession?: string;
+    expectedInstanceId?: string;
+    expectedPid?: number;
+  } = {},
 ): Promise<boolean> {
   try {
     const path = opts.deep ? "/health?deep=1" : "/health";
@@ -217,7 +223,32 @@ export async function checkBridgeHealth(
     ) {
       return false;
     }
+    if (
+      opts.expectedInstanceId !== undefined &&
+      data.instanceId !== opts.expectedInstanceId
+    ) {
+      return false;
+    }
+    if (opts.expectedPid !== undefined && data.pid !== opts.expectedPid) {
+      return false;
+    }
     return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function checkBridgeIdentity(
+  port: number,
+  expected: { session: string; instanceId: string; pid: number },
+): Promise<boolean> {
+  try {
+    const data = JSON.parse(await httpGet(port, "/health", HEALTH_TIMEOUT_MS));
+    return (
+      data.session === expected.session &&
+      data.instanceId === expected.instanceId &&
+      data.pid === expected.pid
+    );
   } catch {
     return false;
   }
@@ -463,8 +494,16 @@ export async function ensureBridge(
     const recordedSessionMatches =
       pidInfo.session === undefined || pidInfo.session === bridgeSessionName;
     const shallowAny = await checkBridgeHealth(pidInfo.port);
+    const identityOptions =
+      pidInfo.instanceId === undefined
+        ? {}
+        : {
+            expectedInstanceId: pidInfo.instanceId,
+            expectedPid: pidInfo.pid,
+          };
     const shallowExpected = await checkBridgeHealth(pidInfo.port, {
       expectedSession: bridgeSessionName,
+      ...identityOptions,
     });
     const healthSessionMatches = !shallowAny || shallowExpected;
     if (recordedSessionMatches && healthSessionMatches) {
@@ -472,13 +511,23 @@ export async function ensureBridge(
         await checkBridgeHealth(pidInfo.port, {
           deep: true,
           expectedSession: bridgeSessionName,
+          ...identityOptions,
         })
       ) {
         return pidInfo.port;
       }
-      await terminateBridgeProcess(pidInfo.pid, {
-        killProcessGroup: isBridgeProcess(pidInfo.pid),
-      });
+      if (
+        pidInfo.instanceId !== undefined &&
+        (await checkBridgeIdentity(pidInfo.port, {
+          session: bridgeSessionName,
+          instanceId: pidInfo.instanceId,
+          pid: pidInfo.pid,
+        }))
+      ) {
+        await terminateBridgeProcess(pidInfo.pid, {
+          killProcessGroup: isBridgeProcess(pidInfo.pid),
+        });
+      }
     }
   }
 
@@ -738,6 +787,16 @@ export async function stopBridgeSession(
     return "session-mismatch";
   }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
+  if (
+    pidInfo.instanceId === undefined ||
+    !(await checkBridgeIdentity(pidInfo.port, {
+      session: bridgeSessionName,
+      instanceId: pidInfo.instanceId,
+      pid: pidInfo.pid,
+    }))
+  ) {
+    return "not-bridge";
+  }
 
   if (target === "logical" && isBrowserPoolEnabled()) {
     try {
