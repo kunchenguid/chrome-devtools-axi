@@ -44,6 +44,7 @@ vi.mock("../src/doctor.js", async () => {
 });
 
 import { main, parseRuntimeOptions, TOP_HELP } from "../src/cli.js";
+import { readSessionIdleTimeoutPolicy } from "../src/session-policy.js";
 
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -165,6 +166,62 @@ describe("main CLI runtime", () => {
       });
       await main({ argv: ["snapshot"] });
       expect(observedTimeout).toBeUndefined();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = originalSession;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not renew a persisted policy for diagnostic commands", async () => {
+    const originalHome = process.env.HOME;
+    const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    const home = mkdtempSync(join(tmpdir(), "axi-diagnostic-policy-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "worker-diagnostic";
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      await main({ argv: ["--agent-session-start"] });
+
+      vi.setSystemTime(2_000);
+      await main({ argv: ["sessions"] });
+
+      vi.setSystemTime(121_500);
+      expect(readSessionIdleTimeoutPolicy()).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = originalSession;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an explicit idle timeout invocation-scoped", async () => {
+    const originalHome = process.env.HOME;
+    const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    const home = mkdtempSync(join(tmpdir(), "axi-one-shot-policy-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "worker-one-shot";
+    let observedTimeout: string | undefined;
+    try {
+      runAxiCli.mockImplementationOnce(async () => {
+        observedTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      });
+      await main({ argv: ["--idle-timeout-ms=120000", "snapshot"] });
+
+      expect(observedTimeout).toBe("120000");
+      expect(readSessionIdleTimeoutPolicy()).toBeUndefined();
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
       else process.env.HOME = originalHome;

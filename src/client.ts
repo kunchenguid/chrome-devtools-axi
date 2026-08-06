@@ -10,7 +10,9 @@ import {
   AMBIENT_SNAPSHOT_TOOL,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   MCP_PACKAGE_SPEC,
+  resolveBridgeIdleTimeoutMs,
   resolveBridgeScript,
+  resolveRouteIdleTimeoutMs,
   validateBrowserPoolConnectionMode,
 } from "./bridge.js";
 import {
@@ -178,11 +180,11 @@ function idleTimeoutHeaders(): Record<string, string> {
  * as well. This makes explicit CLI timeouts and persisted agent-session
  * policies reclaim route-owned pages without shortening unrelated active work.
  */
-function requestedRouteIdleTimeoutMs(): number | undefined {
-  const value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
-  if (!value) return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1000 ? parsed : undefined;
+export function requestedRouteIdleTimeoutMs(): number | undefined {
+  const callerValue = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  if (callerValue) return resolveBridgeIdleTimeoutMs(callerValue);
+  const routeValue = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+  return routeValue ? resolveRouteIdleTimeoutMs(routeValue) : undefined;
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   ensureBridge,
   getSessionSnapshotIfRunning,
   mapErrorMessage,
+  requestedRouteIdleTimeoutMs,
   resolveBridgeTimeoutMs,
   readProcessCommand,
   type SpawnedBridge,
@@ -30,6 +31,33 @@ import {
   waitForProcessExit,
 } from "../src/client.js";
 import { resolveSessionPidFile } from "../src/sessions.js";
+
+describe("pooled route idle policy", () => {
+  const savedCallerIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  const savedRouteIdle = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+
+  afterEach(() => {
+    if (savedCallerIdle === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = savedCallerIdle;
+    }
+    if (savedRouteIdle === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS = savedRouteIdle;
+    }
+  });
+
+  it("sends the route setting per request and lets caller policy override it", () => {
+    delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS = "120000";
+    expect(requestedRouteIdleTimeoutMs()).toBe(120_000);
+
+    process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "60000";
+    expect(requestedRouteIdleTimeoutMs()).toBe(60_000);
+  });
+});
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {

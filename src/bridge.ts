@@ -96,19 +96,20 @@ export function resolvePhysicalBridgeIdleTimeoutMs(
   pooled: boolean,
   value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS,
 ): number {
-  return resolveBridgeIdleTimeoutMs(pooled ? undefined : value);
+  return pooled
+    ? DEFAULT_BRIDGE_IDLE_TIMEOUT_MS
+    : resolveBridgeIdleTimeoutMs(value);
 }
 
 /**
  * Resolve the default idle window for a logical route in a pooled bridge.
- * An explicit route timeout wins; otherwise route cleanup inherits the caller
- * idle policy captured when the pool slot starts. This is deliberately
- * independent from the physical pooled bridge watchdog, and individual
- * requests may still supply a shorter or longer timeout for their route only.
+ * An explicit route timeout wins; otherwise route cleanup inherits the
+ * independently resolved physical bridge timeout. Individual requests may
+ * still supply a shorter or longer timeout for their route only.
  */
 export function resolveRouteIdleTimeoutMs(
   value = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS,
-  bridgeIdleTimeoutMs = resolveBridgeIdleTimeoutMs(),
+  bridgeIdleTimeoutMs = DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
 ): number {
   if (value === undefined || value === "") {
     return bridgeIdleTimeoutMs;
@@ -120,6 +121,24 @@ export function resolveRouteIdleTimeoutMs(
     );
   }
   return parsed;
+}
+
+export function resolveBridgeLifecycleTimeouts(
+  pooled: boolean,
+  bridgeValue = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS,
+): { bridgeIdleTimeoutMs: number; routeIdleTimeoutMs?: number } {
+  const bridgeIdleTimeoutMs = resolvePhysicalBridgeIdleTimeoutMs(
+    pooled,
+    bridgeValue,
+  );
+  return {
+    bridgeIdleTimeoutMs,
+    ...(pooled
+      ? {
+          routeIdleTimeoutMs: bridgeIdleTimeoutMs,
+        }
+      : {}),
+  };
 }
 
 export interface BridgeIdleWatchdog {
@@ -1485,7 +1504,8 @@ async function closeServer(server: Server): Promise<void> {
 
 export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const poolSize = resolveBrowserPoolSize();
-  const idleTimeoutMs = resolvePhysicalBridgeIdleTimeoutMs(poolSize !== null);
+  const { bridgeIdleTimeoutMs: idleTimeoutMs, routeIdleTimeoutMs } =
+    resolveBridgeLifecycleTimeouts(poolSize !== null);
 
   // Connect the MCP transport (which spawns chrome-devtools-mcp and launches
   // Chrome) before binding the port. A same-session bind race then self-heals:
@@ -1502,7 +1522,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const router =
     poolSize === null
       ? undefined
-      : new BrowserPageRouter(resolveRouteIdleTimeoutMs());
+      : new BrowserPageRouter(routeIdleTimeoutMs ?? idleTimeoutMs);
   let idleWatchdog: BridgeIdleWatchdog | undefined;
   const requestActivity: BridgeIdleWatchdog = {
     beginRequest: () => idleWatchdog?.beginRequest() ?? (() => {}),

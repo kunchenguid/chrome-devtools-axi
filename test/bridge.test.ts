@@ -36,6 +36,7 @@ import {
   replacePidFileAtomically,
   removePidFile,
   resolveBridgeIdleTimeoutMs,
+  resolveBridgeLifecycleTimeouts,
   resolvePhysicalBridgeIdleTimeoutMs,
   resolveBridgeScript,
   resolveRouteIdleTimeoutMs,
@@ -83,7 +84,14 @@ describe("bridge idle lifecycle", () => {
     expect(resolvePhysicalBridgeIdleTimeoutMs(false, "120000")).toBe(120_000);
   });
 
-  it("inherits a 2-minute Fleet bridge idle env when route idle is unset", () => {
+  it("keeps pooled physical and fallback route deadlines independent from caller env", () => {
+    expect(resolveBridgeLifecycleTimeouts(true, "120000")).toEqual({
+      bridgeIdleTimeoutMs: DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+      routeIdleTimeoutMs: DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+    });
+  });
+
+  it("does not inherit a caller bridge env when route idle is unset", () => {
     const savedBridgeIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
     const savedRouteIdle =
       process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
@@ -91,7 +99,7 @@ describe("bridge idle lifecycle", () => {
       process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "120000";
       delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
 
-      expect(resolveRouteIdleTimeoutMs()).toBe(120_000);
+      expect(resolveRouteIdleTimeoutMs()).toBe(DEFAULT_ROUTE_IDLE_TIMEOUT_MS);
     } finally {
       if (savedBridgeIdle === undefined) {
         delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;

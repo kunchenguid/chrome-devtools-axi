@@ -172,10 +172,10 @@ environment:
                                     route deadline, after this many ms
                                     (default: 1800000 / 30 minutes, min: 1000)
   CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS
-                                    In pooled mode, release a logical session's routed pages after
-                                    this many ms without that session's browser activity, even if
-                                    other sessions keep the pooled bridge alive
-                                    (default: caller idle timeout captured at pool start, min: 1000)
+                                    In pooled mode, set the caller's logical route deadline when no
+                                    explicit or persisted caller idle policy applies. It is sent with
+                                    each route request and never changes the physical bridge watchdog
+                                    (default: 1800000 / 30 minutes, min: 1000)
 
 gpu:
   Headless Chrome cannot access hardware GPU on most Linux systems.
@@ -1885,6 +1885,17 @@ const COMMANDS: Record<string, CommandFn> = {
   setup: withoutFullFlag(handleSetup),
 };
 
+const NON_BROWSER_POLICY_COMMANDS = new Set(["sessions", "setup", "stop"]);
+
+function consumesBrowserSessionPolicy(argv: string[]): boolean {
+  const command = argv[0];
+  return (
+    command !== undefined &&
+    command in COMMANDS &&
+    !NON_BROWSER_POLICY_COMMANDS.has(command)
+  );
+}
+
 export async function main(
   options: MainOptions | string[] = {},
 ): Promise<void> {
@@ -1895,13 +1906,18 @@ export async function main(
     writeSessionIdleTimeoutPolicy(AGENT_BRIDGE_IDLE_TIMEOUT_MS);
   }
   const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
-  const idleTimeoutMs =
-    runtime.idleTimeoutMs ??
-    (previousIdleTimeout === undefined
-      ? readSessionIdleTimeoutPolicy()
-      : undefined);
-  if (idleTimeoutMs !== undefined && !runtime.sessionStart) {
-    writeSessionIdleTimeoutPolicy(idleTimeoutMs);
+  const consumesPersistedPolicy = consumesBrowserSessionPolicy(runtime.argv);
+  const persistedIdleTimeout =
+    runtime.idleTimeoutMs === undefined &&
+    previousIdleTimeout === undefined &&
+    consumesPersistedPolicy
+      ? runtime.sessionStart
+        ? AGENT_BRIDGE_IDLE_TIMEOUT_MS
+        : readSessionIdleTimeoutPolicy()
+      : undefined;
+  const idleTimeoutMs = runtime.idleTimeoutMs ?? persistedIdleTimeout;
+  if (persistedIdleTimeout !== undefined && !runtime.sessionStart) {
+    writeSessionIdleTimeoutPolicy(persistedIdleTimeout);
   }
   if (idleTimeoutMs !== undefined) {
     process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = String(idleTimeoutMs);
