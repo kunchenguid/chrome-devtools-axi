@@ -21,6 +21,11 @@ const TRACE_REGISTER = join(
   "fixtures",
   "module-trace-register.mjs",
 );
+const TIMING_REGISTER = join(
+  import.meta.dirname,
+  "fixtures",
+  "process-timing-register.mjs",
+);
 
 beforeAll(() => {
   // The test spawns the built CLI, so `pnpm test` on a fresh checkout has to
@@ -34,23 +39,40 @@ beforeAll(() => {
   }
 }, 120_000);
 
-function elapsedMs(args: string[]): number {
-  const started = process.hrtime.bigint();
-  const result = spawnSync(process.execPath, args, { encoding: "utf8" });
-  expect(result.status).toBe(0);
-  return Number(process.hrtime.bigint() - started) / 1e6;
+function runtimeMs(args: string[]): number {
+  const dir = mkdtempSync(join(tmpdir(), "cdt-axi-timing-"));
+  const timingPath = join(dir, "runtime.txt");
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ["--import", TIMING_REGISTER, ...args],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CHROME_DEVTOOLS_AXI_PROCESS_TIMING: timingPath,
+        },
+      },
+    );
+    expect(result.status).toBe(0);
+    return Number(readFileSync(timingPath, "utf8").trim());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function lowContentionDeltaMs(actualArgs: string[], runs = 11): number {
-  const floorArgs = ["-e", "console.log(1)"];
+  const floorArgs = ["-e", ""];
   const deltas: number[] = [];
   for (let i = 0; i < runs; i++) {
-    // Keep each floor measurement adjacent to the command it controls for.
-    // Alternating the order also avoids consistently charging the second
-    // process for short-lived load or temperature changes on shared runners.
+    // Start each clock inside the child after Node and the instrumentation
+    // preload initialize. Parent-side spawn latency is irrelevant to the CLI
+    // import path and varies dramatically when Vitest workers contend in CI.
+    // Keep each floor measurement adjacent and alternate their order so any
+    // remaining short-lived load does not consistently penalize one command.
     const floorFirst = i % 2 === 0;
-    const first = elapsedMs(floorFirst ? floorArgs : actualArgs);
-    const second = elapsedMs(floorFirst ? actualArgs : floorArgs);
+    const first = runtimeMs(floorFirst ? floorArgs : actualArgs);
+    const second = runtimeMs(floorFirst ? actualArgs : floorArgs);
     deltas.push(floorFirst ? second - first : first - second);
   }
   deltas.sort((a, b) => a - b);
