@@ -170,4 +170,39 @@ describe("PID file locking", () => {
     expect(existsSync(lockPath)).toBe(true);
     expect(existsSync(reclaimPath)).toBe(true);
   });
+
+  it("does not unlink another contender's takeover anchor", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-reclaim-takeover-"));
+    roots.push(root);
+    const lockPath = join(root, "bridge.pid.lock");
+    const reclaimPath = `${lockPath}.reclaim`;
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, token: "stale-owner" }),
+    );
+    const staleLock = lstatSync(lockPath);
+    writeFileSync(
+      reclaimPath,
+      JSON.stringify({
+        dev: staleLock.dev,
+        ino: staleLock.ino,
+        owner: { pid: 99999999, token: "dead-reclaimer" },
+      }),
+    );
+    const staleReclaim = lstatSync(reclaimPath);
+    const takeoverPath = `${reclaimPath}.takeover-${staleReclaim.dev}-${staleReclaim.ino}`;
+    writeFileSync(
+      takeoverPath,
+      JSON.stringify({
+        dev: staleLock.dev,
+        ino: staleLock.ino,
+        owner: { pid: process.pid, token: "winning-reclaimer" },
+      }),
+    );
+
+    removeStalePidFileLock(lockPath);
+
+    expect(existsSync(takeoverPath)).toBe(true);
+    expect(existsSync(reclaimPath)).toBe(true);
+  });
 });

@@ -249,7 +249,7 @@ function takeOverReclaimClaim(
   } catch {
     return undefined;
   } finally {
-    if (!ownsTakeover || !samePathIdentity(reclaimPath, takeoverPath)) {
+    if (ownsTakeover && !samePathIdentity(reclaimPath, takeoverPath)) {
       try {
         unlinkSync(takeoverPath);
       } catch {}
