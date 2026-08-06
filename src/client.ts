@@ -748,7 +748,6 @@ export async function stopBridgeSession(
           name: "__axi_release_session",
           args: {},
           routeSession: sessionName,
-          routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
         },
         10_000,
       );

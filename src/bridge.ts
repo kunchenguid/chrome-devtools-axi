@@ -39,6 +39,7 @@ import {
   resolveSessionName,
   resolveSessionPort,
 } from "./sessions.js";
+import { withPidFileLock } from "./pid-file.js";
 
 export interface BridgeContentBlock {
   type: string;
@@ -274,16 +275,18 @@ export function replacePidFileAtomically(
   pidFile: string,
   data: Record<string, unknown>,
 ): void {
-  const temporaryFile = `${pidFile}.${process.pid}.${pidFileWriteSequence++}.tmp`;
-  try {
-    writeFileSync(temporaryFile, JSON.stringify(data));
-    renameSync(temporaryFile, pidFile);
-  } catch (error) {
+  withPidFileLock(pidFile, () => {
+    const temporaryFile = `${pidFile}.${process.pid}.${pidFileWriteSequence++}.tmp`;
     try {
-      unlinkSync(temporaryFile);
-    } catch {}
-    throw error;
-  }
+      writeFileSync(temporaryFile, JSON.stringify(data));
+      renameSync(temporaryFile, pidFile);
+    } catch (error) {
+      try {
+        unlinkSync(temporaryFile);
+      } catch {}
+      throw error;
+    }
+  });
 }
 
 function touchPidFileActivity(): void {
@@ -317,18 +320,21 @@ export function removePidFile(
   ownerPid: number = process.pid,
 ): void {
   try {
-    const data = JSON.parse(readFileSync(pidFile, "utf-8")) as {
-      pid?: unknown;
-    };
-    if (data.pid !== ownerPid) return;
+    withPidFileLock(pidFile, () => {
+      try {
+        const data = JSON.parse(readFileSync(pidFile, "utf-8")) as {
+          pid?: unknown;
+        };
+        if (data.pid !== ownerPid) return;
+      } catch {
+        return;
+      }
+      try {
+        unlinkSync(pidFile);
+      } catch {}
+    });
   } catch {
-    // Missing, unreadable, or malformed — nothing we own to remove.
     return;
-  }
-  try {
-    unlinkSync(pidFile);
-  } catch {
-    // Already gone — fine
   }
 }
 
@@ -928,6 +934,8 @@ export class BrowserPageRouter {
   ): void {
     if (idleTimeoutMs !== undefined) {
       this.idleTimeoutByRouteSession.set(routeSession, idleTimeoutMs);
+    } else {
+      this.idleTimeoutByRouteSession.delete(routeSession);
     }
     this.lastActivityByRouteSession.set(routeSession, Date.now());
     this.armRouteIdleTimer(routeSession, call);

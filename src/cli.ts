@@ -5,8 +5,8 @@ import { encode } from "@toon-format/toon";
 import { runAxiCli } from "axi-sdk-js";
 import {
   CdpError,
-  callTool,
-  ensureBridge,
+  callTool as callClientTool,
+  ensureBridge as ensureClientBridge,
   getSessionSnapshotIfRunning,
   stopBridge,
 } from "./client.js";
@@ -55,6 +55,27 @@ type ToolCaller = (
   name: string,
   args?: Record<string, unknown>,
 ) => Promise<string>;
+
+function consumePersistedBrowserPolicy(): void {
+  if (process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS !== undefined) return;
+  const idleTimeoutMs = readSessionIdleTimeoutPolicy();
+  if (idleTimeoutMs === undefined) return;
+  writeSessionIdleTimeoutPolicy(idleTimeoutMs);
+  process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = String(idleTimeoutMs);
+}
+
+async function callTool(
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<string> {
+  consumePersistedBrowserPolicy();
+  return callClientTool(name, args);
+}
+
+async function ensureBridge(): Promise<number> {
+  consumePersistedBrowserPolicy();
+  return ensureClientBridge();
+}
 
 export type MainOptions = {
   argv?: string[];
@@ -1885,17 +1906,6 @@ const COMMANDS: Record<string, CommandFn> = {
   setup: withoutFullFlag(handleSetup),
 };
 
-const NON_BROWSER_POLICY_COMMANDS = new Set(["sessions", "setup", "stop"]);
-
-function consumesBrowserSessionPolicy(argv: string[]): boolean {
-  const command = argv[0];
-  return (
-    command !== undefined &&
-    command in COMMANDS &&
-    !NON_BROWSER_POLICY_COMMANDS.has(command)
-  );
-}
-
 export async function main(
   options: MainOptions | string[] = {},
 ): Promise<void> {
@@ -1906,19 +1916,9 @@ export async function main(
     writeSessionIdleTimeoutPolicy(AGENT_BRIDGE_IDLE_TIMEOUT_MS);
   }
   const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
-  const consumesPersistedPolicy = consumesBrowserSessionPolicy(runtime.argv);
-  const persistedIdleTimeout =
-    runtime.idleTimeoutMs === undefined &&
-    previousIdleTimeout === undefined &&
-    consumesPersistedPolicy
-      ? runtime.sessionStart
-        ? AGENT_BRIDGE_IDLE_TIMEOUT_MS
-        : readSessionIdleTimeoutPolicy()
-      : undefined;
-  const idleTimeoutMs = runtime.idleTimeoutMs ?? persistedIdleTimeout;
-  if (persistedIdleTimeout !== undefined && !runtime.sessionStart) {
-    writeSessionIdleTimeoutPolicy(persistedIdleTimeout);
-  }
+  const idleTimeoutMs =
+    runtime.idleTimeoutMs ??
+    (runtime.sessionStart ? AGENT_BRIDGE_IDLE_TIMEOUT_MS : undefined);
   if (idleTimeoutMs !== undefined) {
     process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = String(idleTimeoutMs);
   }

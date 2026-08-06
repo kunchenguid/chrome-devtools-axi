@@ -386,7 +386,7 @@ State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `session
 | --------------------- | ------------------------------------------------------------------------------- |
 | `bridge.pid`          | PID, port, session, owner, start time, and last activity for the running bridge |
 | `snapshot-generation` | Per-logical-session counter used to detect stale uid refs                       |
-| `agent-idle-timeout`  | Renewable per-logical-session policy from lifecycle hooks or the timeout flag   |
+| `agent-idle-timeout`  | Renewable per-logical-session policy from lifecycle hooks                       |
 
 Use `chrome-devtools-axi sessions` to inspect bridge state without starting a browser. It inventories the default session plus named and pooled sessions such as `pool-3` when they have bridge PID state; reports PID/process-group liveness, bridge health, page count and selected URL when reachable, and flags stale PID files, reused non-bridge PIDs, health failures, session mismatches, and orphan symptoms. `--json` prints machine-readable output for watchdogs.
 

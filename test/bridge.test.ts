@@ -820,6 +820,36 @@ describe("BrowserPageRouter", () => {
     }
   });
 
+  it("returns a route to its fallback timeout on a policy-free request", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(1000);
+      const fake = new FakeMcpPages();
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+          routeIdleTimeoutMs: 10_000,
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await router.run(
+        { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries idle release after a transient MCP failure", async () => {
     vi.useFakeTimers();
     try {

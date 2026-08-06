@@ -13,6 +13,11 @@ const { inspectBrowserSessions } = vi.hoisted(() => ({
   inspectBrowserSessions: vi.fn(),
 }));
 
+const { clientCallTool, clientEnsureBridge } = vi.hoisted(() => ({
+  clientCallTool: vi.fn(),
+  clientEnsureBridge: vi.fn(),
+}));
+
 vi.mock("axi-sdk-js", async () => {
   const actual =
     await vi.importActual<typeof import("axi-sdk-js")>("axi-sdk-js");
@@ -40,6 +45,18 @@ vi.mock("../src/doctor.js", async () => {
   return {
     ...actual,
     inspectBrowserSessions,
+  };
+});
+
+vi.mock("../src/client.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../src/client.js")>(
+      "../src/client.js",
+    );
+  return {
+    ...actual,
+    callTool: clientCallTool,
+    ensureBridge: clientEnsureBridge,
   };
 });
 
@@ -153,8 +170,12 @@ describe("main CLI runtime", () => {
     let observedTimeout: string | undefined;
     try {
       await main({ argv: ["--agent-session-start"] });
-      runAxiCli.mockImplementationOnce(async () => {
+      clientCallTool.mockImplementationOnce(async () => {
         observedTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+        return 'RootWebArea "test"';
+      });
+      runAxiCli.mockImplementationOnce(async (options) => {
+        await options.commands.snapshot([]);
       });
       await main({ argv: ["snapshot"] });
       expect(observedTimeout).toBe("120000");
@@ -191,6 +212,35 @@ describe("main CLI runtime", () => {
 
       vi.setSystemTime(2_000);
       await main({ argv: ["sessions"] });
+
+      vi.setSystemTime(121_500);
+      expect(readSessionIdleTimeoutPolicy()).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = originalSession;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not renew a persisted policy when command help is rendered", async () => {
+    const originalHome = process.env.HOME;
+    const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    const home = mkdtempSync(join(tmpdir(), "axi-command-help-policy-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "worker-command-help";
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      await main({ argv: ["--agent-session-start"] });
+
+      vi.setSystemTime(2_000);
+      await main({ argv: ["snapshot", "--help"] });
 
       vi.setSystemTime(121_500);
       expect(readSessionIdleTimeoutPolicy()).toBeUndefined();

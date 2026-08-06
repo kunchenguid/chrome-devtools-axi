@@ -36,6 +36,7 @@ import {
   resolveStateRoot,
   validateSessionName,
 } from "./sessions.js";
+import { withPidFileLock } from "./pid-file.js";
 
 export type SessionKind = "default" | "named" | "pooled";
 export type PidFileStatus = "missing" | "ok" | "malformed";
@@ -416,9 +417,24 @@ async function inspectOneSession(
         options.cleanStale &&
         options.runtime.isProcessAlive(parsed.pid) === false
       ) {
-        options.runtime.unlinkFile(pidFilePath);
-        cleanup = { stalePidFileRemoved: true };
-        flags.push("stale_pid_file_removed");
+        let removed = false;
+        try {
+          removed = withPidFileLock(pidFilePath, () => {
+            const current = readPidFileForDoctor(pidFilePath).parsed;
+            if (
+              current?.pid !== parsed.pid ||
+              options.runtime.isProcessAlive(parsed.pid)
+            ) {
+              return false;
+            }
+            options.runtime.unlinkFile(pidFilePath);
+            return true;
+          });
+        } catch {}
+        if (removed) {
+          cleanup = { stalePidFileRemoved: true };
+          flags.push("stale_pid_file_removed");
+        }
       }
     } else if (!isBridge) {
       status = "suspicious-pid";

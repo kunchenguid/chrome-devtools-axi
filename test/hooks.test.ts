@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,6 +97,38 @@ describe("buildPiExtension", () => {
     expect(source).toContain('pi.on("before_agent_start"');
     expect(source).toContain('pi.on("session_shutdown"');
     expect(source).not.toContain('pi.on("turn_end"');
+  });
+
+  it("reacquires Pi lifecycle ownership after a completed session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "chrome-devtools-axi-pi-reuse-"));
+    const command = join(dir, "fake-axi");
+    writeFileSync(command, "#!/bin/sh\nprintf 'browser context for pi\\n'\n");
+    chmodSync(command, 0o755);
+
+    try {
+      const source = buildPiExtension(command);
+      const module = await import(
+        `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
+      );
+      const handlers: Record<string, (...args: any[]) => any> = {};
+      module.default({
+        on(event: string, handler: (...args: any[]) => any) {
+          handlers[event] = handler;
+        },
+      });
+
+      handlers.session_start();
+      handlers.session_shutdown();
+      handlers.session_start();
+
+      expect(
+        handlers.before_agent_start({ systemPrompt: "second session" }),
+      ).toEqual({
+        systemPrompt: "second session\n\nbrowser context for pi",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("launches JavaScript entrypoints through the Node executable", () => {

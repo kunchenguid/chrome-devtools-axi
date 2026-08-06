@@ -252,6 +252,33 @@ describe("browser session diagnostics", () => {
     expect(existsSync(pidFile)).toBe(false);
   });
 
+  it("preserves a replacement PID file during stale cleanup", async () => {
+    const pidFile = writePid("default", { pid: 99999999, port: 9224 });
+    let checks = 0;
+
+    const cleaned = await inspectBrowserSessions({
+      cleanStale: true,
+      runtime: {
+        isProcessAlive: () => {
+          checks++;
+          if (checks === 2) {
+            writeFileSync(
+              pidFile,
+              JSON.stringify({ pid: process.pid, port: 9224 }),
+            );
+          }
+          return false;
+        },
+      },
+    });
+
+    expect(cleaned.sessions[0]?.cleanup).toBeUndefined();
+    expect(JSON.parse(readFileSync(pidFile, "utf-8"))).toEqual({
+      pid: process.pid,
+      port: 9224,
+    });
+  });
+
   it("does not clean malformed PID files because there is no validated PID", async () => {
     mkdirSync(stateDir("default"), { recursive: true });
     const pidFile = join(stateDir("default"), "bridge.pid");

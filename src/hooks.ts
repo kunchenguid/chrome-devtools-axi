@@ -221,6 +221,8 @@ export function buildPiExtension(
     `  if (state.owner) return;\n` +
     `  state.owner = owner;\n\n` +
     `  pi.on("session_start", () => {\n` +
+    `    if (!state.owner) state.owner = owner;\n` +
+    `    if (state.owner !== owner) return;\n` +
     `    state.context = run(["--agent-session-start"], 10000);\n` +
     `  });\n\n` +
     `  pi.on("before_agent_start", (event) => {\n` +
