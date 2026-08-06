@@ -15,7 +15,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { hostname, userInfo } from "node:os";
 import {
@@ -1553,6 +1553,80 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
+export async function closeBridgeResources(
+  server: Server,
+  client: BridgeClient,
+  transport: { close(): Promise<void> },
+): Promise<void> {
+  const serverClosed = closeServer(server);
+  server.closeAllConnections();
+  let closeError: unknown;
+  try {
+    await client.close();
+  } catch (error) {
+    closeError = error;
+  }
+  try {
+    await transport.close();
+  } catch (error) {
+    closeError ??= error;
+  }
+  try {
+    await serverClosed;
+  } catch (error) {
+    closeError ??= error;
+  }
+  if (closeError !== undefined) throw closeError;
+}
+
+interface ProcessTreeReaperOptions {
+  platform?: NodeJS.Platform;
+  pid?: number;
+  kill?: (pid: number, signal: NodeJS.Signals) => unknown;
+  taskkill?: (
+    file: string,
+    args: string[],
+    options: { timeout: number; stdio: "ignore" },
+  ) => unknown;
+}
+
+export function reapOwnedBridgeProcessTree(
+  opts: ProcessTreeReaperOptions = {},
+): boolean {
+  const platform = opts.platform ?? process.platform;
+  const pid = opts.pid ?? process.pid;
+  const kill = opts.kill ?? process.kill.bind(process);
+  if (platform === "win32") {
+    try {
+      const taskkill =
+        opts.taskkill ??
+        ((
+          file: string,
+          args: string[],
+          options: { timeout: number; stdio: "ignore" },
+        ) => execFileSync(file, args, options));
+      taskkill("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        timeout: 5_000,
+        stdio: "ignore",
+      });
+      return true;
+    } catch {
+      try {
+        kill(pid, "SIGKILL");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  try {
+    kill(-pid, "SIGTERM");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const poolSize = resolveBrowserPoolSize();
   const { bridgeIdleTimeoutMs: idleTimeoutMs, routeIdleTimeoutMs } =
@@ -1588,10 +1662,15 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     shuttingDown = true;
     idleWatchdog?.stop();
     if (reason) logBridgeMessage(reason);
+    if (process.platform === "win32" && reapOwnedBridgeProcessTree()) {
+      return;
+    }
+    try {
+      await closeBridgeResources(server, client, transport);
+    } catch (error) {
+      logBridgeMessage(`Shutdown cleanup failed: ${getErrorMessage(error)}`);
+    }
     removePidFile();
-    await closeServer(server);
-    await client.close();
-    await transport.close();
     process.exit(0);
   };
 
@@ -1616,16 +1695,11 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     );
   });
 
-  // Kill our entire process group on exit so chrome-devtools-mcp children
-  // don't survive as orphans. The bridge is spawned with detached:true,
-  // making it a process group leader — all children share our PGID.
+  // Reap the process tree on exit so chrome-devtools-mcp children don't
+  // survive as orphans. On POSIX, the detached bridge owns their process group.
   process.on("exit", () => {
+    reapOwnedBridgeProcessTree();
     removePidFile();
-    try {
-      process.kill(-process.pid, "SIGTERM");
-    } catch {
-      // Already dead or not a group leader
-    }
   });
 
   process.on("SIGTERM", () => {

@@ -78,4 +78,28 @@ describe("PID file locking", () => {
 
     expect(existsSync(lockPath)).toBe(false);
   });
+
+  it("does not remove a replacement installed during stale-owner recovery", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-replaced-pid-lock-"));
+    roots.push(root);
+    const lockPath = join(root, "bridge.pid.lock");
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, token: "stale-owner" }),
+    );
+
+    removeStalePidFileLock(lockPath, () => {
+      rmSync(lockPath);
+      writeFileSync(
+        lockPath,
+        JSON.stringify({ pid: process.pid, token: "replacement-owner" }),
+      );
+      return false;
+    });
+
+    expect(JSON.parse(readFileSync(lockPath, "utf-8"))).toEqual({
+      pid: process.pid,
+      token: "replacement-owner",
+    });
+  });
 });

@@ -17,6 +17,14 @@ type LockOwner = {
   token: string;
 };
 
+type LockSnapshot = {
+  dev: number;
+  ino: number;
+  isDirectory: boolean;
+  mtimeMs: number;
+  owner: LockOwner | undefined;
+};
+
 function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -54,22 +62,52 @@ function parseOwner(value: string): LockOwner | undefined {
   return undefined;
 }
 
-function readLockOwner(lockPath: string): LockOwner | undefined {
+function readLockSnapshot(lockPath: string): LockSnapshot | undefined {
   try {
     const stat = lstatSync(lockPath);
     const ownerPath = stat.isDirectory() ? `${lockPath}/owner` : lockPath;
-    return parseOwner(readFileSync(ownerPath, "utf-8"));
+    return {
+      dev: stat.dev,
+      ino: stat.ino,
+      isDirectory: stat.isDirectory(),
+      mtimeMs: stat.mtimeMs,
+      owner: parseOwner(readFileSync(ownerPath, "utf-8")),
+    };
   } catch {
     return undefined;
   }
 }
 
-export function removeStalePidFileLock(lockPath: string): void {
+function readLockOwner(lockPath: string): LockOwner | undefined {
+  return readLockSnapshot(lockPath)?.owner;
+}
+
+function sameSnapshot(
+  left: LockSnapshot | undefined,
+  right: LockSnapshot,
+): boolean {
+  return (
+    left?.dev === right.dev &&
+    left.ino === right.ino &&
+    left.isDirectory === right.isDirectory &&
+    left.owner?.pid === right.owner?.pid &&
+    left.owner?.token === right.owner?.token
+  );
+}
+
+export function removeStalePidFileLock(
+  lockPath: string,
+  isAlive: (pid: number) => boolean = processIsAlive,
+): void {
   try {
-    const stat = lstatSync(lockPath);
-    const owner = readLockOwner(lockPath);
+    const snapshot = readLockSnapshot(lockPath);
+    if (!snapshot) return;
+    const { owner } = snapshot;
     if (owner) {
-      if (!processIsAlive(owner.pid)) {
+      if (
+        !isAlive(owner.pid) &&
+        sameSnapshot(readLockSnapshot(lockPath), snapshot)
+      ) {
         rmSync(lockPath, { recursive: true, force: true });
       }
       return;
@@ -80,8 +118,9 @@ export function removeStalePidFileLock(lockPath: string): void {
     // mkdir-then-write implementation; a lock with a live owner is never
     // evicted merely because the machine slept or the holder was paused.
     if (
-      stat.isDirectory() &&
-      Date.now() - stat.mtimeMs > LEGACY_STALE_LOCK_MS
+      snapshot.isDirectory &&
+      Date.now() - snapshot.mtimeMs > LEGACY_STALE_LOCK_MS &&
+      sameSnapshot(readLockSnapshot(lockPath), snapshot)
     ) {
       rmSync(lockPath, { recursive: true, force: true });
     }

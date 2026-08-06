@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { IncomingMessage, ServerResponse } from "node:http";
+import { IncomingMessage, ServerResponse, type Server } from "node:http";
 import { Socket } from "node:net";
 import {
   existsSync,
@@ -18,6 +18,7 @@ import {
   DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
   DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
   buildTransportArgs,
+  closeBridgeResources,
   createBridgeIdleWatchdog,
   createBridgeServer,
   detectGlobalMcpPath,
@@ -33,6 +34,7 @@ import {
   isBridgeClientConnected,
   isBridgeTargetReachable,
   parseBridgeCallPayload,
+  reapOwnedBridgeProcessTree,
   replacePidFileAtomically,
   removePidFile,
   resolveBridgeIdleTimeoutMs,
@@ -45,6 +47,64 @@ import {
   type BridgeClient,
   type McpPathProbe,
 } from "../src/bridge.js";
+
+describe("bridge shutdown lifecycle", () => {
+  it("stops accepting connections before closing MCP resources", async () => {
+    const actions: string[] = [];
+    let closed: (() => void) | undefined;
+    const server = {
+      close(callback: () => void) {
+        actions.push("server-close");
+        closed = callback;
+        return server;
+      },
+      closeAllConnections() {
+        actions.push("connections-close");
+        closed?.();
+      },
+    } as unknown as Server;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {
+        actions.push("client-close");
+      },
+    };
+    const transport = {
+      close: async () => {
+        actions.push("transport-close");
+      },
+    };
+
+    await closeBridgeResources(server, client, transport);
+
+    expect(actions).toEqual([
+      "server-close",
+      "connections-close",
+      "client-close",
+      "transport-close",
+    ]);
+  });
+
+  it("uses taskkill for a self-owned Windows process tree", () => {
+    const taskkill = vi.fn();
+    const kill = vi.fn();
+
+    reapOwnedBridgeProcessTree({
+      platform: "win32",
+      pid: 4321,
+      taskkill,
+      kill,
+    });
+
+    expect(taskkill).toHaveBeenCalledWith(
+      "taskkill.exe",
+      ["/PID", "4321", "/T", "/F"],
+      { timeout: 5000, stdio: "ignore" },
+    );
+    expect(kill).not.toHaveBeenCalled();
+  });
+});
 
 function makeMcpPathProbe(overrides: Partial<McpPathProbe> = {}): McpPathProbe {
   return {
