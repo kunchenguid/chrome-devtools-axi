@@ -780,8 +780,11 @@ export type StopBridgeSessionTarget = "logical" | "dedicated" | "physical-pool";
  * Stop one logical session after validating that its PID file still points at
  * the expected chrome-devtools-axi bridge process. The target distinguishes a
  * logical pooled route from diagnostics that intentionally stop a dedicated
- * or physical pool-slot bridge. These checks prevent cleanup from signaling an
- * unrelated process after PID reuse.
+ * or physical pool-slot bridge. Physical stops use an instance-ID-authenticated
+ * self-shutdown request, so cleanup never sends a terminating signal to a PID
+ * after it can be reused.
+ * Logical route release remains compatible with legacy pooled bridges that do
+ * not report an instance ID because it never terminates the physical process.
  */
 export async function stopBridgeSession(
   sessionName: string = resolveSessionName(),

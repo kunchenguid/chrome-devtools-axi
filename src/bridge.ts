@@ -4,8 +4,9 @@
  * Spawns chrome-devtools-mcp as a child process and maintains a single
  * persistent MCP session. Exposes a simple HTTP API:
  *   POST /call  { name, args }  → { result }
+ *   POST /shutdown { instanceId } → authenticated self-shutdown
  *   GET  /tools                 → [{ name, description }]
- *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
+ *   GET  /health                → { status: "ok", session, instanceId, pid } or 503
  *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason
  *
  * Writes a PID file to the active bridge's state dir on startup

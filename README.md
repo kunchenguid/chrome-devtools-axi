@@ -137,7 +137,7 @@ Use a Node version allowed by the `engines.node` declaration in `package.json`; 
 ```
 
 - **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation; optional pooling hashes many logical sessions onto a bounded number of bridge/browser processes
-- **Auto-lifecycle** — the bridge starts on first command, writes an observable PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, shuts down after 30 idle minutes, and reaps child processes on stop
+- **Auto-lifecycle** — the bridge starts on first command, writes identity-bearing PID state under `~/.chrome-devtools-axi/`, recycles stale CDP targets after a deep health check, shuts down after 30 idle minutes, and reaps child processes on stop
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
 
@@ -383,20 +383,21 @@ CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.or
 With pooling enabled, logical session state still lives under `sessions/<name>/`, but browser traffic hashes onto `pool-0` through `pool-(N-1)`.
 Each pooled bridge serializes its own browser calls and restores the logical session's selected page before every routed operation, so text/code agent concurrency stays high while browser concurrency is bounded by the pool size. `pages`, `selectpage`, and `closepage` are scoped to pages owned by the calling session, and pages opened as click or script side effects are claimed by that same owner.
 `chrome-devtools-axi stop` in pooled mode releases all pages owned by the calling logical session, including claimed popups: it closes them when another page exists, or navigates the last remaining page to `about:blank` because upstream cannot close the last tab. The physical pooled bridge stays available to other logical sessions.
+During an in-place upgrade, logical release also works with an already-running pooled bridge whose older PID record has no instance ID, after its health and session are validated. Physical bridge termination requires a current instance ID and uses an authenticated self-shutdown request, so cleanup never sends a terminating signal to a numeric PID that could have been reused.
 If an agent exits without running `stop`, the route idle timeout releases that logical session's pages even while other sessions keep the pooled bridge alive. `CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS` sets the caller's route deadline when no explicit or persisted caller policy applies, and it travels with each routed request instead of changing the shared bridge. Routes without a caller policy fall back to the pooled bridge's independent 30-minute physical timeout. A caller's `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, `--idle-timeout-ms`, or persisted agent policy overrides the route setting only for its logical route.
 If `CHROME_DEVTOOLS_AXI_PORT` is set with a pool, it is treated as the base port and each pool slot uses `base + slot`; leaving it unset uses the normal derived pool-slot ports.
 
 State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`; pooled bridge PID files nest under `pools/pool-<slot>/`):
 
-| File                  | Purpose                                                                         |
-| --------------------- | ------------------------------------------------------------------------------- |
-| `bridge.pid`          | PID, port, session, owner, start time, and last activity for the running bridge |
-| `snapshot-generation` | Per-logical-session counter used to detect stale uid refs                       |
-| `agent-idle-timeout`  | Renewable per-logical-session policy from lifecycle hooks                       |
+| File                  | Purpose                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `bridge.pid`          | PID, port, session, instance ID, owner, start time, and last activity |
+| `snapshot-generation` | Per-logical-session counter used to detect stale uid refs             |
+| `agent-idle-timeout`  | Renewable per-logical-session policy from lifecycle hooks             |
 
-Use `chrome-devtools-axi sessions` to inspect bridge state without starting a browser. It inventories the default session plus named and pooled sessions such as `pool-3` when they have bridge PID state; reports PID/process-group liveness, bridge health, page count and selected URL when reachable, and flags stale PID files, reused non-bridge PIDs, health failures, session mismatches, and orphan symptoms. `--json` prints machine-readable output for watchdogs.
+Use `chrome-devtools-axi sessions` to inspect bridge state without starting a browser. It inventories the default session plus named and pooled sessions such as `pool-3` when they have bridge PID state; reports PID liveness, process-group details when the platform exposes them, bridge health, page count and selected URL when reachable, and flags stale PID files, reused non-bridge PIDs, health failures, session mismatches, and orphan symptoms. `--json` prints machine-readable output for watchdogs.
 
-Cleanup is opt-in. `chrome-devtools-axi sessions --clean-stale` (also `--clean` or `--prune`) removes only well-formed `bridge.pid` files whose recorded PID is confirmed dead, and `--stop-unhealthy` stops only live PIDs that still validate as `chrome-devtools-axi-bridge` processes. Stopping an unhealthy pooled entry stops that physical pool slot, so every logical session hashed to the slot must start a fresh route afterward.
+Cleanup is opt-in. `chrome-devtools-axi sessions --clean-stale` (also `--clean` or `--prune`) removes only well-formed `bridge.pid` files whose recorded PID is confirmed dead. `--stop-unhealthy` requires the recorded session, instance ID, and PID to match the live bridge, then asks that instance to shut itself down; a legacy record without an instance ID is never used for physical termination. Stopping an unhealthy pooled entry stops that physical pool slot, so every logical session hashed to the slot must start a fresh route afterward.
 
 ## Development
 
