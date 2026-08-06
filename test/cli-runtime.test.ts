@@ -257,6 +257,27 @@ describe("main CLI runtime", () => {
     }
   });
 
+  it("preserves an explicit idle environment during session start", async () => {
+    const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "600000";
+    let observedTimeout: string | undefined;
+    try {
+      runAxiCli.mockImplementationOnce(async () => {
+        observedTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      });
+
+      await main({ argv: ["--agent-session-start"] });
+
+      expect(observedTimeout).toBe("600000");
+    } finally {
+      if (previousIdleTimeout === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = previousIdleTimeout;
+      }
+    }
+  });
+
   it("keeps an explicit idle timeout invocation-scoped", async () => {
     const originalHome = process.env.HOME;
     const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;

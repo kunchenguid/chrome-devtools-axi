@@ -1,15 +1,21 @@
 import {
-  mkdirSync,
+  linkSync,
+  lstatSync,
   readFileSync,
   rmSync,
-  statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 2_000;
-const STALE_LOCK_MS = 30_000;
+const LEGACY_STALE_LOCK_MS = 30_000;
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
+
+type LockOwner = {
+  pid: number;
+  token: string;
+};
 
 function processIsAlive(pid: number): boolean {
   try {
@@ -20,50 +26,101 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-function removeStaleLock(lockDir: string): void {
+function parseOwner(value: string): LockOwner | undefined {
   try {
-    const ageMs = Date.now() - statSync(lockDir).mtimeMs;
-    let owner: number | undefined;
-    try {
-      const parsed = Number.parseInt(
-        readFileSync(`${lockDir}/owner`, "utf-8"),
-        10,
-      );
-      if (!Number.isNaN(parsed)) owner = parsed;
-    } catch {}
+    const parsed = JSON.parse(value) as Partial<LockOwner>;
     if (
-      (owner !== undefined && !processIsAlive(owner)) ||
-      ageMs > STALE_LOCK_MS ||
-      (owner === undefined && ageMs > LOCK_TIMEOUT_MS / 2)
+      Number.isInteger(parsed.pid) &&
+      (parsed.pid as number) > 0 &&
+      typeof parsed.token === "string" &&
+      parsed.token.length > 0
     ) {
-      rmSync(lockDir, { recursive: true, force: true });
+      return { pid: parsed.pid as number, token: parsed.token };
+    }
+  } catch {
+    const legacyPid = Number.parseInt(value, 10);
+    if (!Number.isNaN(legacyPid) && legacyPid > 0) {
+      return { pid: legacyPid, token: "legacy" };
+    }
+  }
+  return undefined;
+}
+
+function readLockOwner(lockPath: string): LockOwner | undefined {
+  try {
+    const stat = lstatSync(lockPath);
+    const ownerPath = stat.isDirectory() ? `${lockPath}/owner` : lockPath;
+    return parseOwner(readFileSync(ownerPath, "utf-8"));
+  } catch {
+    return undefined;
+  }
+}
+
+export function removeStalePidFileLock(lockPath: string): void {
+  try {
+    const stat = lstatSync(lockPath);
+    const owner = readLockOwner(lockPath);
+    if (owner) {
+      if (!processIsAlive(owner.pid)) {
+        rmSync(lockPath, { recursive: true, force: true });
+      }
+      return;
+    }
+
+    // Current writers publish a fully populated lock file atomically. This
+    // age check only migrates ownerless directories left by the older
+    // mkdir-then-write implementation; a lock with a live owner is never
+    // evicted merely because the machine slept or the holder was paused.
+    if (
+      stat.isDirectory() &&
+      Date.now() - stat.mtimeMs > LEGACY_STALE_LOCK_MS
+    ) {
+      rmSync(lockPath, { recursive: true, force: true });
     }
   } catch {}
 }
 
-export function withPidFileLock<T>(pidFile: string, action: () => T): T {
-  const lockDir = `${pidFile}.lock`;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      mkdirSync(lockDir, { mode: 0o700 });
-      try {
-        writeFileSync(`${lockDir}/owner`, String(process.pid));
-      } catch (error) {
-        rmSync(lockDir, { recursive: true, force: true });
-        throw error;
-      }
-      break;
-    } catch (error) {
-      removeStaleLock(lockDir);
-      if (Date.now() >= deadline) throw error;
-      Atomics.wait(sleeper, 0, 0, LOCK_RETRY_MS);
-    }
-  }
+function sameOwner(left: LockOwner | undefined, right: LockOwner): boolean {
+  return left?.pid === right.pid && left.token === right.token;
+}
 
+export function withPidFileLock<T>(pidFile: string, action: () => T): T {
+  const lockPath = `${pidFile}.lock`;
+  const owner: LockOwner = {
+    pid: process.pid,
+    token: `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  };
+  const candidatePath = `${lockPath}.${owner.token}`;
+  writeFileSync(candidatePath, JSON.stringify(owner), {
+    flag: "wx",
+    mode: 0o600,
+  });
+
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
   try {
-    return action();
+    while (true) {
+      try {
+        // The hard link publishes a complete owner record and acquires the
+        // well-known lock path in one atomic filesystem operation.
+        linkSync(candidatePath, lockPath);
+        break;
+      } catch (error) {
+        removeStalePidFileLock(lockPath);
+        if (Date.now() >= deadline) throw error;
+        Atomics.wait(sleeper, 0, 0, LOCK_RETRY_MS);
+      }
+    }
+
+    try {
+      return action();
+    } finally {
+      if (sameOwner(readLockOwner(lockPath), owner)) {
+        unlinkSync(lockPath);
+      }
+    }
   } finally {
-    rmSync(lockDir, { recursive: true, force: true });
+    try {
+      unlinkSync(candidatePath);
+    } catch {}
   }
 }

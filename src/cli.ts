@@ -66,10 +66,10 @@ function consumePersistedBrowserPolicy(): void {
 
 async function callTool(
   name: string,
-  args: Record<string, unknown> = {},
+  args?: Record<string, unknown>,
 ): Promise<string> {
   consumePersistedBrowserPolicy();
-  return callClientTool(name, args);
+  return args === undefined ? callClientTool(name) : callClientTool(name, args);
 }
 
 async function ensureBridge(): Promise<number> {
@@ -1918,7 +1918,9 @@ export async function main(
   const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
   const idleTimeoutMs =
     runtime.idleTimeoutMs ??
-    (runtime.sessionStart ? AGENT_BRIDGE_IDLE_TIMEOUT_MS : undefined);
+    (runtime.sessionStart && previousIdleTimeout === undefined
+      ? AGENT_BRIDGE_IDLE_TIMEOUT_MS
+      : undefined);
   if (idleTimeoutMs !== undefined) {
     process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = String(idleTimeoutMs);
   }
