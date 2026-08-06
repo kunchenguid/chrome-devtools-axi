@@ -1093,6 +1093,7 @@ export async function handleBridgeRequest(
   logForbidden?: (message: string) => void,
   router?: BrowserPageRouter,
   instanceId?: string,
+  shutdown?: (reason?: string) => void | Promise<void>,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -1109,6 +1110,30 @@ export async function handleBridgeRequest(
         `origin=${origin ?? ""} ${req.method ?? ""} ${req.url ?? ""}`,
     );
     writeJson(res, 403, { error: "Forbidden host" });
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/shutdown") {
+    if (instanceId === undefined || shutdown === undefined) {
+      writeJson(res, 404, { error: "not found" });
+      return;
+    }
+    try {
+      const payload = JSON.parse(await readRequestBody(req)) as {
+        instanceId?: unknown;
+      };
+      if (payload.instanceId !== instanceId) {
+        writeJson(res, 403, { error: "Bridge identity mismatch" });
+        return;
+      }
+    } catch {
+      writeJson(res, 400, { error: "Invalid shutdown request" });
+      return;
+    }
+    writeJson(res, 202, { status: "shutting-down" });
+    setImmediate(() => {
+      void shutdown("Authenticated shutdown requested");
+    });
     return;
   }
 
@@ -1169,6 +1194,7 @@ export function createBridgeServer(
   idleWatchdog?: BridgeIdleWatchdog,
   router?: BrowserPageRouter,
   instanceId?: string,
+  shutdown?: (reason?: string) => void | Promise<void>,
 ): Server {
   return createServer((req, res) => {
     if (!isRequestAllowed(req)) {
@@ -1180,6 +1206,7 @@ export function createBridgeServer(
         logBridgeMessage,
         router,
         instanceId,
+        shutdown,
       );
       return;
     }
@@ -1205,6 +1232,7 @@ export function createBridgeServer(
       logBridgeMessage,
       router,
       instanceId,
+      shutdown,
     ).finally(() => {
       finishRequest?.();
     });
@@ -1553,18 +1581,8 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     setTimeoutMs: (timeoutMs) => idleWatchdog?.setTimeoutMs(timeoutMs),
     stop: () => idleWatchdog?.stop(),
   };
-  const server = createBridgeServer(
-    client,
-    sessionName,
-    requestActivity,
-    router,
-    instanceId,
-  );
-  server.on("error", (error: NodeJS.ErrnoException) => {
-    handleBridgeServerError(error, port);
-  });
-
   let shuttingDown = false;
+  let server: Server;
   const shutdown = async (reason?: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -1576,6 +1594,18 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     await transport.close();
     process.exit(0);
   };
+
+  server = createBridgeServer(
+    client,
+    sessionName,
+    requestActivity,
+    router,
+    instanceId,
+    shutdown,
+  );
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    handleBridgeServerError(error, port);
+  });
 
   server.listen(port, "127.0.0.1", () => {
     writePidFile(port, instanceId);

@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import { BRIDGE_PORT_IN_USE_EXIT_CODE } from "../src/bridge.js";
 import {
@@ -32,7 +32,11 @@ import {
   terminateBridgeProcess,
   waitForProcessExit,
 } from "../src/client.js";
-import { resolveSessionPidFile } from "../src/sessions.js";
+import {
+  resolveBridgePidFile,
+  resolveBridgeSessionName,
+  resolveSessionPidFile,
+} from "../src/sessions.js";
 
 describe("pooled route idle policy", () => {
   const savedCallerIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
@@ -286,6 +290,55 @@ describe("unsafe session names are rejected on action entry points", () => {
       await new Promise<void>((resolve) => child.once("exit", () => resolve()));
     }
   });
+
+  it("releases a legacy pooled route without requiring a physical bridge nonce", async () => {
+    const savedHome = process.env.HOME;
+    const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    const home = mkdtempSync(join(tmpdir(), "cda-legacy-pool-stop-"));
+    const releasedSessions: string[] = [];
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)", "chrome-devtools-axi-bridge"],
+      { stdio: "ignore" },
+    );
+    const pid = child.pid as number;
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    const bridgeSession = resolveBridgeSessionName("worker-1");
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: bridgeSession,
+      releasedSessions,
+    });
+
+    try {
+      const pidFile = resolveBridgePidFile("worker-1");
+      mkdirSync(dirname(pidFile), { recursive: true });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({ pid, port: fake.port, session: bridgeSession }),
+      );
+
+      await expect(stopBridgeSession("worker-1")).resolves.toBe("stopped");
+      expect(releasedSessions).toEqual(["worker-1"]);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedPoolSize === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+      }
+      rmSync(home, { recursive: true, force: true });
+      await fake.close();
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+  });
 });
 
 describe("resolveBridgeTimeoutMs", () => {
@@ -338,6 +391,7 @@ interface FakeBridgeOptions {
   session?: string;
   instanceId?: string;
   pid?: number;
+  releasedSessions?: string[];
 }
 
 function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
@@ -372,6 +426,20 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
         } else {
           sendResponse();
         }
+        return;
+      }
+      if (req.method === "POST" && req.url === "/call") {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          const payload = JSON.parse(body) as { routeSession?: string };
+          if (payload.routeSession) {
+            opts.releasedSessions?.push(payload.routeSession);
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.statusCode = 200;
+          res.end(JSON.stringify({ result: "status: stopped" }));
+        });
         return;
       }
       res.statusCode = 404;

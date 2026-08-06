@@ -1529,6 +1529,57 @@ function makeResponse(): { res: ServerResponse; captured: CapturedResponse } {
 }
 
 describe("handleBridgeRequest /health", () => {
+  it("accepts shutdown only for the matching bridge instance", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const shutdown = vi.fn();
+    const accepted = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/shutdown",
+        {},
+        JSON.stringify({ instanceId: "instance-1" }),
+      ),
+      accepted.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+      shutdown,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(accepted.captured.statusCode).toBe(202);
+    expect(shutdown).toHaveBeenCalledWith("Authenticated shutdown requested");
+
+    shutdown.mockClear();
+    const rejected = makeResponse();
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/shutdown",
+        {},
+        JSON.stringify({ instanceId: "replacement-instance" }),
+      ),
+      rejected.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+      shutdown,
+    );
+
+    expect(rejected.captured.statusCode).toBe(403);
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
   it("returns 200 ok for shallow /health when MCP is connected", async () => {
     const client: BridgeClient = {
       listTools: async () => ({ tools: [] }),

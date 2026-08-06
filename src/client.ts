@@ -254,6 +254,20 @@ export async function checkBridgeIdentity(
   }
 }
 
+async function requestAuthenticatedBridgeShutdown(
+  port: number,
+  instanceId: string,
+): Promise<boolean> {
+  try {
+    const data = JSON.parse(
+      await httpPost(port, "/shutdown", { instanceId }, 5_000),
+    );
+    return data.status === "shutting-down";
+  } catch {
+    return false;
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -530,9 +544,11 @@ export async function ensureBridge(
           pid: pidInfo.pid,
         }))
       ) {
-        await terminateBridgeProcess(pidInfo.pid, {
-          killProcessGroup: isBridgeProcess(pidInfo.pid),
-        });
+        await requestAuthenticatedBridgeShutdown(
+          pidInfo.port,
+          pidInfo.instanceId,
+        );
+        await waitForProcessExit(pidInfo.pid, 5_000);
       }
     }
   }
@@ -793,18 +809,19 @@ export async function stopBridgeSession(
     return "session-mismatch";
   }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
-  if (
-    pidInfo.instanceId === undefined ||
-    !(await checkBridgeIdentity(pidInfo.port, {
-      session: bridgeSessionName,
-      instanceId: pidInfo.instanceId,
-      pid: pidInfo.pid,
-    }))
-  ) {
-    return "not-bridge";
-  }
 
   if (target === "logical" && isBrowserPoolEnabled()) {
+    const identityMatches =
+      pidInfo.instanceId === undefined
+        ? await checkBridgeHealth(pidInfo.port, {
+            expectedSession: bridgeSessionName,
+          })
+        : await checkBridgeIdentity(pidInfo.port, {
+            session: bridgeSessionName,
+            instanceId: pidInfo.instanceId,
+            pid: pidInfo.pid,
+          });
+    if (!identityMatches) return "not-bridge";
     try {
       await httpPost(
         pidInfo.port,
@@ -822,8 +839,24 @@ export async function stopBridgeSession(
     }
   }
 
-  await terminateBridgeProcess(pidInfo.pid, {
-    killProcessGroup: true,
-  });
+  if (
+    pidInfo.instanceId === undefined ||
+    !(await checkBridgeIdentity(pidInfo.port, {
+      session: bridgeSessionName,
+      instanceId: pidInfo.instanceId,
+      pid: pidInfo.pid,
+    }))
+  ) {
+    return "not-bridge";
+  }
+  if (
+    !(await requestAuthenticatedBridgeShutdown(
+      pidInfo.port,
+      pidInfo.instanceId,
+    ))
+  ) {
+    return "not-running";
+  }
+  await waitForProcessExit(pidInfo.pid, 5_000);
   return "stopped";
 }
