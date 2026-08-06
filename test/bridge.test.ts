@@ -43,6 +43,7 @@ import {
   resolveBridgeScript,
   resolveRouteIdleTimeoutMs,
   resolveTransportSpec,
+  shutdownOwnedWindowsBridgeProcessTree,
   MCP_PACKAGE_SPEC,
   type BridgeClient,
   type McpPathProbe,
@@ -103,6 +104,21 @@ describe("bridge shutdown lifecycle", () => {
       { timeout: 5000, stdio: "ignore" },
     );
     expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("removes the owned PID identity before Windows tree termination", () => {
+    const actions: string[] = [];
+
+    const reaped = shutdownOwnedWindowsBridgeProcessTree({
+      removePidIdentity: () => actions.push("pid-identity-removed"),
+      reapProcessTree: () => {
+        actions.push("process-tree-reaped");
+        return true;
+      },
+    });
+
+    expect(reaped).toBe(true);
+    expect(actions).toEqual(["pid-identity-removed", "process-tree-reaped"]);
   });
 });
 

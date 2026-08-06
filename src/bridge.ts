@@ -1628,6 +1628,21 @@ export function reapOwnedBridgeProcessTree(
   }
 }
 
+/**
+ * Windows taskkill terminates this process together with its descendants, so
+ * remove the owner-checked PID identity before starting that irreversible
+ * operation; the normal process-exit cleanup may never run afterward.
+ */
+export function shutdownOwnedWindowsBridgeProcessTree(
+  opts: {
+    removePidIdentity?: () => void;
+    reapProcessTree?: () => boolean;
+  } = {},
+): boolean {
+  (opts.removePidIdentity ?? removePidFile)();
+  return (opts.reapProcessTree ?? reapOwnedBridgeProcessTree)();
+}
+
 export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const poolSize = resolveBrowserPoolSize();
   const { bridgeIdleTimeoutMs: idleTimeoutMs, routeIdleTimeoutMs } =
@@ -1664,8 +1679,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     idleWatchdog?.stop();
     if (reason) logBridgeMessage(reason);
     if (process.platform === "win32") {
-      removePidFile();
-      if (reapOwnedBridgeProcessTree()) return;
+      if (shutdownOwnedWindowsBridgeProcessTree()) return;
     }
     try {
       await closeBridgeResources(server, client, transport);

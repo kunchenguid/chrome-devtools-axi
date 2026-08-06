@@ -281,6 +281,13 @@ function releaseReclaimLease(lease: ReclaimLease): void {
   } catch {}
 }
 
+/**
+ * Reclaim only the stale lock generation named by a filesystem-identity
+ * lease. The fixed device/inode claim prevents a delayed reclaimer from
+ * deleting a replacement generation, and writers yield while that lease is
+ * published. Ownerless directories are age-reclaimed solely for compatibility
+ * with the legacy mkdir-then-write lock format.
+ */
 export function removeStalePidFileLock(
   lockPath: string,
   isAlive: (pid: number) => boolean = processIsAlive,
