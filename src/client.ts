@@ -172,6 +172,11 @@ function idleTimeoutHeaders(): Record<string, string> {
   return value ? { "X-Axi-Idle-Timeout-Ms": value } : {};
 }
 
+/**
+ * Apply the caller's effective bridge idle policy to its pooled logical route
+ * as well. This makes explicit CLI timeouts and persisted agent-session
+ * policies reclaim route-owned pages without shortening unrelated active work.
+ */
 function requestedRouteIdleTimeoutMs(): number | undefined {
   const value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
   if (!value) return undefined;
@@ -681,10 +686,9 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
 }
 
 /**
- * Stop the bridge process. Waits for the bridge PID to actually exit (bounded
- * poll, ~2s) before escalating to SIGKILL on the entire detached process
- * group, so chrome-devtools-mcp + Chrome children get reaped together rather
- * than orphaned. Resolves once the bridge process is gone.
+ * Stop the active logical session. In unpooled mode this terminates the bridge
+ * process and reaps its MCP/Chrome process group; in pooled mode it releases
+ * only the caller's owned pages and leaves the shared bridge running.
  */
 export async function stopBridge(): Promise<boolean> {
   return (await stopBridgeSession()) === "stopped";
@@ -697,9 +701,11 @@ export type StopBridgeSessionResult =
   | "session-mismatch";
 
 /**
- * Stop one named bridge session after validating that the PID file still points
- * at a chrome-devtools-axi bridge process. This keeps cleanup actions from
- * signaling an unrelated process after PID reuse.
+ * Stop one logical session after validating that its PID file still points at
+ * the expected chrome-devtools-axi bridge process. Pooled logical cleanup asks
+ * that bridge to release only the route's pages; `physicalPool` is reserved for
+ * diagnostics that intentionally stop a validated pool-slot bridge. These
+ * checks prevent cleanup from signaling an unrelated process after PID reuse.
  */
 export async function stopBridgeSession(
   sessionName: string = resolveSessionName(),

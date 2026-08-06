@@ -8,6 +8,11 @@ import {
 import { dirname, join } from "node:path";
 import { resolveSessionStateDir } from "./sessions.js";
 
+/**
+ * Per-logical-session idle policy written by agent lifecycle integrations.
+ * Keeping it beside the generation counter lets later short-lived CLI
+ * processes inherit the policy without changing the direct CLI default.
+ */
 const POLICY_FILE = "agent-idle-timeout";
 
 function policyFile(): string {

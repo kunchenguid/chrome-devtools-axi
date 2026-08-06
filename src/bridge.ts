@@ -8,9 +8,9 @@
  *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
  *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason
  *
- * Writes a PID file to the active session's state dir on startup
- * (~/.chrome-devtools-axi/bridge.pid for the default session; named sessions
- * nest under sessions/<name>/ - see src/sessions.ts).
+ * Writes a PID file to the active bridge's state dir on startup
+ * (~/.chrome-devtools-axi/bridge.pid for the unpooled default session, named
+ * sessions under sessions/<name>/, or pooled bridges under pools/pool-<slot>/).
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -89,6 +89,12 @@ export function resolveBridgeIdleTimeoutMs(
   return parsed;
 }
 
+/**
+ * Resolve the default idle window for a logical route in a pooled bridge.
+ * An explicit route timeout wins; otherwise route cleanup inherits the bridge
+ * idle window so one lifecycle policy bounds both physical and logical state.
+ * Individual requests may still supply a shorter or longer route timeout.
+ */
 export function resolveRouteIdleTimeoutMs(
   value = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS,
   bridgeIdleTimeoutMs = resolveBridgeIdleTimeoutMs(),

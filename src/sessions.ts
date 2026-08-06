@@ -13,12 +13,13 @@
  * Setting `CHROME_DEVTOOLS_AXI_POOL_SIZE` changes only the bridge identity:
  * logical sessions keep their own state dirs and generation counters, but their
  * browser traffic hashes onto one of N pooled bridges. The bridge then routes
- * each logical session to a deterministic page within that browser.
+ * each logical session to its own in-memory-owned set of pages.
  *
  * Precedence:
  *   logical state dir - always derived from CHROME_DEVTOOLS_AXI_SESSION
  *   bridge identity  - logical session by default, or pool slot when pooled
- *   bridge port      - CHROME_DEVTOOLS_AXI_PORT > deterministic bridge identity
+ *   bridge port      - deterministic bridge identity, unless PORT supplies a
+ *                      direct port (unpooled) or base port plus slot (pooled)
  *
  * The default session name is "default", which preserves prior behavior: port
  * 9224 and the legacy `~/.chrome-devtools-axi/` state paths.
