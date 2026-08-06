@@ -19,6 +19,10 @@ import {
 import {
   DEFAULT_SESSION_NAME,
   defaultPortForSession,
+  isPooledBridgeSessionName,
+  resolveBridgePidFileForBridgeSession,
+  resolveBridgeStateDirForBridgeSession,
+  resolveBrowserPoolsDir,
   resolveNamedSessionsDir,
   resolveSessionPidFile,
   resolveSessionStateDir,
@@ -147,7 +151,7 @@ export function parseSessionsArgs(args: string[]): SessionsCommandArgs {
 
 function classifySessionKind(session: string): SessionKind {
   if (session === DEFAULT_SESSION_NAME) return "default";
-  return /^pool(?:[-_.].+|\d+)$/i.test(session) ? "pooled" : "named";
+  return isPooledBridgeSessionName(session) ? "pooled" : "named";
 }
 
 function listSessionNames(): string[] {
@@ -167,6 +171,18 @@ function listSessionNames(): string[] {
     }
   } catch {
     // No named sessions yet.
+  }
+  const poolsDir = resolveBrowserPoolsDir();
+  try {
+    for (const entry of readdirSync(poolsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const name = entry.name;
+      if (!isPooledBridgeSessionName(name)) continue;
+      if (!existsSync(join(poolsDir, name, "bridge.pid"))) continue;
+      names.add(name);
+    }
+  } catch {
+    // Pooling may never have been enabled.
   }
   return [...names].sort((a, b) => {
     if (a === DEFAULT_SESSION_NAME) return -1;
@@ -341,8 +357,15 @@ async function inspectOneSession(
   options: ResolvedInspectBrowserSessionsOptions,
 ): Promise<BrowserSessionDiagnostic> {
   const now = options.runtime.now();
-  const stateDir = resolveSessionStateDir(session);
-  const pidFilePath = resolveSessionPidFile(session);
+  const kind = classifySessionKind(session);
+  const stateDir =
+    kind === "pooled"
+      ? resolveBridgeStateDirForBridgeSession(session, true)
+      : resolveSessionStateDir(session);
+  const pidFilePath =
+    kind === "pooled"
+      ? resolveBridgePidFileForBridgeSession(session)
+      : resolveSessionPidFile(session);
   const { pidFile, parsed } = readPidFileForDoctor(pidFilePath);
   const flags: string[] = [];
   let status: BridgeStatus = "no-state";
@@ -430,7 +453,7 @@ async function inspectOneSession(
 
   return {
     session,
-    kind: classifySessionKind(session),
+    kind,
     stateDir,
     pidFile,
     status,

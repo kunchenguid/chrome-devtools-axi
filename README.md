@@ -348,7 +348,21 @@ The default (unset) session keeps port 9224 and the legacy state paths below.
 Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.
 Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT` only inline per command.
 
-State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`):
+For high agent counts where one Chrome per named session is too heavy, opt into a bounded browser pool:
+
+```sh
+export CHROME_DEVTOOLS_AXI_POOL_SIZE=4
+CHROME_DEVTOOLS_AXI_SESSION=worker-1 chrome-devtools-axi open https://example.com
+CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.org
+```
+
+With pooling enabled, logical session state still lives under `sessions/<name>/`, but browser traffic hashes onto `pool-0` through `pool-(N-1)`.
+Each pooled bridge serializes its own browser calls and selects the logical session's page before every routed operation, so text/code agent concurrency stays high while browser concurrency is bounded by the pool size.
+`chrome-devtools-axi stop` in pooled mode releases only the calling logical session's pages: it closes those pages when another page exists, or navigates the last remaining page to `about:blank` because upstream cannot close the last tab.
+If an agent exits without running `stop`, `CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS` releases that logical session's pages after 30 idle minutes by default, even while other sessions keep the pooled bridge alive.
+If `CHROME_DEVTOOLS_AXI_PORT` is set with a pool, it is treated as the base port and each pool slot uses `base + slot`; leaving it unset uses the normal derived pool-slot ports.
+
+State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`; pooled bridge PID files nest under `pools/pool-<slot>/`):
 
 | File                  | Purpose                                                                         |
 | --------------------- | ------------------------------------------------------------------------------- |

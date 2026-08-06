@@ -33,8 +33,9 @@ import {
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import {
+  resolveActiveBridgePidFile,
+  resolveBrowserPoolSize,
   resolveSessionName,
-  resolveSessionPidFile,
   resolveSessionPort,
 } from "./sessions.js";
 
@@ -46,6 +47,7 @@ export interface BridgeContentBlock {
 export interface BridgeCallPayload {
   name: string;
   args: Record<string, unknown>;
+  routeSession?: string;
 }
 
 interface BridgeToolDescription {
@@ -63,6 +65,8 @@ export interface BridgeClient {
 }
 
 export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+export const DEFAULT_ROUTE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const ROUTE_SESSION_MARKER_KEY = "__chromeDevtoolsAxiRouteSession";
 
 /**
  * Resolve how long an unused bridge stays alive. The bridge is intentionally
@@ -80,6 +84,21 @@ export function resolveBridgeIdleTimeoutMs(
   if (!Number.isInteger(parsed) || parsed < 1000) {
     throw new Error(
       "CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS must be an integer >= 1000",
+    );
+  }
+  return parsed;
+}
+
+export function resolveRouteIdleTimeoutMs(
+  value = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS,
+): number {
+  if (value === undefined || value === "") {
+    return DEFAULT_ROUTE_IDLE_TIMEOUT_MS;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1000) {
+    throw new Error(
+      "CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS must be an integer >= 1000",
     );
   }
   return parsed;
@@ -192,7 +211,7 @@ function resolveOwnerMetadata(): Record<string, unknown> {
 }
 
 function writePidFile(port: number): void {
-  const pidFile = resolveSessionPidFile();
+  const pidFile = resolveActiveBridgePidFile();
   const now = new Date().toISOString();
   const session = resolveSessionName();
   mkdirSync(dirname(pidFile), { recursive: true });
@@ -210,7 +229,7 @@ function writePidFile(port: number): void {
 }
 
 function touchPidFileActivity(): void {
-  const pidFile = resolveSessionPidFile();
+  const pidFile = resolveActiveBridgePidFile();
   try {
     const existing = JSON.parse(readFileSync(pidFile, "utf-8")) as Record<
       string,
@@ -239,7 +258,7 @@ function touchPidFileActivity(): void {
  * injectable for tests.
  */
 export function removePidFile(
-  pidFile: string = resolveSessionPidFile(),
+  pidFile: string = resolveActiveBridgePidFile(),
   ownerPid: number = process.pid,
 ): void {
   try {
@@ -373,7 +392,7 @@ function getToolContent(result: unknown): BridgeContentBlock[] {
 }
 
 export function parseBridgeCallPayload(body: string): BridgeCallPayload {
-  let payload: { name?: unknown; args?: unknown };
+  let payload: { name?: unknown; args?: unknown; routeSession?: unknown };
   try {
     payload = JSON.parse(body) as { name?: unknown; args?: unknown };
   } catch {
@@ -383,7 +402,14 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
     throw new Error("Invalid bridge request payload");
   }
   if (payload.args === undefined) {
-    return { name: payload.name, args: {} };
+    return {
+      name: payload.name,
+      args: {},
+      routeSession:
+        typeof payload.routeSession === "string"
+          ? payload.routeSession
+          : undefined,
+    };
   }
   if (
     payload.args === null ||
@@ -392,7 +418,487 @@ export function parseBridgeCallPayload(body: string): BridgeCallPayload {
   ) {
     throw new Error("Invalid bridge request payload");
   }
-  return { name: payload.name, args: payload.args as Record<string, unknown> };
+  return {
+    name: payload.name,
+    args: payload.args as Record<string, unknown>,
+    routeSession:
+      typeof payload.routeSession === "string"
+        ? payload.routeSession
+        : undefined,
+  };
+}
+
+interface ParsedPage {
+  id: number;
+  url: string;
+  selected: boolean;
+}
+
+function parsePagesList(text: string): ParsedPage[] {
+  const pages: ParsedPage[] = [];
+  for (const line of text.split("\n")) {
+    const match = line.match(/^(\d+):\s+(\S+)(\s+\[selected\])?/);
+    if (!match) continue;
+    pages.push({
+      id: Number.parseInt(match[1], 10),
+      url: match[2],
+      selected: Boolean(match[3]),
+    });
+  }
+  return pages;
+}
+
+function textFromToolResult(result: unknown): string {
+  return extractToolText(getToolContent(result));
+}
+
+type BridgeToolCall = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<string>;
+
+/**
+ * Serializes page-routed MCP calls within one bridge and restores the selected
+ * page before each routed operation. chrome-devtools-mcp has one selected page
+ * per MCP session, so routing must be bridge-local and serialized; the pool
+ * size controls browser parallelism while text agents remain unconstrained.
+ */
+export class BrowserPageRouter {
+  private readonly pagesByRouteSession = new Map<string, Set<number>>();
+  private readonly activePageByRouteSession = new Map<string, number>();
+  private readonly routeSessionByPage = new Map<number, string>();
+  private readonly lastActivityByRouteSession = new Map<string, number>();
+  private readonly activeRouteSessions = new Set<string>();
+  private readonly routeIdleTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly routeIdleTimeoutMs = DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
+  ) {}
+
+  async run(payload: BridgeCallPayload, call: BridgeToolCall): Promise<string> {
+    const routeSession = payload.routeSession;
+    if (!routeSession) {
+      return call(payload.name, payload.args);
+    }
+
+    const run = this.queue.then(() =>
+      this.runLocked(routeSession, payload, call),
+    );
+    this.queue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  private async runLocked(
+    routeSession: string,
+    payload: BridgeCallPayload,
+    call: BridgeToolCall,
+  ): Promise<string> {
+    if (payload.name === "__axi_release_session") {
+      return await this.releaseSession(routeSession, call, "explicit");
+    }
+
+    if (payload.name === "list_pages") {
+      await this.recoverMarkedOwnership(call);
+      this.touchRoute(routeSession, call);
+      return this.formatOwnedPages(routeSession, await this.listPages(call));
+    }
+
+    this.activeRouteSessions.add(routeSession);
+    try {
+      if (payload.name === "select_page") {
+        const pageId = numericArg(payload.args.pageId);
+        if (pageId === null) return await call(payload.name, payload.args);
+        await this.requireOwnedPage(routeSession, pageId, call);
+        const result = await call(payload.name, payload.args);
+        this.activePageByRouteSession.set(routeSession, pageId);
+        await this.markSelectedPage(routeSession, call);
+        this.touchRoute(routeSession, call);
+        return result;
+      }
+
+      if (payload.name === "close_page") {
+        const result = await this.closeOwnedPage(
+          routeSession,
+          payload.args,
+          call,
+        );
+        this.touchRoute(routeSession, call);
+        return result;
+      }
+
+      if (payload.name === "new_page") {
+        const result = await this.openOwnedPage(
+          routeSession,
+          payload.args,
+          call,
+        );
+        this.touchRoute(routeSession, call);
+        return result;
+      }
+
+      await this.ensureSessionPage(routeSession, call);
+      const result = await call(payload.name, payload.args);
+      await this.markSelectedPage(routeSession, call);
+      this.touchRoute(routeSession, call);
+      return result;
+    } finally {
+      this.activeRouteSessions.delete(routeSession);
+    }
+  }
+
+  private async listPages(call: BridgeToolCall): Promise<ParsedPage[]> {
+    return parsePagesList(await call("list_pages", {}));
+  }
+
+  private formatOwnedPages(routeSession: string, pages: ParsedPage[]): string {
+    const owned = this.pagesByRouteSession.get(routeSession) ?? new Set();
+    const activePageId = this.activePageByRouteSession.get(routeSession);
+    return pages
+      .filter((page) => owned.has(page.id))
+      .map(
+        (page) =>
+          `${page.id}: ${page.url}${page.id === activePageId ? " [selected]" : ""}`,
+      )
+      .join("\n");
+  }
+
+  private rememberPage(
+    routeSession: string,
+    pageId: number,
+    active: boolean,
+  ): void {
+    const previousOwner = this.routeSessionByPage.get(pageId);
+    if (previousOwner && previousOwner !== routeSession) {
+      this.pagesByRouteSession.get(previousOwner)?.delete(pageId);
+      if (this.activePageByRouteSession.get(previousOwner) === pageId) {
+        this.activePageByRouteSession.delete(previousOwner);
+      }
+    }
+    let pages = this.pagesByRouteSession.get(routeSession);
+    if (!pages) {
+      pages = new Set();
+      this.pagesByRouteSession.set(routeSession, pages);
+    }
+    pages.add(pageId);
+    this.routeSessionByPage.set(pageId, routeSession);
+    if (active) this.activePageByRouteSession.set(routeSession, pageId);
+  }
+
+  private async ensureSessionPage(
+    routeSession: string,
+    call: BridgeToolCall,
+  ): Promise<void> {
+    await this.recoverMarkedOwnership(call);
+    let pages = await this.listPages(call);
+    const ownedPages = this.pagesByRouteSession.get(routeSession) ?? new Set();
+    const activePageId = this.activePageByRouteSession.get(routeSession);
+    const existing =
+      activePageId === undefined
+        ? pages.find((page) => ownedPages.has(page.id))
+        : pages.find((page) => page.id === activePageId);
+
+    if (existing) {
+      if (!existing.selected) {
+        await call("select_page", { pageId: existing.id, bringToFront: false });
+      }
+      this.rememberPage(routeSession, existing.id, true);
+      await this.markSelectedPage(routeSession, call);
+      return;
+    }
+
+    this.forgetMissingPages(pages);
+
+    const owned = new Set(this.routeSessionByPage.keys());
+    let target = pages.find(
+      (page) => isBlankPage(page.url) && !owned.has(page.id),
+    );
+    if (!target) {
+      await call("new_page", { url: "about:blank" });
+      pages = await this.listPages(call);
+      target =
+        pages.find((page) => page.selected) ??
+        pages.reduce<ParsedPage | undefined>(
+          (latest, page) => (!latest || page.id > latest.id ? page : latest),
+          undefined,
+        );
+    }
+
+    if (!target) return;
+    if (!target.selected) {
+      await call("select_page", { pageId: target.id, bringToFront: false });
+    }
+    this.rememberPage(routeSession, target.id, true);
+    await this.markSelectedPage(routeSession, call);
+  }
+
+  private async openOwnedPage(
+    routeSession: string,
+    args: Record<string, unknown>,
+    call: BridgeToolCall,
+  ): Promise<string> {
+    const before = await this.listPages(call);
+    const beforeIds = new Set(before.map((page) => page.id));
+    const previousActive = this.activePageByRouteSession.get(routeSession);
+    const result = await call("new_page", args);
+    const after = await this.listPages(call);
+    const created = after.filter((page) => !beforeIds.has(page.id));
+
+    for (const page of created) {
+      this.rememberPage(routeSession, page.id, args.background !== true);
+    }
+
+    if (args.background === true && previousActive !== undefined) {
+      const previous = after.find((page) => page.id === previousActive);
+      if (previous && !previous.selected) {
+        await call("select_page", {
+          pageId: previous.id,
+          bringToFront: false,
+        });
+      }
+      this.activePageByRouteSession.set(routeSession, previousActive);
+    } else {
+      const selected = after.find((page) => page.selected) ?? created.at(-1);
+      if (selected) this.rememberPage(routeSession, selected.id, true);
+    }
+
+    await this.markSelectedPage(routeSession, call);
+    return result;
+  }
+
+  private async closeOwnedPage(
+    routeSession: string,
+    args: Record<string, unknown>,
+    call: BridgeToolCall,
+  ): Promise<string> {
+    const pageId = numericArg(args.pageId);
+    if (pageId === null) return await call("close_page", args);
+    await this.requireOwnedPage(routeSession, pageId, call);
+
+    const pages = await this.listPages(call);
+    const target = pages.find((page) => page.id === pageId);
+    if (!target || pages.length <= 1) {
+      return await call("close_page", args);
+    }
+
+    if (target.selected) {
+      const survivor = pages.find((page) => page.id !== pageId);
+      if (survivor) {
+        await call("select_page", {
+          pageId: survivor.id,
+          bringToFront: false,
+        });
+      }
+    }
+
+    const result = await call("close_page", args);
+    this.forgetPage(pageId);
+    const ownedSurvivor = pages.find(
+      (page) =>
+        page.id !== pageId &&
+        this.routeSessionByPage.get(page.id) === routeSession,
+    );
+    if (ownedSurvivor) {
+      this.activePageByRouteSession.set(routeSession, ownedSurvivor.id);
+    } else {
+      this.activePageByRouteSession.delete(routeSession);
+    }
+    return result;
+  }
+
+  private async requireOwnedPage(
+    routeSession: string,
+    pageId: number,
+    call: BridgeToolCall,
+  ): Promise<void> {
+    await this.recoverMarkedOwnership(call);
+    if (this.routeSessionByPage.get(pageId) === routeSession) return;
+    throw new Error(`Page ${pageId} is not owned by session "${routeSession}"`);
+  }
+
+  private async releaseSession(
+    routeSession: string,
+    call: BridgeToolCall,
+    reason: "explicit" | "idle",
+  ): Promise<string> {
+    const owned = [...(this.pagesByRouteSession.get(routeSession) ?? [])];
+    if (owned.length === 0) {
+      this.clearRoute(routeSession);
+      return `Released session "${routeSession}" (no page).`;
+    }
+
+    let closed = 0;
+    let blanked = 0;
+    for (const pageId of owned) {
+      const pages = await this.listPages(call);
+      const target = pages.find((page) => page.id === pageId);
+      if (!target) {
+        this.forgetPage(pageId);
+        continue;
+      }
+
+      if (pages.length <= 1) {
+        if (!target.selected) {
+          await call("select_page", { pageId: target.id, bringToFront: false });
+        }
+        await call("navigate_page", { type: "url", url: "about:blank" });
+        blanked++;
+        this.forgetPage(pageId);
+        continue;
+      }
+
+      if (target.selected) {
+        const survivor =
+          pages.find(
+            (page) =>
+              page.id !== pageId &&
+              this.routeSessionByPage.get(page.id) !== routeSession,
+          ) ?? pages.find((page) => page.id !== pageId);
+        if (survivor) {
+          await call("select_page", {
+            pageId: survivor.id,
+            bringToFront: false,
+          });
+        }
+      }
+      await call("close_page", { pageId });
+      this.forgetPage(pageId);
+      closed++;
+    }
+
+    this.clearRoute(routeSession);
+    return `Released session "${routeSession}" (${reason}); closed ${closed}, blanked ${blanked}.`;
+  }
+
+  private touchRoute(routeSession: string, call: BridgeToolCall): void {
+    this.lastActivityByRouteSession.set(routeSession, Date.now());
+    this.armRouteIdleTimer(routeSession, call);
+  }
+
+  private armRouteIdleTimer(routeSession: string, call: BridgeToolCall): void {
+    const existing = this.routeIdleTimers.get(routeSession);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      void this.enqueueIdleRelease(routeSession, call);
+    }, this.routeIdleTimeoutMs);
+    timer.unref();
+    this.routeIdleTimers.set(routeSession, timer);
+  }
+
+  private enqueueIdleRelease(
+    routeSession: string,
+    call: BridgeToolCall,
+  ): Promise<void> {
+    const run = this.queue.then(async () => {
+      const lastActivity = this.lastActivityByRouteSession.get(routeSession);
+      if (lastActivity === undefined) return;
+      if (this.activeRouteSessions.has(routeSession)) {
+        this.armRouteIdleTimer(routeSession, call);
+        return;
+      }
+      if (Date.now() - lastActivity < this.routeIdleTimeoutMs) {
+        this.armRouteIdleTimer(routeSession, call);
+        return;
+      }
+      await this.releaseSession(routeSession, call, "idle");
+    });
+    this.queue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  private async recoverMarkedOwnership(call: BridgeToolCall): Promise<void> {
+    const pages = await this.listPages(call);
+    this.forgetMissingPages(pages);
+
+    for (const page of pages) {
+      if (this.routeSessionByPage.has(page.id)) continue;
+      await call("select_page", { pageId: page.id, bringToFront: false });
+      let owner: string | null = null;
+      try {
+        const output = await call("evaluate_script", {
+          function: `() => globalThis[${JSON.stringify(ROUTE_SESSION_MARKER_KEY)}] ?? null`,
+        });
+        owner = parseJsonToolValue(output);
+      } catch {
+        owner = null;
+      }
+      if (typeof owner === "string" && owner.length > 0) {
+        this.rememberPage(owner, page.id, false);
+      }
+    }
+  }
+
+  private async markSelectedPage(
+    routeSession: string,
+    call: BridgeToolCall,
+  ): Promise<void> {
+    try {
+      await call("evaluate_script", {
+        function: `() => { globalThis[${JSON.stringify(ROUTE_SESSION_MARKER_KEY)}] = ${JSON.stringify(routeSession)}; return true; }`,
+      });
+    } catch {
+      // A marker miss only affects bridge-restart recovery; live in-memory
+      // routing still owns the page.
+    }
+  }
+
+  private forgetMissingPages(pages: ParsedPage[]): void {
+    const live = new Set(pages.map((page) => page.id));
+    for (const pageId of this.routeSessionByPage.keys()) {
+      if (!live.has(pageId)) this.forgetPage(pageId);
+    }
+  }
+
+  private forgetPage(pageId: number): void {
+    const routeSession = this.routeSessionByPage.get(pageId);
+    if (routeSession) {
+      this.pagesByRouteSession.get(routeSession)?.delete(pageId);
+      if (this.activePageByRouteSession.get(routeSession) === pageId) {
+        this.activePageByRouteSession.delete(routeSession);
+      }
+    }
+    this.routeSessionByPage.delete(pageId);
+  }
+
+  private clearRoute(routeSession: string): void {
+    const timer = this.routeIdleTimers.get(routeSession);
+    if (timer) clearTimeout(timer);
+    this.routeIdleTimers.delete(routeSession);
+    this.lastActivityByRouteSession.delete(routeSession);
+    this.activePageByRouteSession.delete(routeSession);
+    for (const pageId of this.pagesByRouteSession.get(routeSession) ?? []) {
+      this.routeSessionByPage.delete(pageId);
+    }
+    this.pagesByRouteSession.delete(routeSession);
+  }
+}
+
+function numericArg(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function isBlankPage(url: string): boolean {
+  return url === "about:blank" || url === "chrome://newtab/";
+}
+
+function parseJsonToolValue(output: string): string | null {
+  const jsonBlock = output.match(/```json\n([\s\S]*?)\n```/);
+  const raw = jsonBlock ? jsonBlock[1].trim() : output.trim();
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function resolveBridgeScript(importMetaDir: string): string {
@@ -440,14 +946,18 @@ async function handleCallRequest(
   client: BridgeClient,
   req: IncomingMessage,
   res: ServerResponse,
+  router?: BrowserPageRouter,
 ): Promise<void> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
-  const result = await client.callTool({
-    name: payload.name,
-    arguments: payload.args,
-  });
-  writeJson(res, 200, { result: extractToolText(getToolContent(result)) });
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const result = await client.callTool({ name, arguments: args });
+    return textFromToolResult(result);
+  };
+  const result = router
+    ? await router.run(payload, call)
+    : await call(payload.name, payload.args);
+  writeJson(res, 200, { result });
 }
 
 export async function handleBridgeRequest(
@@ -456,6 +966,7 @@ export async function handleBridgeRequest(
   res: ServerResponse,
   sessionName?: string,
   logForbidden?: (message: string) => void,
+  router?: BrowserPageRouter,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -506,7 +1017,7 @@ export async function handleBridgeRequest(
     }
 
     if (req.method === "POST" && req.url === "/call") {
-      await handleCallRequest(client, req, res);
+      await handleCallRequest(client, req, res, router);
       return;
     }
   } catch (error) {
@@ -521,6 +1032,7 @@ export function createBridgeServer(
   client: BridgeClient,
   sessionName?: string,
   idleWatchdog?: BridgeIdleWatchdog,
+  router?: BrowserPageRouter,
 ): Server {
   return createServer((req, res) => {
     touchPidFileActivity();
@@ -531,6 +1043,7 @@ export function createBridgeServer(
       res,
       sessionName,
       logBridgeMessage,
+      router,
     ).finally(() => {
       finishRequest?.();
     });
@@ -853,12 +1366,21 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
+  const router =
+    resolveBrowserPoolSize() === null
+      ? undefined
+      : new BrowserPageRouter(resolveRouteIdleTimeoutMs());
   let idleWatchdog: BridgeIdleWatchdog | undefined;
   const requestActivity: BridgeIdleWatchdog = {
     beginRequest: () => idleWatchdog?.beginRequest() ?? (() => {}),
     stop: () => idleWatchdog?.stop(),
   };
-  const server = createBridgeServer(client, sessionName, requestActivity);
+  const server = createBridgeServer(
+    client,
+    sessionName,
+    requestActivity,
+    router,
+  );
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);
   });

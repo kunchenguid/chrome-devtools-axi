@@ -32,6 +32,9 @@ describe("browser session diagnostics", () => {
   });
 
   function stateDir(session = "default"): string {
+    if (/^pool-\d+$/.test(session)) {
+      return join(home, ".chrome-devtools-axi", "pools", session);
+    }
     return session === "default"
       ? join(home, ".chrome-devtools-axi")
       : join(home, ".chrome-devtools-axi", "sessions", session);

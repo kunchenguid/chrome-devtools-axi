@@ -89,6 +89,11 @@ environment:
                                     run at once without colliding. Connection mode and profile are
                                     unchanged. Defaults to "default" (port 9224, legacy state paths).
                                     e.g. CHROME_DEVTOOLS_AXI_SESSION=worker-1
+  CHROME_DEVTOOLS_AXI_POOL_SIZE     Optional browser pool size. When set to a positive integer,
+                                    logical sessions keep separate refs/state but hash onto N shared
+                                    bridge/browser processes. The bridge routes each session to its
+                                    own page and pooled stop closes/blanks only that page. Unset or 0
+                                    preserves one bridge/browser per named session.
   CHROME_DEVTOOLS_AXI_BROWSER_URL   Connect to an existing Chrome instance instead of launching one.
                                     http(s):// uses --browserUrl (fetches /json/version).
                                     ws(s):// uses --wsEndpoint (direct WebSocket).
@@ -105,6 +110,11 @@ environment:
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
   CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
                                     Shut down an unused bridge and its browser after this many ms
+                                    (default: 1800000 / 30 minutes, min: 1000)
+  CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS
+                                    In pooled mode, release a logical session's routed pages after
+                                    this many ms without that session's browser activity, even if
+                                    other sessions keep the pooled bridge alive
                                     (default: 1800000 / 30 minutes, min: 1000)
 
 gpu:

@@ -12,9 +12,13 @@ import {
   resolveBridgeScript,
 } from "./bridge.js";
 import {
+  isBrowserPoolEnabled,
+  isPooledBridgeSessionName,
+  resolveBridgePidFile,
+  resolveBridgePidFileForBridgeSession,
+  resolveBridgePort,
+  resolveBridgeSessionName,
   resolveSessionName,
-  resolveSessionPidFile,
-  resolveSessionPort,
 } from "./sessions.js";
 
 const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
@@ -67,7 +71,7 @@ export interface PidInfo {
 }
 
 export function readPidFile(
-  pidFile: string = resolveSessionPidFile(),
+  pidFile: string = resolveBridgePidFile(),
 ): PidInfo | null {
   try {
     if (!existsSync(pidFile)) return null;
@@ -382,25 +386,26 @@ export async function ensureBridge(
   ) => SpawnedBridge = spawnBridgeProcess,
 ): Promise<number> {
   const sessionName = resolveSessionName();
-  const port = resolveSessionPort(sessionName);
-  const pidFile = resolveSessionPidFile(sessionName);
+  const bridgeSessionName = resolveBridgeSessionName(sessionName);
+  const port = resolveBridgePort(sessionName);
+  const pidFile = resolveBridgePidFile(sessionName);
 
   // Check existing bridge via PID file. Use a deep probe so a bridge whose
   // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
     const recordedSessionMatches =
-      pidInfo.session === undefined || pidInfo.session === sessionName;
+      pidInfo.session === undefined || pidInfo.session === bridgeSessionName;
     const shallowAny = await checkBridgeHealth(pidInfo.port);
     const shallowExpected = await checkBridgeHealth(pidInfo.port, {
-      expectedSession: sessionName,
+      expectedSession: bridgeSessionName,
     });
     const healthSessionMatches = !shallowAny || shallowExpected;
     if (recordedSessionMatches && healthSessionMatches) {
       if (
         await checkBridgeHealth(pidInfo.port, {
           deep: true,
-          expectedSession: sessionName,
+          expectedSession: bridgeSessionName,
         })
       ) {
         return pidInfo.port;
@@ -412,7 +417,7 @@ export async function ensureBridge(
   }
 
   // Start a new bridge
-  const child = spawnBridge(port, sessionName);
+  const child = spawnBridge(port, bridgeSessionName);
 
   // If the freshly spawned bridge dies before it reports healthy - an EADDRINUSE
   // port collision with another session, or a startup failure (npx/MCP launch,
@@ -441,7 +446,7 @@ export async function ensureBridge(
     if (
       await checkBridgeHealth(port, {
         deep: true,
-        expectedSession: sessionName,
+        expectedSession: bridgeSessionName,
       })
     ) {
       return port;
@@ -450,16 +455,21 @@ export async function ensureBridge(
       if (
         await checkBridgeHealth(port, {
           deep: true,
-          expectedSession: sessionName,
+          expectedSession: bridgeSessionName,
         })
       ) {
         return port;
       }
-      throw buildBridgeEarlyExitError(sessionName, port, exitCode, exitSignal);
+      throw buildBridgeEarlyExitError(
+        bridgeSessionName,
+        port,
+        exitCode,
+        exitSignal,
+      );
     }
     if (
       !sawShallowReady &&
-      (await checkBridgeHealth(port, { expectedSession: sessionName }))
+      (await checkBridgeHealth(port, { expectedSession: bridgeSessionName }))
     ) {
       sawShallowReady = true;
     }
@@ -510,9 +520,10 @@ export async function callTool(
   args: Record<string, unknown> = {},
 ): Promise<string> {
   const port = await ensureBridge();
+  const routeSession = resolveSessionName();
 
   try {
-    const resp = await httpPost(port, "/call", { name, args });
+    const resp = await httpPost(port, "/call", { name, args, routeSession });
     const data = JSON.parse(resp);
     if (data.error) {
       throw new Error(data.error);
@@ -567,10 +578,12 @@ export function mapErrorMessage(message: string): CdpError {
  */
 export async function getSessionSnapshotIfRunning(): Promise<string | null> {
   let sessionName: string;
+  let bridgeSessionName: string;
   let pidInfo: PidInfo | null;
   try {
     sessionName = resolveSessionName();
-    pidInfo = readPidFile(resolveSessionPidFile(sessionName));
+    bridgeSessionName = resolveBridgeSessionName(sessionName);
+    pidInfo = readPidFile(resolveBridgePidFile(sessionName));
   } catch {
     return null;
   }
@@ -578,7 +591,9 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     return null;
   }
   if (
-    !(await checkBridgeHealth(pidInfo.port, { expectedSession: sessionName }))
+    !(await checkBridgeHealth(pidInfo.port, {
+      expectedSession: bridgeSessionName,
+    }))
   ) {
     return null;
   }
@@ -586,7 +601,7 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     const resp = await httpPost(
       pidInfo.port,
       "/call",
-      { name: "take_snapshot", args: {} },
+      { name: "take_snapshot", args: {}, routeSession: sessionName },
       5000,
     );
     const data = JSON.parse(resp);
@@ -621,13 +636,33 @@ export type StopBridgeSessionResult =
 export async function stopBridgeSession(
   sessionName: string = resolveSessionName(),
 ): Promise<StopBridgeSessionResult> {
-  const pidInfo = readPidFile(resolveSessionPidFile(sessionName));
+  const isPoolBridgeSession = isPooledBridgeSessionName(sessionName);
+  const pidInfo = readPidFile(
+    isPoolBridgeSession
+      ? resolveBridgePidFileForBridgeSession(sessionName)
+      : resolveBridgePidFile(sessionName),
+  );
   if (!pidInfo) return "not-running";
   if (!isProcessAlive(pidInfo.pid)) return "not-running";
   if (pidInfo.session !== undefined && pidInfo.session !== sessionName) {
     return "session-mismatch";
   }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
+
+  if (isBrowserPoolEnabled() && !isPoolBridgeSession) {
+    try {
+      await httpPost(
+        pidInfo.port,
+        "/call",
+        { name: "__axi_release_session", args: {}, routeSession: sessionName },
+        10_000,
+      );
+      return "stopped";
+    } catch {
+      return "not-running";
+    }
+  }
+
   await terminateBridgeProcess(pidInfo.pid, {
     killProcessGroup: true,
   });

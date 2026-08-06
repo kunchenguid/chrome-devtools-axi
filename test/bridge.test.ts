@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  BrowserPageRouter,
   DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+  DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
   buildTransportArgs,
   createBridgeIdleWatchdog,
   createBridgeServer,
@@ -26,6 +28,7 @@ import {
   removePidFile,
   resolveBridgeIdleTimeoutMs,
   resolveBridgeScript,
+  resolveRouteIdleTimeoutMs,
   resolveTransportSpec,
   MCP_PACKAGE_SPEC,
   type BridgeClient,
@@ -52,6 +55,13 @@ describe("bridge idle lifecycle", () => {
     expect(resolveBridgeIdleTimeoutMs("60000")).toBe(60_000);
     expect(() => resolveBridgeIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
     expect(() => resolveBridgeIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
+  });
+
+  it("defaults route idle release to the bridge idle window and validates overrides", () => {
+    expect(resolveRouteIdleTimeoutMs("")).toBe(DEFAULT_ROUTE_IDLE_TIMEOUT_MS);
+    expect(resolveRouteIdleTimeoutMs("60000")).toBe(60_000);
+    expect(() => resolveRouteIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
+    expect(() => resolveRouteIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
   });
 
   it("shuts down after inactivity but never during an active request", async () => {
@@ -140,6 +150,18 @@ describe("parseBridgeCallPayload", () => {
     expect(result).toEqual({ name: "take_snapshot", args: {} });
   });
 
+  it("accepts an optional logical route session", () => {
+    const result = parseBridgeCallPayload(
+      '{"name":"take_snapshot","args":{},"routeSession":"worker-1"}',
+    );
+
+    expect(result).toEqual({
+      name: "take_snapshot",
+      args: {},
+      routeSession: "worker-1",
+    });
+  });
+
   it("rejects payloads without a tool name", () => {
     expect(() => parseBridgeCallPayload('{"args":{}}')).toThrow(
       "Invalid bridge request payload",
@@ -150,6 +172,380 @@ describe("parseBridgeCallPayload", () => {
     expect(() => parseBridgeCallPayload("{")).toThrow(
       "Invalid bridge request payload",
     );
+  });
+});
+
+describe("BrowserPageRouter", () => {
+  class FakeMcpPages {
+    pages = [{ id: 0, url: "about:blank", selected: true }];
+    markers = new Map<number, string>();
+    calls: { name: string; args: Record<string, unknown> }[] = [];
+
+    async call(name: string, args: Record<string, unknown>): Promise<string> {
+      this.calls.push({ name, args });
+      if (name === "list_pages") {
+        return this.pages
+          .map(
+            (page) =>
+              `${page.id}: ${page.url}${page.selected ? " [selected]" : ""}`,
+          )
+          .join("\n");
+      }
+      if (name === "select_page") {
+        const pageId = args.pageId as number;
+        this.pages = this.pages.map((page) => ({
+          ...page,
+          selected: page.id === pageId,
+        }));
+        return "";
+      }
+      if (name === "new_page") {
+        const nextId = Math.max(...this.pages.map((page) => page.id)) + 1;
+        const background = args.background === true;
+        this.pages = this.pages.map((page) => ({
+          ...page,
+          selected: background ? page.selected : false,
+        }));
+        this.pages.push({
+          id: nextId,
+          url: String(args.url),
+          selected: !background,
+        });
+        return "";
+      }
+      if (name === "navigate_page") {
+        const selected = this.pages.find((page) => page.selected);
+        if (selected) selected.url = String(args.url);
+        return "";
+      }
+      if (name === "evaluate_script") {
+        const selected = this.pages.find((page) => page.selected);
+        const source = String(args.function);
+        const assignment = source.match(/=\s*"([^"]+)";\s*return true/);
+        if (selected && assignment) {
+          this.markers.set(selected.id, assignment[1]);
+          return "Script ran on page and returned:\n```json\ntrue\n```";
+        }
+        const marker = selected ? this.markers.get(selected.id) : undefined;
+        return `Script ran on page and returned:\n\`\`\`json\n${JSON.stringify(marker ?? null)}\n\`\`\``;
+      }
+      if (name === "close_page") {
+        const pageId = args.pageId as number;
+        this.pages = this.pages.filter((page) => page.id !== pageId);
+        this.markers.delete(pageId);
+        if (!this.pages.some((page) => page.selected) && this.pages[0]) {
+          this.pages[0].selected = true;
+        }
+        return "";
+      }
+      if (name === "take_snapshot") {
+        return `snapshot:${this.pages.find((page) => page.selected)?.id}`;
+      }
+      return "";
+    }
+  }
+
+  it("routes different logical sessions to different pages in one bridge", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    const snapshotA = await router.run(
+      { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(snapshotA).toBe("snapshot:0");
+    expect(fake.pages).toEqual([
+      { id: 0, url: "https://a.example/", selected: true },
+      { id: 1, url: "https://b.example/", selected: false },
+    ]);
+  });
+
+  it("lists only pages owned by the requesting route", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const pagesA = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(pagesA).toContain("0: https://a.example/ [selected]");
+    expect(pagesA).not.toContain("https://b.example/");
+  });
+
+  it("selects a survivor before closing the selected page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "new_page",
+        args: { url: "https://a2.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      { name: "select_page", args: { pageId: 0 }, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    fake.calls = [];
+    await router.run(
+      { name: "close_page", args: { pageId: 0 }, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    const closeIndex = fake.calls.findIndex(
+      (call) => call.name === "close_page",
+    );
+    const selectBeforeClose = fake.calls
+      .slice(0, closeIndex)
+      .some((call) => call.name === "select_page" && call.args.pageId === 1);
+    expect(selectBeforeClose).toBe(true);
+    expect(fake.pages).toEqual([
+      { id: 1, url: "https://a2.example/", selected: true },
+    ]);
+  });
+
+  it("fails closed when a route selects or closes another route's page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    await expect(
+      router.run(
+        { name: "select_page", args: { pageId: 0 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      router.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    expect(fake.pages.some((page) => page.id === 0)).toBe(true);
+  });
+
+  it("keeps background new pages owned without making them active", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "new_page",
+        args: { url: "https://background.example/", background: true },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const pages = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    const snapshot = await router.run(
+      { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(pages).toContain("0: https://a.example/ [selected]");
+    expect(pages).toContain("1: https://background.example/");
+    expect(snapshot).toBe("snapshot:0");
+  });
+
+  it("releases a routed session by closing its page when a survivor exists", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const result = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(result).toContain("closed 1");
+    expect(fake.pages).toEqual([
+      { id: 1, url: "https://b.example/", selected: true },
+    ]);
+  });
+
+  it("releases the last routed session by blanking the last page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://only.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const result = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(result).toContain("blanked 1");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("recovers marked page ownership after bridge router restart", async () => {
+    const firstRouter = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await firstRouter.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await firstRouter.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const restartedRouter = new BrowserPageRouter();
+    const pagesA = await restartedRouter.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(pagesA).toContain("https://a.example/");
+    expect(pagesA).not.toContain("https://b.example/");
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+  });
+
+  it("releases an idle route even while another route keeps the bridge alive", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(1000);
+      const fake = new FakeMcpPages();
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://b.example/" },
+          routeSession: "worker-b",
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await router.run(
+        { name: "take_snapshot", args: {}, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(fake.pages).toEqual([
+        { id: 1, url: "https://b.example/", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

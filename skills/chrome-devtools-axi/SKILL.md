@@ -33,6 +33,8 @@ Skip it when a plain `fetch`/`curl` suffices - ordinary web search, curl-able pa
 6. Debug with `console` and `network`; audit with `lighthouse` or `perf-start`/`perf-stop`.
 7. Every response ends with contextual next-step hints - follow them. The first command auto-starts a persistent bridge, so the browser session survives across invocations; run `stop` when you are done.
 
+For many concurrent agents, set `CHROME_DEVTOOLS_AXI_POOL_SIZE=<N>` before launching them. Named sessions still keep separate refs/state, but share at most N bridge/browser processes; `stop` releases only that session's routed pages in pooled mode, and `CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS` bounds abandoned routed pages even when other sessions keep the pooled bridge alive.
+
 ## Commands
 
 ```
