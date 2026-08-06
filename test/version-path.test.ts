@@ -34,16 +34,30 @@ beforeAll(() => {
   }
 }, 120_000);
 
-function medianMs(args: string[], runs = 7): number {
-  const samples: number[] = [];
+function elapsedMs(args: string[]): number {
+  const started = process.hrtime.bigint();
+  const result = spawnSync(process.execPath, args, { encoding: "utf8" });
+  expect(result.status).toBe(0);
+  return Number(process.hrtime.bigint() - started) / 1e6;
+}
+
+function lowContentionDeltaMs(actualArgs: string[], runs = 11): number {
+  const floorArgs = ["-e", "console.log(1)"];
+  const deltas: number[] = [];
   for (let i = 0; i < runs; i++) {
-    const started = process.hrtime.bigint();
-    const result = spawnSync(process.execPath, args, { encoding: "utf8" });
-    samples.push(Number(process.hrtime.bigint() - started) / 1e6);
-    expect(result.status).toBe(0);
+    // Keep each floor measurement adjacent to the command it controls for.
+    // Alternating the order also avoids consistently charging the second
+    // process for short-lived load or temperature changes on shared runners.
+    const floorFirst = i % 2 === 0;
+    const first = elapsedMs(floorFirst ? floorArgs : actualArgs);
+    const second = elapsedMs(floorFirst ? actualArgs : floorArgs);
+    deltas.push(floorFirst ? second - first : first - second);
   }
-  samples.sort((a, b) => a - b);
-  return samples[Math.floor(samples.length / 2)]!;
+  deltas.sort((a, b) => a - b);
+  // Wall-clock process timings include unrelated scheduler delays. Use the
+  // lower quartile rather than a single minimum so several observations must
+  // demonstrate the fast path while contended samples cannot dominate it.
+  return deltas[Math.floor((deltas.length - 1) / 4)]!;
 }
 
 function traceModules(
@@ -94,9 +108,7 @@ describe("--version path", () => {
     // node floor in the same process and assert the delta. Post-fix overhead is
     // ~3-5ms; 15ms leaves headroom for slow CI while still catching a heavy
     // static import (axi-sdk-js alone is ~5.5ms, the MCP SDK ~45ms).
-    const floor = medianMs(["-e", "console.log(1)"]);
-    const actual = medianMs([CLI_BIN, "--version"]);
-    expect(actual - floor).toBeLessThan(15);
+    expect(lowContentionDeltaMs([CLI_BIN, "--version"])).toBeLessThan(15);
   }, 60_000);
 
   it("does not load the MCP SDK", () => {
