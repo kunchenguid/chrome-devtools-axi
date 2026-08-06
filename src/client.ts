@@ -6,17 +6,30 @@ import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
 import { AxiError } from "axi-sdk-js";
-import { BRIDGE_PORT_IN_USE_EXIT_CODE, resolveBridgeScript } from "./bridge.js";
 import {
+  AMBIENT_SNAPSHOT_TOOL,
+  BRIDGE_PORT_IN_USE_EXIT_CODE,
+  MCP_PACKAGE_SPEC,
+  resolveBridgeIdleTimeoutMs,
+  resolveBridgeScript,
+  resolveRouteIdleTimeoutMs,
+  validateBrowserPoolConnectionMode,
+} from "./bridge.js";
+import {
+  isBrowserPoolEnabled,
+  resolveBridgePidFile,
+  resolveBridgePidFileForBridgeSession,
+  resolveBridgePort,
+  resolveBridgeSessionName,
   resolveSessionName,
-  resolveSessionPidFile,
-  resolveSessionPort,
 } from "./sessions.js";
 
 const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
 const MIN_BRIDGE_TIMEOUT_MS = 1_000;
 const HEALTH_TIMEOUT_MS = 2_000;
 const DEEP_HEALTH_TIMEOUT_MS = 5_000;
+const TARGET_LOSS_CONFIRMATION_ATTEMPTS = 2;
+const TARGET_LOSS_CONFIRMATION_DELAY_MS = 250;
 
 /**
  * Resolve the bridge readiness deadline in milliseconds.
@@ -53,13 +66,18 @@ export class CdpError extends AxiError {
   }
 }
 
-interface PidInfo {
+export interface PidInfo {
   pid: number;
   port: number;
+  session?: string;
+  instanceId?: string;
+  startedAt?: string;
+  lastActivityAt?: string;
+  owner?: unknown;
 }
 
-function readPidFile(
-  pidFile: string = resolveSessionPidFile(),
+export function readPidFile(
+  pidFile: string = resolveBridgePidFile(),
 ): PidInfo | null {
   try {
     if (!existsSync(pidFile)) return null;
@@ -73,7 +91,7 @@ function readPidFile(
   }
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -89,7 +107,14 @@ function httpGet(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = request(
-      { hostname: "127.0.0.1", port, path, method: "GET", timeout: timeoutMs },
+      {
+        hostname: "127.0.0.1",
+        port,
+        path,
+        method: "GET",
+        timeout: timeoutMs,
+        headers: idleTimeoutHeaders(),
+      },
       (res) => {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
@@ -123,6 +148,7 @@ function httpPost(
         headers: {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(payload),
+          ...idleTimeoutHeaders(),
         },
       },
       (res) => {
@@ -147,6 +173,23 @@ function httpPost(
   });
 }
 
+function idleTimeoutHeaders(): Record<string, string> {
+  const value = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  return value ? { "X-Axi-Idle-Timeout-Ms": value } : {};
+}
+
+/**
+ * Apply the caller's effective bridge idle policy to its pooled logical route
+ * as well. This makes explicit CLI timeouts and persisted agent-session
+ * policies reclaim route-owned pages without shortening unrelated active work.
+ */
+export function requestedRouteIdleTimeoutMs(): number | undefined {
+  const callerValue = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  if (callerValue) return resolveBridgeIdleTimeoutMs(callerValue);
+  const routeValue = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+  return routeValue ? resolveRouteIdleTimeoutMs(routeValue) : undefined;
+}
+
 /**
  * Probe the bridge's `/health` endpoint. With `deep: true`, asks the bridge
  * to drive one CDP-backed MCP call (`list_pages`) so callers can distinguish
@@ -162,22 +205,109 @@ function httpPost(
  */
 export async function checkBridgeHealth(
   port: number,
-  opts: { deep?: boolean; expectedSession?: string } = {},
+  opts: {
+    deep?: boolean;
+    expectedSession?: string;
+    expectedInstanceId?: string;
+    expectedPid?: number;
+  } = {},
 ): Promise<boolean> {
+  return (await probeBridgeHealth(port, opts)).status === "ok";
+}
+
+export type BridgeHealthProbe =
+  | { status: "ok" }
+  | { status: "target-unreachable"; reason?: string }
+  | { status: "unhealthy" }
+  | { status: "identity-mismatch" }
+  | { status: "unreachable" };
+
+export async function probeBridgeHealth(
+  port: number,
+  opts: {
+    deep?: boolean;
+    expectedSession?: string;
+    expectedInstanceId?: string;
+    expectedPid?: number;
+  } = {},
+): Promise<BridgeHealthProbe> {
   try {
     const path = opts.deep ? "/health?deep=1" : "/health";
     const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
     const resp = await httpGet(port, path, timeoutMs);
     const data = JSON.parse(resp);
-    if (data.status !== "ok") return false;
     if (
       opts.expectedSession !== undefined &&
       typeof data.session === "string" &&
       data.session !== opts.expectedSession
     ) {
-      return false;
+      return { status: "identity-mismatch" };
     }
-    return true;
+    if (
+      opts.expectedInstanceId !== undefined &&
+      data.instanceId !== opts.expectedInstanceId
+    ) {
+      return { status: "identity-mismatch" };
+    }
+    if (opts.expectedPid !== undefined && data.pid !== opts.expectedPid) {
+      return { status: "identity-mismatch" };
+    }
+    if (data.status === "ok") return { status: "ok" };
+    if (opts.deep && data.error === "CDP target unreachable") {
+      return {
+        status: "target-unreachable",
+        ...(typeof data.reason === "string" ? { reason: data.reason } : {}),
+      };
+    }
+    return { status: "unhealthy" };
+  } catch {
+    return { status: "unreachable" };
+  }
+}
+
+export async function confirmBridgeTargetUnreachable(
+  port: number,
+  opts: {
+    expectedSession?: string;
+    expectedInstanceId?: string;
+    expectedPid?: number;
+  },
+  attempts = TARGET_LOSS_CONFIRMATION_ATTEMPTS,
+  delayMs = TARGET_LOSS_CONFIRMATION_DELAY_MS,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await sleep(delayMs);
+    const probe = await probeBridgeHealth(port, { ...opts, deep: true });
+    if (probe.status !== "target-unreachable") return false;
+  }
+  return true;
+}
+
+export async function checkBridgeIdentity(
+  port: number,
+  expected: { session: string; instanceId: string; pid: number },
+): Promise<boolean> {
+  try {
+    const data = JSON.parse(await httpGet(port, "/health", HEALTH_TIMEOUT_MS));
+    return (
+      data.session === expected.session &&
+      data.instanceId === expected.instanceId &&
+      data.pid === expected.pid
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function requestAuthenticatedBridgeShutdown(
+  port: number,
+  instanceId: string,
+): Promise<boolean> {
+  try {
+    const data = JSON.parse(
+      await httpPost(port, "/shutdown", { instanceId }, 5_000),
+    );
+    return data.status === "shutting-down";
   } catch {
     return false;
   }
@@ -199,16 +329,36 @@ export async function waitForProcessExit(
   return !isProcessAlive(pid);
 }
 
-function isBridgeProcess(pid: number): boolean {
+export function isBridgeProcess(pid: number): boolean {
   try {
-    const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
-      encoding: "utf-8",
-      timeout: 1000,
-    });
+    const command = readProcessCommand(pid);
     return command.includes("chrome-devtools-axi-bridge");
   } catch {
     return false;
   }
+}
+
+export function readProcessCommand(
+  pid: number,
+  platform = process.platform,
+  run: typeof execFileSync = execFileSync,
+): string {
+  if (platform === "win32") {
+    return run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\").CommandLine`,
+      ],
+      { encoding: "utf-8", timeout: 1000 },
+    );
+  }
+  return run("ps", ["-p", String(pid), "-o", "command="], {
+    encoding: "utf-8",
+    timeout: 1000,
+  });
 }
 
 /**
@@ -224,6 +374,23 @@ export async function terminateBridgeProcess(
 ): Promise<void> {
   if (!isProcessAlive(pid)) return;
   const killProcessGroup = opts.killProcessGroup === true;
+
+  if (process.platform === "win32" && killProcessGroup) {
+    try {
+      execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        timeout: 5000,
+        stdio: "ignore",
+      });
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        return;
+      }
+    }
+    await waitForProcessExit(pid, 1000);
+    return;
+  }
 
   // Give the bridge a chance to run its own shutdown handler (which kills its
   // process group on `exit`).
@@ -287,23 +454,29 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
   const script = existsSync(bridgeScript.replace(/\.js$/, ".ts"))
     ? bridgeScript.replace(/\.js$/, ".ts")
     : bridgeScript;
-  const runner = script.endsWith(".ts") ? "tsx" : "node";
+  const launch = resolveBridgeLaunchCommand(script);
 
-  const child = spawn(
-    runner === "tsx" ? "npx" : "node",
-    runner === "tsx" ? ["tsx", script] : [script],
-    {
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        CHROME_DEVTOOLS_AXI_PORT: String(port),
-        CHROME_DEVTOOLS_AXI_SESSION: sessionName,
-      },
-      detached: true,
+  const child = spawn(launch.command, launch.args, {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      CHROME_DEVTOOLS_AXI_PORT: String(port),
+      CHROME_DEVTOOLS_AXI_SESSION: sessionName,
     },
-  );
+    detached: true,
+  });
   child.unref();
   return child;
+}
+
+export function resolveBridgeLaunchCommand(script: string): {
+  command: string;
+  args: string[];
+} {
+  return {
+    command: process.execPath,
+    args: script.endsWith(".ts") ? ["--import", "tsx", script] : [script],
+  };
 }
 
 /**
@@ -314,10 +487,11 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
  *
  * The guidance is attributed by exit code. Only {@link BRIDGE_PORT_IN_USE_EXIT_CODE}
  * (the bridge's EADDRINUSE sentinel) gets the port-in-use explanation; any
- * other early death is a startup failure (npx could not resolve/download
- * chrome-devtools-mcp, a broken `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a
- * Chrome launch failure) and gets the generic startup guidance, so a
- * single-session user with a broken install is not misdirected to port advice.
+ * other early death is a startup failure (packaged MCP could not start, the
+ * pinned npx fallback could not resolve/download chrome-devtools-mcp, a broken
+ * `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a Chrome launch failure) and gets the
+ * generic startup guidance, so a single-session user with a broken install is
+ * not misdirected to port advice.
  */
 export function buildBridgeEarlyExitError(
   sessionName: string,
@@ -339,7 +513,7 @@ export function buildBridgeEarlyExitError(
   }
 
   const suggestions = [
-    "Check that chrome-devtools-mcp can start: npx chrome-devtools-mcp@latest --help",
+    "Reinstall chrome-devtools-axi so its packaged MCP dependency is present.",
   ];
   if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH) {
     suggestions.push(
@@ -347,8 +521,7 @@ export function buildBridgeEarlyExitError(
     );
   } else {
     suggestions.push(
-      "`npx -y chrome-devtools-mcp@latest` may have failed to resolve/download the package (offline, or a slow cold first run); install it globally and set:",
-      '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
+      `If the packaged dependency is unavailable, check the pinned fallback directly: npx -y ${MCP_PACKAGE_SPEC} --help`,
     );
   }
   suggestions.push(
@@ -361,9 +534,10 @@ export function buildBridgeEarlyExitError(
  * Ensure the bridge is running, starting it if needed. Returns the port.
  *
  * Verifies a *deep* health check (one round-trip CDP-backed MCP call) before
- * declaring the bridge ready, so a bridge whose attached browser/Electron
- * target was killed while still answering local /health requests gets torn
- * down + restarted instead of being reused as a stale endpoint.
+ * declaring the bridge ready. Automatic replacement requires the recorded
+ * session/instance/PID identity and repeated target-unreachable probes; other
+ * deep-health failures preserve the existing bridge because another route may
+ * still be active.
  *
  * `spawnBridge` is injectable for tests; production uses {@link spawnBridgeProcess}.
  */
@@ -373,29 +547,82 @@ export async function ensureBridge(
     sessionName: string,
   ) => SpawnedBridge = spawnBridgeProcess,
 ): Promise<number> {
+  validateBrowserPoolConnectionMode();
   const sessionName = resolveSessionName();
-  const port = resolveSessionPort(sessionName);
-  const pidFile = resolveSessionPidFile(sessionName);
+  const bridgeSessionName = resolveBridgeSessionName(sessionName);
+  const port = resolveBridgePort(sessionName);
+  const pidFile = resolveBridgePidFile(sessionName);
 
-  // Check existing bridge via PID file. Use a deep probe so a bridge whose
-  // attached CDP target has gone away gets recycled instead of returned.
+  // Check the existing bridge via its PID file. Recycle it only after exact
+  // identity and repeated deep probes confirm persistent CDP target loss.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
-    if (
-      await checkBridgeHealth(pidInfo.port, {
-        deep: true,
-        expectedSession: sessionName,
-      })
-    ) {
-      return pidInfo.port;
-    }
-    await terminateBridgeProcess(pidInfo.pid, {
-      killProcessGroup: isBridgeProcess(pidInfo.pid),
+    const recordedSessionMatches =
+      pidInfo.session === undefined || pidInfo.session === bridgeSessionName;
+    const shallowAny = await checkBridgeHealth(pidInfo.port);
+    const identityOptions =
+      pidInfo.instanceId === undefined
+        ? {}
+        : {
+            expectedInstanceId: pidInfo.instanceId,
+            expectedPid: pidInfo.pid,
+          };
+    const shallowExpected = await checkBridgeHealth(pidInfo.port, {
+      expectedSession: bridgeSessionName,
+      ...identityOptions,
     });
+    const healthSessionMatches = !shallowAny || shallowExpected;
+    if (recordedSessionMatches && healthSessionMatches) {
+      const deepOptions = {
+        expectedSession: bridgeSessionName,
+        ...identityOptions,
+      };
+      const deepProbe = await probeBridgeHealth(pidInfo.port, {
+        ...deepOptions,
+        deep: true,
+      });
+      if (deepProbe.status === "ok") {
+        return pidInfo.port;
+      }
+      const identityMatches =
+        pidInfo.instanceId !== undefined &&
+        (await checkBridgeIdentity(pidInfo.port, {
+          session: bridgeSessionName,
+          instanceId: pidInfo.instanceId,
+          pid: pidInfo.pid,
+        }));
+      const targetLossConfirmed =
+        deepProbe.status === "target-unreachable" &&
+        identityMatches &&
+        (await confirmBridgeTargetUnreachable(pidInfo.port, deepOptions));
+      if (targetLossConfirmed && pidInfo.instanceId !== undefined) {
+        const shutdownAccepted = await requestAuthenticatedBridgeShutdown(
+          pidInfo.port,
+          pidInfo.instanceId,
+        );
+        const exited =
+          shutdownAccepted && (await waitForProcessExit(pidInfo.pid, 5_000));
+        if (!exited) {
+          throw new CdpError(
+            "The stale bridge accepted shutdown but did not exit before its deadline",
+            "BRIDGE_NOT_READY",
+            ["Retry after the bridge process has exited."],
+          );
+        }
+      } else if (shallowExpected) {
+        throw new CdpError(
+          "The bridge target health check failed without confirmed persistent target loss",
+          "BRIDGE_NOT_READY",
+          [
+            "Retry the command; the bridge was preserved because another route may still be active.",
+          ],
+        );
+      }
+    }
   }
 
   // Start a new bridge
-  const child = spawnBridge(port, sessionName);
+  const child = spawnBridge(port, bridgeSessionName);
 
   // If the freshly spawned bridge dies before it reports healthy - an EADDRINUSE
   // port collision with another session, or a startup failure (npx/MCP launch,
@@ -411,7 +638,8 @@ export async function ensureBridge(
     exitSignal = signal;
   });
 
-  // Poll for health — Chrome launch + npx bootstrap can be slow.
+  // Poll for health — Chrome launch can be slow, and broken installs may hit
+  // the slower pinned npx fallback.
   // Track whether the *shallow* health check ever passed so we can attribute
   // the failure correctly: shallow-but-no-deep means the MCP server came up
   // but the attached CDP target is dead, vs. nothing-came-up which is the
@@ -423,7 +651,7 @@ export async function ensureBridge(
     if (
       await checkBridgeHealth(port, {
         deep: true,
-        expectedSession: sessionName,
+        expectedSession: bridgeSessionName,
       })
     ) {
       return port;
@@ -432,16 +660,21 @@ export async function ensureBridge(
       if (
         await checkBridgeHealth(port, {
           deep: true,
-          expectedSession: sessionName,
+          expectedSession: bridgeSessionName,
         })
       ) {
         return port;
       }
-      throw buildBridgeEarlyExitError(sessionName, port, exitCode, exitSignal);
+      throw buildBridgeEarlyExitError(
+        bridgeSessionName,
+        port,
+        exitCode,
+        exitSignal,
+      );
     }
     if (
       !sawShallowReady &&
-      (await checkBridgeHealth(port, { expectedSession: sessionName }))
+      (await checkBridgeHealth(port, { expectedSession: bridgeSessionName }))
     ) {
       sawShallowReady = true;
     }
@@ -462,14 +695,16 @@ export async function ensureBridge(
     );
   }
 
-  const usingNpx = !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
   const suggestions = [
-    "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
+    "Reinstall chrome-devtools-axi so its packaged MCP dependency is present.",
   ];
-  if (usingNpx) {
+  if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH) {
     suggestions.push(
-      "If `npx -y chrome-devtools-mcp@latest` is slow on this machine, install mcp globally and set:",
-      '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
+      "Verify CHROME_DEVTOOLS_AXI_MCP_PATH points to a valid chrome-devtools-mcp build.",
+    );
+  } else {
+    suggestions.push(
+      `If the packaged dependency is unavailable, check the pinned fallback directly: npx -y ${MCP_PACKAGE_SPEC} --help`,
     );
   }
   suggestions.push(
@@ -490,9 +725,15 @@ export async function callTool(
   args: Record<string, unknown> = {},
 ): Promise<string> {
   const port = await ensureBridge();
+  const routeSession = resolveSessionName();
 
   try {
-    const resp = await httpPost(port, "/call", { name, args });
+    const resp = await httpPost(port, "/call", {
+      name,
+      args,
+      routeSession,
+      routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
+    });
     const data = JSON.parse(resp);
     if (data.error) {
       throw new Error(data.error);
@@ -547,10 +788,12 @@ export function mapErrorMessage(message: string): CdpError {
  */
 export async function getSessionSnapshotIfRunning(): Promise<string | null> {
   let sessionName: string;
+  let bridgeSessionName: string;
   let pidInfo: PidInfo | null;
   try {
     sessionName = resolveSessionName();
-    pidInfo = readPidFile(resolveSessionPidFile(sessionName));
+    bridgeSessionName = resolveBridgeSessionName(sessionName);
+    pidInfo = readPidFile(resolveBridgePidFile(sessionName));
   } catch {
     return null;
   }
@@ -558,7 +801,9 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     return null;
   }
   if (
-    !(await checkBridgeHealth(pidInfo.port, { expectedSession: sessionName }))
+    !(await checkBridgeHealth(pidInfo.port, {
+      expectedSession: bridgeSessionName,
+    }))
   ) {
     return null;
   }
@@ -566,7 +811,12 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     const resp = await httpPost(
       pidInfo.port,
       "/call",
-      { name: "take_snapshot", args: {} },
+      {
+        name: isBrowserPoolEnabled() ? AMBIENT_SNAPSHOT_TOOL : "take_snapshot",
+        args: {},
+        routeSession: sessionName,
+        routeIdleTimeoutMs: requestedRouteIdleTimeoutMs(),
+      },
       5000,
     );
     const data = JSON.parse(resp);
@@ -578,17 +828,108 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
 }
 
 /**
- * Stop the bridge process. Waits for the bridge PID to actually exit (bounded
- * poll, ~2s) before escalating to SIGKILL on the entire detached process
- * group, so chrome-devtools-mcp + Chrome children get reaped together rather
- * than orphaned. Resolves once the bridge process is gone.
+ * Stop the active logical session. In unpooled mode this terminates the bridge
+ * process and reaps its MCP/Chrome process group; in pooled mode it releases
+ * only the caller's owned pages and leaves the shared bridge running.
  */
 export async function stopBridge(): Promise<boolean> {
-  const pidInfo = readPidFile();
-  if (!pidInfo) return false;
-  if (!isProcessAlive(pidInfo.pid)) return false;
-  await terminateBridgeProcess(pidInfo.pid, {
-    killProcessGroup: isBridgeProcess(pidInfo.pid),
-  });
-  return true;
+  return (await stopBridgeSession()) === "stopped";
+}
+
+export type StopBridgeSessionResult =
+  | "stopped"
+  | "not-running"
+  | "not-bridge"
+  | "session-mismatch"
+  | "shutdown-timeout";
+
+export type StopBridgeSessionTarget = "logical" | "dedicated" | "physical-pool";
+
+/**
+ * Stop one logical session after validating that its PID file still points at
+ * the expected chrome-devtools-axi bridge process. The target distinguishes a
+ * logical pooled route from diagnostics that intentionally stop a dedicated
+ * or physical pool-slot bridge. Physical stops use an instance-ID-authenticated
+ * self-shutdown request, so cleanup never sends a terminating signal to a PID
+ * after it can be reused.
+ * Logical route release remains compatible with legacy pooled bridges that do
+ * not report an instance ID because it never terminates the physical process.
+ */
+export async function stopBridgeSession(
+  sessionName: string = resolveSessionName(),
+  opts: { target?: StopBridgeSessionTarget; physicalPool?: boolean } = {},
+): Promise<StopBridgeSessionResult> {
+  const target = opts.physicalPool
+    ? "physical-pool"
+    : (opts.target ?? "logical");
+  const isPhysicalPool = target === "physical-pool";
+  const isDedicated = target === "dedicated";
+  const bridgeSessionName =
+    isPhysicalPool || isDedicated
+      ? sessionName
+      : resolveBridgeSessionName(sessionName);
+  const pidInfo = readPidFile(
+    isPhysicalPool
+      ? resolveBridgePidFileForBridgeSession(sessionName, true)
+      : isDedicated
+        ? resolveBridgePidFileForBridgeSession(sessionName, false)
+        : resolveBridgePidFile(sessionName),
+  );
+  if (!pidInfo) return "not-running";
+  if (!isProcessAlive(pidInfo.pid)) return "not-running";
+  if (pidInfo.session !== undefined && pidInfo.session !== bridgeSessionName) {
+    return "session-mismatch";
+  }
+  if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
+
+  if (target === "logical" && isBrowserPoolEnabled()) {
+    const identityMatches =
+      pidInfo.instanceId === undefined
+        ? await checkBridgeHealth(pidInfo.port, {
+            expectedSession: bridgeSessionName,
+          })
+        : await checkBridgeIdentity(pidInfo.port, {
+            session: bridgeSessionName,
+            instanceId: pidInfo.instanceId,
+            pid: pidInfo.pid,
+          });
+    if (!identityMatches) return "not-bridge";
+    try {
+      await httpPost(
+        pidInfo.port,
+        "/call",
+        {
+          name: "__axi_release_session",
+          args: {},
+          routeSession: sessionName,
+        },
+        10_000,
+      );
+      return "stopped";
+    } catch {
+      return "not-running";
+    }
+  }
+
+  if (
+    pidInfo.instanceId === undefined ||
+    !(await checkBridgeIdentity(pidInfo.port, {
+      session: bridgeSessionName,
+      instanceId: pidInfo.instanceId,
+      pid: pidInfo.pid,
+    }))
+  ) {
+    return "not-bridge";
+  }
+  if (
+    !(await requestAuthenticatedBridgeShutdown(
+      pidInfo.port,
+      pidInfo.instanceId,
+    ))
+  ) {
+    return "not-running";
+  }
+  return (await waitForProcessExit(pidInfo.pid, 5_000))
+    ? "stopped"
+    : "shutdown-timeout";
 }

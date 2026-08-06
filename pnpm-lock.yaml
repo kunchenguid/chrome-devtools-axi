@@ -16,6 +16,9 @@ importers:
       axi-sdk-js:
         specifier: ^0.1.8
         version: 0.1.8
+      chrome-devtools-mcp:
+        specifier: 1.6.0
+        version: 1.6.0(@toon-format/toon@2.1.0)
     devDependencies:
       "@types/node":
         specifier: ^22.0.0
@@ -678,6 +681,22 @@ packages:
         integrity: sha512-PAJdDJusoxnwm1VwW07VWwUN1sl7smmC3OKggvndJFadxxDRyFJBX/ggnu/KE4kQAB7a3Dp8f/YXC1FlUprWmA==,
       }
     engines: { node: ">= 16" }
+
+  chrome-devtools-mcp@1.6.0:
+    resolution:
+      {
+        integrity: sha512-VZX6f/OjQSYhy2BGGRs+y3LsrsAQAz/HwZCWKBLVyST/4r/3zjVEjjVW7gMCVbRDuspnVdcp5hQDPrQ5UFrdZw==,
+      }
+    engines: { node: ^20.19.0 || ^22.12.0 || >=23 }
+    hasBin: true
+    peerDependencies:
+      "@blackwell-systems/gcf": ^2.2.2
+      "@toon-format/toon": ^2.2.0
+    peerDependenciesMeta:
+      "@blackwell-systems/gcf":
+        optional: true
+      "@toon-format/toon":
+        optional: true
 
   content-disposition@1.0.1:
     resolution:
@@ -1874,6 +1893,10 @@ snapshots:
       pathval: 2.0.1
 
   check-error@2.1.3: {}
+
+  chrome-devtools-mcp@1.6.0(@toon-format/toon@2.1.0):
+    optionalDependencies:
+      "@toon-format/toon": 2.1.0
 
   content-disposition@1.0.1: {}
 

@@ -1,13 +1,30 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { IncomingMessage, ServerResponse } from "node:http";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { IncomingMessage, ServerResponse, type Server } from "node:http";
 import { Socket } from "node:net";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AMBIENT_SNAPSHOT_TOOL,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  BRIDGE_SHUTDOWN_DEADLINE_MS,
+  BrowserPageRouter,
+  DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+  DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
   buildTransportArgs,
+  closeBridgeResources,
+  closeBridgeResourcesWithinDeadline,
+  createBridgeIdleWatchdog,
+  createBridgeServer,
   detectGlobalMcpPath,
+  detectPackagedMcpPath,
   extractHostHeaderHostname,
   extractToolText,
   getErrorMessage,
@@ -19,11 +36,337 @@ import {
   isBridgeClientConnected,
   isBridgeTargetReachable,
   parseBridgeCallPayload,
+  reapOwnedBridgeProcessTree,
+  replacePidFileAtomically,
   removePidFile,
+  resolveBridgeIdleTimeoutMs,
+  resolveBridgeLifecycleTimeouts,
+  resolvePhysicalBridgeIdleTimeoutMs,
   resolveBridgeScript,
+  resolveRouteIdleTimeoutMs,
   resolveTransportSpec,
+  shutdownOwnedWindowsBridgeProcessTree,
+  MCP_PACKAGE_SPEC,
   type BridgeClient,
+  type McpPathProbe,
 } from "../src/bridge.js";
+
+describe("bridge shutdown lifecycle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops accepting connections before closing MCP resources", async () => {
+    const actions: string[] = [];
+    let closed: (() => void) | undefined;
+    const server = {
+      close(callback: () => void) {
+        actions.push("server-close");
+        closed = callback;
+        return server;
+      },
+      closeAllConnections() {
+        actions.push("connections-close");
+        closed?.();
+      },
+    } as unknown as Server;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {
+        actions.push("client-close");
+      },
+    };
+    const transport = {
+      close: async () => {
+        actions.push("transport-close");
+      },
+    };
+
+    await closeBridgeResources(server, client, transport);
+
+    expect(actions).toEqual([
+      "server-close",
+      "connections-close",
+      "client-close",
+      "transport-close",
+    ]);
+  });
+
+  it("uses taskkill for a self-owned Windows process tree", () => {
+    const taskkill = vi.fn();
+    const kill = vi.fn();
+
+    reapOwnedBridgeProcessTree({
+      platform: "win32",
+      pid: 4321,
+      taskkill,
+      kill,
+    });
+
+    expect(taskkill).toHaveBeenCalledWith(
+      "taskkill.exe",
+      ["/PID", "4321", "/T", "/F"],
+      { timeout: 5000, stdio: "ignore" },
+    );
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("removes the owned PID identity before Windows tree termination", () => {
+    const actions: string[] = [];
+
+    const reaped = shutdownOwnedWindowsBridgeProcessTree({
+      removePidIdentity: () => actions.push("pid-identity-removed"),
+      reapProcessTree: () => {
+        actions.push("process-tree-reaped");
+        return true;
+      },
+    });
+
+    expect(reaped).toBe(true);
+    expect(actions).toEqual(["pid-identity-removed", "process-tree-reaped"]);
+  });
+
+  it("forces shutdown when resource cleanup exceeds its deadline", async () => {
+    vi.useFakeTimers();
+    const onDeadline = vi.fn();
+    const closing = closeBridgeResourcesWithinDeadline(
+      () => new Promise<void>(() => {}),
+      BRIDGE_SHUTDOWN_DEADLINE_MS,
+      onDeadline,
+    );
+
+    await vi.advanceTimersByTimeAsync(BRIDGE_SHUTDOWN_DEADLINE_MS);
+
+    await expect(closing).resolves.toBe(false);
+    expect(onDeadline).toHaveBeenCalledOnce();
+  });
+});
+
+function makeMcpPathProbe(overrides: Partial<McpPathProbe> = {}): McpPathProbe {
+  return {
+    existsSync: () => false,
+    getNpmPrefix: () => null,
+    readFileSync: () => "",
+    resolvePackageJson: () => null,
+    ...overrides,
+  };
+}
+
+describe("bridge idle lifecycle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("defaults to a 30-minute idle window and validates overrides", () => {
+    expect(resolveBridgeIdleTimeoutMs("")).toBe(DEFAULT_BRIDGE_IDLE_TIMEOUT_MS);
+    expect(resolveBridgeIdleTimeoutMs("60000")).toBe(60_000);
+    expect(() => resolveBridgeIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
+    expect(() => resolveBridgeIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
+  });
+
+  it("defaults route idle release to the bridge idle window and validates overrides", () => {
+    expect(resolveRouteIdleTimeoutMs("", DEFAULT_ROUTE_IDLE_TIMEOUT_MS)).toBe(
+      DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
+    );
+    expect(resolveRouteIdleTimeoutMs("60000")).toBe(60_000);
+    expect(() => resolveRouteIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
+    expect(() => resolveRouteIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
+  });
+
+  it("keeps a pooled bridge deadline independent from a caller policy", () => {
+    expect(resolvePhysicalBridgeIdleTimeoutMs(true, "120000")).toBe(
+      DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+    );
+    expect(resolvePhysicalBridgeIdleTimeoutMs(false, "120000")).toBe(120_000);
+  });
+
+  it("keeps pooled physical and fallback route deadlines independent from caller env", () => {
+    expect(resolveBridgeLifecycleTimeouts(true, "120000")).toEqual({
+      bridgeIdleTimeoutMs: DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+      routeIdleTimeoutMs: DEFAULT_BRIDGE_IDLE_TIMEOUT_MS,
+    });
+  });
+
+  it("does not inherit a caller bridge env when route idle is unset", () => {
+    const savedBridgeIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    const savedRouteIdle =
+      process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+    try {
+      process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "120000";
+      delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+
+      expect(resolveRouteIdleTimeoutMs()).toBe(DEFAULT_ROUTE_IDLE_TIMEOUT_MS);
+    } finally {
+      if (savedBridgeIdle === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = savedBridgeIdle;
+      }
+      if (savedRouteIdle === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS = savedRouteIdle;
+      }
+    }
+  });
+
+  it("shuts down after inactivity but never during an active request", async () => {
+    vi.useFakeTimers();
+    const onIdle = vi.fn();
+    const watchdog = createBridgeIdleWatchdog(1000, onIdle);
+
+    const finishRequest = watchdog.beginRequest();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onIdle).not.toHaveBeenCalled();
+
+    finishRequest();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(onIdle).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it("resets the idle window after every completed request", async () => {
+    vi.useFakeTimers();
+    const onIdle = vi.fn();
+    const watchdog = createBridgeIdleWatchdog(1000, onIdle);
+
+    await vi.advanceTimersByTimeAsync(900);
+    watchdog.beginRequest()();
+    await vi.advanceTimersByTimeAsync(900);
+    expect(onIdle).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it("updates the idle window for a later agent request", async () => {
+    vi.useFakeTimers();
+    const onIdle = vi.fn();
+    const watchdog = createBridgeIdleWatchdog(10_000, onIdle);
+
+    watchdog.setTimeoutMs(1000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(onIdle).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onIdle).toHaveBeenCalledOnce();
+  });
+
+  it("tracks action requests but leaves health diagnostics idle", async () => {
+    let starts = 0;
+    let finishes = 0;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const server = createBridgeServer(client, "idle-test", {
+      beginRequest: () => {
+        starts++;
+        return () => {
+          finishes++;
+        };
+      },
+      setTimeoutMs: () => {},
+      stop: () => {},
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected an ephemeral TCP address");
+      }
+      const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+      expect(response.status).toBe(200);
+      expect(starts).toBe(0);
+      expect(finishes).toBe(0);
+
+      await fetch(`http://127.0.0.1:${address.port}/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "list_pages", args: {} }),
+      });
+      expect(starts).toBe(1);
+      expect(finishes).toBe(1);
+
+      const forbidden = await fetch(`http://127.0.0.1:${address.port}/health`, {
+        headers: { Origin: "https://attacker.example" },
+      });
+      expect(forbidden.status).toBe(403);
+      expect(starts).toBe(1);
+      expect(finishes).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("keeps health and pooled route policies out of the bridge watchdog", async () => {
+    const setTimeoutMs = vi.fn();
+    const beginRequest = vi.fn(() => () => {});
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const server = createBridgeServer(
+      client,
+      "pool-0",
+      {
+        beginRequest,
+        setTimeoutMs,
+        stop: () => {},
+      },
+      new BrowserPageRouter(),
+    );
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected an ephemeral TCP address");
+      }
+      const url = `http://127.0.0.1:${address.port}`;
+      await fetch(`${url}/health`, {
+        headers: { "X-Axi-Idle-Timeout-Ms": "1000" },
+      });
+      await fetch(`${url}/call`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Axi-Idle-Timeout-Ms": "1000",
+        },
+        body: JSON.stringify({
+          name: "list_pages",
+          args: {},
+          routeSession: "worker-a",
+          routeIdleTimeoutMs: 1000,
+        }),
+      });
+      await fetch(`${url}/call`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Axi-Diagnostic": "1",
+        },
+        body: JSON.stringify({ name: "list_pages", args: {} }),
+      });
+
+      expect(setTimeoutMs).not.toHaveBeenCalled();
+      expect(beginRequest).toHaveBeenCalledOnce();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+});
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {
@@ -44,6 +387,18 @@ describe("parseBridgeCallPayload", () => {
     expect(result).toEqual({ name: "take_snapshot", args: {} });
   });
 
+  it("accepts an optional logical route session", () => {
+    const result = parseBridgeCallPayload(
+      '{"name":"take_snapshot","args":{},"routeSession":"worker-1"}',
+    );
+
+    expect(result).toEqual({
+      name: "take_snapshot",
+      args: {},
+      routeSession: "worker-1",
+    });
+  });
+
   it("rejects payloads without a tool name", () => {
     expect(() => parseBridgeCallPayload('{"args":{}}')).toThrow(
       "Invalid bridge request payload",
@@ -54,6 +409,718 @@ describe("parseBridgeCallPayload", () => {
     expect(() => parseBridgeCallPayload("{")).toThrow(
       "Invalid bridge request payload",
     );
+  });
+});
+
+describe("BrowserPageRouter", () => {
+  class FakeMcpPages {
+    pages = [{ id: 0, url: "about:blank", selected: true }];
+    calls: { name: string; args: Record<string, unknown> }[] = [];
+
+    async call(name: string, args: Record<string, unknown>): Promise<string> {
+      this.calls.push({ name, args });
+      if (name === "list_pages") {
+        return this.pages
+          .map(
+            (page) =>
+              `${page.id}: ${page.url}${page.selected ? " [selected]" : ""}`,
+          )
+          .join("\n");
+      }
+      if (name === "select_page") {
+        const pageId = args.pageId as number;
+        this.pages = this.pages.map((page) => ({
+          ...page,
+          selected: page.id === pageId,
+        }));
+        return "";
+      }
+      if (name === "new_page") {
+        const nextId = Math.max(...this.pages.map((page) => page.id)) + 1;
+        const background = args.background === true;
+        this.pages = this.pages.map((page) => ({
+          ...page,
+          selected: background ? page.selected : false,
+        }));
+        this.pages.push({
+          id: nextId,
+          url: String(args.url),
+          selected: !background,
+        });
+        return "";
+      }
+      if (name === "navigate_page") {
+        const selected = this.pages.find((page) => page.selected);
+        if (selected) selected.url = String(args.url);
+        return "";
+      }
+      if (name === "evaluate_script") {
+        throw new Error("router must not use page-visible ownership markers");
+      }
+      if (name === "close_page") {
+        const pageId = args.pageId as number;
+        this.pages = this.pages.filter((page) => page.id !== pageId);
+        if (!this.pages.some((page) => page.selected) && this.pages[0]) {
+          this.pages[0].selected = true;
+        }
+        return "";
+      }
+      if (name === "take_snapshot") {
+        return `snapshot:${this.pages.find((page) => page.selected)?.id}`;
+      }
+      return "";
+    }
+  }
+
+  it("routes different logical sessions to different pages in one bridge", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    const snapshotA = await router.run(
+      { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(snapshotA).toBe("snapshot:1");
+    expect(fake.pages).toEqual([
+      { id: 0, url: "about:blank", selected: false },
+      { id: 1, url: "https://a.example/", selected: true },
+      { id: 2, url: "https://b.example/", selected: false },
+    ]);
+  });
+
+  it("returns no ambient snapshot without creating an owned page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    const snapshot = await router.run(
+      {
+        name: AMBIENT_SNAPSHOT_TOOL,
+        args: {},
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(snapshot).toBe("");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+    expect(fake.calls.map((call) => call.name)).toEqual(["list_pages"]);
+  });
+
+  it("lists only pages owned by the requesting route", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const pagesA = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(pagesA).toContain("1: https://a.example/ [selected]");
+    expect(pagesA).not.toContain("https://b.example/");
+  });
+
+  it("selects a survivor before closing the selected page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "new_page",
+        args: { url: "https://a2.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      { name: "select_page", args: { pageId: 1 }, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    fake.calls = [];
+    await router.run(
+      { name: "close_page", args: { pageId: 1 }, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    const closeIndex = fake.calls.findIndex(
+      (call) => call.name === "close_page",
+    );
+    const selectBeforeClose = fake.calls
+      .slice(0, closeIndex)
+      .some((call) => call.name === "select_page" && call.args.pageId === 2);
+    expect(selectBeforeClose).toBe(true);
+    expect(fake.pages).toEqual([
+      { id: 0, url: "about:blank", selected: false },
+      { id: 2, url: "https://a2.example/", selected: true },
+    ]);
+  });
+
+  it("fails closed when a route selects or closes another route's page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    await expect(
+      router.run(
+        { name: "select_page", args: { pageId: 0 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      router.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    expect(fake.pages.some((page) => page.id === 0)).toBe(true);
+  });
+
+  it("keeps background new pages owned without making them active", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "new_page",
+        args: { url: "https://background.example/", background: true },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const pages = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    const snapshot = await router.run(
+      { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(pages).toContain("1: https://a.example/ [selected]");
+    expect(pages).toContain("2: https://background.example/");
+    expect(snapshot).toBe("snapshot:1");
+  });
+
+  it("does not claim another route's selected page for a first background page", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "new_page",
+        args: { url: "https://background.example/", background: true },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const owned = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    expect(owned).toBe("1: https://background.example/");
+
+    await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("owns and releases a popup opened as a side effect of a routed call", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+    const callWithPopup = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      if (name === "click") {
+        fake.calls.push({ name, args });
+        fake.pages = fake.pages.map((page) => ({
+          ...page,
+          selected: false,
+        }));
+        fake.pages.push({
+          id: 2,
+          url: "https://popup.example/",
+          selected: true,
+        });
+        return "";
+      }
+      return fake.call(name, args);
+    };
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      callWithPopup,
+    );
+    await router.run(
+      { name: "click", args: { uid: "button-1" }, routeSession: "worker-a" },
+      callWithPopup,
+    );
+
+    const owned = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      callWithPopup,
+    );
+    expect(owned).toContain("1: https://a.example/");
+    expect(owned).toContain("2: https://popup.example/ [selected]");
+
+    const released = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      callWithPopup,
+    );
+    expect(released).toContain("closed 2");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("owns a popup after its routed call and reconciliation both fail", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+    let failFollowUpList = false;
+    const failingPopup = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      if (name === "click") {
+        fake.calls.push({ name, args });
+        fake.pages = fake.pages.map((page) => ({ ...page, selected: false }));
+        fake.pages.push({
+          id: 2,
+          url: "https://failed-popup.example/",
+          selected: true,
+        });
+        failFollowUpList = true;
+        throw new Error("click failed after popup creation");
+      }
+      if (name === "list_pages" && failFollowUpList) {
+        failFollowUpList = false;
+        throw new Error("temporary list failure");
+      }
+      return fake.call(name, args);
+    };
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      failingPopup,
+    );
+    await expect(
+      router.run(
+        { name: "click", args: { uid: "button-1" }, routeSession: "worker-a" },
+        failingPopup,
+      ),
+    ).rejects.toThrow("click failed after popup creation");
+
+    const released = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      failingPopup,
+    );
+    expect(released).toContain("closed 2");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("owns a page when new_page creates it and then rejects", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+    let failFollowUpList = false;
+    const failingOpen = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      if (name === "new_page") {
+        await fake.call(name, args);
+        failFollowUpList = true;
+        throw new Error("new_page failed after target creation");
+      }
+      if (name === "list_pages" && failFollowUpList) {
+        failFollowUpList = false;
+        throw new Error("temporary list failure");
+      }
+      return fake.call(name, args);
+    };
+
+    await expect(
+      router.run(
+        {
+          name: "new_page",
+          args: { url: "https://created-before-error.example/" },
+          routeSession: "worker-a",
+        },
+        failingOpen,
+      ),
+    ).rejects.toThrow("new_page failed after target creation");
+
+    const released = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      failingOpen,
+    );
+    expect(released).toContain("closed 1");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("owns an automatically created session page when new_page rejects", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+    let failed = false;
+    const failingOpen = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      if (name === "new_page" && !failed) {
+        failed = true;
+        await fake.call(name, args);
+        throw new Error("automatic page open failed");
+      }
+      return fake.call(name, args);
+    };
+
+    await expect(
+      router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://never-navigated.example/" },
+          routeSession: "worker-a",
+        },
+        failingOpen,
+      ),
+    ).rejects.toThrow("automatic page open failed");
+
+    const released = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      failingOpen,
+    );
+    expect(released).toContain("closed 1");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("releases a routed session by closing its page when a survivor exists", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const result = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(result).toContain("closed 1");
+    expect(fake.pages).toEqual([
+      { id: 0, url: "about:blank", selected: false },
+      { id: 2, url: "https://b.example/", selected: true },
+    ]);
+  });
+
+  it("releases the last routed session by closing its page when an unowned baseline exists", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://only.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const result = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(result).toContain("closed 1");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
+  });
+
+  it("leaves existing pages unclaimed after bridge router restart", async () => {
+    const firstRouter = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+
+    await firstRouter.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      (name, args) => fake.call(name, args),
+    );
+    await firstRouter.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://b.example/" },
+        routeSession: "worker-b",
+      },
+      (name, args) => fake.call(name, args),
+    );
+
+    const restartedRouter = new BrowserPageRouter();
+    const pagesA = await restartedRouter.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(pagesA).toBe("");
+    await expect(
+      restartedRouter.run(
+        { name: "select_page", args: { pageId: 0 }, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      restartedRouter.run(
+        { name: "select_page", args: { pageId: 1 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 1 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+
+    const snapshotA = await restartedRouter.run(
+      { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(snapshotA).toBe("snapshot:3");
+    expect(fake.pages).toEqual([
+      { id: 0, url: "about:blank", selected: false },
+      { id: 1, url: "https://a.example/", selected: false },
+      { id: 2, url: "https://b.example/", selected: false },
+      { id: 3, url: "about:blank", selected: true },
+    ]);
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+  });
+
+  it("releases an idle route even while another route keeps the bridge alive", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(1000);
+      const fake = new FakeMcpPages();
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://b.example/" },
+          routeSession: "worker-b",
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await router.run(
+        { name: "take_snapshot", args: {}, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: false },
+        { id: 2, url: "https://b.example/", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies a request-specific idle timeout to an existing pooled route", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(10_000);
+      const fake = new FakeMcpPages();
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+          routeIdleTimeoutMs: 1000,
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a route to its fallback timeout on a policy-free request", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(1000);
+      const fake = new FakeMcpPages();
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+          routeIdleTimeoutMs: 10_000,
+        },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await router.run(
+        { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries idle release after a transient MCP failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const router = new BrowserPageRouter(1000);
+      const fake = new FakeMcpPages();
+      let closeFailures = 1;
+      const flakyCall = async (
+        name: string,
+        args: Record<string, unknown>,
+      ): Promise<string> => {
+        if (name === "close_page" && closeFailures-- > 0) {
+          throw new Error("transient close failure");
+        }
+        return fake.call(name, args);
+      };
+
+      await router.run(
+        {
+          name: "navigate_page",
+          args: { type: "url", url: "https://a.example/" },
+          routeSession: "worker-a",
+        },
+        flakyCall,
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fake.pages.some((page) => page.id === 1)).toBe(true);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fake.pages).toEqual([
+        { id: 0, url: "about:blank", selected: true },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -93,6 +1160,8 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
       process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    savedEnv.CHROME_DEVTOOLS_AXI_POOL_SIZE =
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -100,6 +1169,7 @@ describe("buildTransportArgs", () => {
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
   });
 
   afterEach(() => {
@@ -117,13 +1187,19 @@ describe("buildTransportArgs", () => {
       savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL =
       savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL;
+    if (savedEnv.CHROME_DEVTOOLS_AXI_POOL_SIZE === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE =
+        savedEnv.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    }
   });
 
   it("defaults to headless and isolated", () => {
     const args = buildTransportArgs();
     expect(args).toEqual([
       "-y",
-      "chrome-devtools-mcp@latest",
+      MCP_PACKAGE_SPEC,
       "--isolated",
       "--headless",
       "--chrome-arg=--use-mock-keychain",
@@ -136,7 +1212,7 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toEqual([
       "-y",
-      "chrome-devtools-mcp@latest",
+      MCP_PACKAGE_SPEC,
       "--isolated",
       "--chrome-arg=--use-mock-keychain",
       "--chrome-arg=--password-store=basic",
@@ -180,6 +1256,16 @@ describe("buildTransportArgs", () => {
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).not.toContain("--isolated");
     expect(args).not.toContain("--headless");
+  });
+
+  it("rejects pooled attachment to an externally managed browser", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    expect(() => buildTransportArgs()).toThrow(/cannot be combined/);
+
+    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    expect(() => buildTransportArgs()).toThrow(/cannot be combined/);
   });
 
   it("passes chrome args alongside --browserUrl", () => {
@@ -375,17 +1461,32 @@ describe("resolveTransportSpec", () => {
     }
   });
 
-  it("defaults to spawning via npx when MCP_PATH is unset and auto-detection finds nothing", () => {
-    // Inject a probe that simulates "no global chrome-devtools-mcp" so the
-    // test outcome doesn't depend on the host machine's npm install state.
-    const probe = {
-      existsSync: () => false,
+  it("defaults to the packaged chrome-devtools-mcp dependency", () => {
+    const probe = makeMcpPathProbe({
+      existsSync: (path) =>
+        path === "/app/node_modules/chrome-devtools-mcp/bin.js",
+      readFileSync: () =>
+        JSON.stringify({ bin: { "chrome-devtools-mcp": "./bin.js" } }),
+      resolvePackageJson: () =>
+        "/app/node_modules/chrome-devtools-mcp/package.json",
+    });
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe("/app/node_modules/chrome-devtools-mcp/bin.js");
+    expect(spec.args).not.toContain("-y");
+    expect(spec.args).not.toContain(MCP_PACKAGE_SPEC);
+    expect(spec.args).toContain("--isolated");
+    expect(spec.args).toContain("--headless");
+  });
+
+  it("falls back to spawning via pinned npx when package and auto-detection find nothing", () => {
+    const probe = makeMcpPathProbe({
       getNpmPrefix: () => "/usr",
-    };
+    });
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
     expect(spec.args[0]).toBe("-y");
-    expect(spec.args[1]).toBe("chrome-devtools-mcp@latest");
+    expect(spec.args[1]).toBe(MCP_PACKAGE_SPEC);
     // Default mcp args follow
     expect(spec.args).toContain("--isolated");
     expect(spec.args).toContain("--headless");
@@ -397,9 +1498,9 @@ describe("resolveTransportSpec", () => {
     const spec = resolveTransportSpec();
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe("/opt/mcp/build/src/bin/chrome-devtools-mcp.js");
-    // Strips the npx-only `-y, chrome-devtools-mcp@latest` prefix
+    // Strips the npx-only `-y, MCP_PACKAGE_SPEC` prefix
     expect(spec.args).not.toContain("-y");
-    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    expect(spec.args).not.toContain(MCP_PACKAGE_SPEC);
     // Preserves the mcp-specific args
     expect(spec.args).toContain("--isolated");
     expect(spec.args).toContain("--headless");
@@ -417,70 +1518,115 @@ describe("resolveTransportSpec", () => {
 
   it("treats an empty MCP_PATH as unset", () => {
     process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "";
-    const probe = {
-      existsSync: () => false,
+    const probe = makeMcpPathProbe({
       getNpmPrefix: () => null,
-    };
+    });
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
   });
 
-  it("auto-detects a globally-installed chrome-devtools-mcp when MCP_PATH is unset", () => {
-    const probe = {
+  it("auto-detects a globally-installed chrome-devtools-mcp when the package dependency is unavailable", () => {
+    const probe = makeMcpPathProbe({
       existsSync: (path: string) =>
         path ===
         "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
       getNpmPrefix: () => "/usr",
-    };
+    });
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe(
       "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
     );
     expect(spec.args).not.toContain("-y");
-    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    expect(spec.args).not.toContain(MCP_PACKAGE_SPEC);
     expect(spec.args).toContain("--isolated");
   });
 
   it("falls back to npx when auto-detection finds nothing", () => {
-    const probe = {
-      existsSync: () => false,
+    const probe = makeMcpPathProbe({
       getNpmPrefix: () => "/usr",
-    };
+    });
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
     expect(spec.args[0]).toBe("-y");
   });
 
   it("falls back to npx when npm prefix is unavailable", () => {
-    const probe = {
+    const probe = makeMcpPathProbe({
       existsSync: () => true, // would match anything if asked
       getNpmPrefix: () => null,
-    };
+    });
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
   });
 
   it("explicit MCP_PATH always wins over auto-detection", () => {
     process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/explicit/override.js";
-    const probe = {
+    const probe = makeMcpPathProbe({
       existsSync: () => true,
       getNpmPrefix: () => "/usr",
-    };
+      readFileSync: () =>
+        JSON.stringify({ bin: { "chrome-devtools-mcp": "./packaged.js" } }),
+      resolvePackageJson: () =>
+        "/app/node_modules/chrome-devtools-mcp/package.json",
+    });
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe(process.execPath);
     expect(spec.args[0]).toBe("/explicit/override.js");
   });
 });
 
+describe("detectPackagedMcpPath", () => {
+  it("returns the package-owned MCP bin from package.json metadata", () => {
+    const probe = makeMcpPathProbe({
+      existsSync: (path: string) =>
+        path === "/opt/app/node_modules/chrome-devtools-mcp/dist/mcp.js",
+      readFileSync: () =>
+        JSON.stringify({ bin: { "chrome-devtools-mcp": "./dist/mcp.js" } }),
+      resolvePackageJson: () =>
+        "/opt/app/node_modules/chrome-devtools-mcp/package.json",
+    });
+
+    expect(detectPackagedMcpPath(probe)).toBe(
+      "/opt/app/node_modules/chrome-devtools-mcp/dist/mcp.js",
+    );
+  });
+
+  it("returns null when the package dependency is missing", () => {
+    expect(detectPackagedMcpPath(makeMcpPathProbe())).toBeNull();
+  });
+
+  it("returns null when package.json is invalid", () => {
+    const probe = makeMcpPathProbe({
+      readFileSync: () => "{",
+      resolvePackageJson: () =>
+        "/opt/app/node_modules/chrome-devtools-mcp/package.json",
+    });
+
+    expect(detectPackagedMcpPath(probe)).toBeNull();
+  });
+
+  it("returns null when the declared bin file is missing", () => {
+    const probe = makeMcpPathProbe({
+      existsSync: () => false,
+      readFileSync: () =>
+        JSON.stringify({ bin: { "chrome-devtools-mcp": "./dist/mcp.js" } }),
+      resolvePackageJson: () =>
+        "/opt/app/node_modules/chrome-devtools-mcp/package.json",
+    });
+
+    expect(detectPackagedMcpPath(probe)).toBeNull();
+  });
+});
+
 describe("detectGlobalMcpPath", () => {
   it("returns the canonical MCP path when npm prefix + the file both exist", () => {
-    const probe = {
+    const probe = makeMcpPathProbe({
       existsSync: (path: string) =>
         path ===
         "/opt/npm/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
       getNpmPrefix: () => "/opt/npm",
-    };
+    });
 
     expect(detectGlobalMcpPath(probe)).toBe(
       "/opt/npm/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
@@ -488,28 +1634,28 @@ describe("detectGlobalMcpPath", () => {
   });
 
   it("returns null when the file is missing", () => {
-    const probe = {
+    const probe = makeMcpPathProbe({
       existsSync: () => false,
       getNpmPrefix: () => "/opt/npm",
-    };
+    });
 
     expect(detectGlobalMcpPath(probe)).toBeNull();
   });
 
   it("returns null when npm prefix is null (npm not installed)", () => {
-    const probe = {
+    const probe = makeMcpPathProbe({
       existsSync: () => true,
       getNpmPrefix: () => null,
-    };
+    });
 
     expect(detectGlobalMcpPath(probe)).toBeNull();
   });
 
   it("returns null when npm prefix is the empty string", () => {
-    const probe = {
+    const probe = makeMcpPathProbe({
       existsSync: () => true,
       getNpmPrefix: () => "",
-    };
+    });
 
     expect(detectGlobalMcpPath(probe)).toBeNull();
   });
@@ -621,6 +1767,57 @@ function makeResponse(): { res: ServerResponse; captured: CapturedResponse } {
 }
 
 describe("handleBridgeRequest /health", () => {
+  it("accepts shutdown only for the matching bridge instance", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const shutdown = vi.fn();
+    const accepted = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/shutdown",
+        {},
+        JSON.stringify({ instanceId: "instance-1" }),
+      ),
+      accepted.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+      shutdown,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(accepted.captured.statusCode).toBe(202);
+    expect(shutdown).toHaveBeenCalledWith("Authenticated shutdown requested");
+
+    shutdown.mockClear();
+    const rejected = makeResponse();
+    await handleBridgeRequest(
+      client,
+      makeRequest(
+        "POST",
+        "/shutdown",
+        {},
+        JSON.stringify({ instanceId: "replacement-instance" }),
+      ),
+      rejected.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+      shutdown,
+    );
+
+    expect(rejected.captured.statusCode).toBe(403);
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
   it("returns 200 ok for shallow /health when MCP is connected", async () => {
     const client: BridgeClient = {
       listTools: async () => ({ tools: [] }),
@@ -654,6 +1851,58 @@ describe("handleBridgeRequest /health", () => {
     expect(JSON.parse(captured.body)).toEqual({
       status: "ok",
       session: "worker-1",
+    });
+  });
+
+  it("stamps bridge identity into healthy and unhealthy responses", async () => {
+    const connected: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      close: async () => {},
+    };
+    const healthy = makeResponse();
+
+    await handleBridgeRequest(
+      connected,
+      makeRequest("GET", "/health"),
+      healthy.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+    );
+
+    expect(JSON.parse(healthy.captured.body)).toMatchObject({
+      status: "ok",
+      session: "worker-1",
+      instanceId: "instance-1",
+      pid: process.pid,
+    });
+
+    const disconnected: BridgeClient = {
+      listTools: async () => {
+        throw new Error("Not connected");
+      },
+      callTool: async () => ({}),
+      close: async () => {},
+    };
+    const unhealthy = makeResponse();
+
+    await handleBridgeRequest(
+      disconnected,
+      makeRequest("GET", "/health"),
+      unhealthy.res,
+      "worker-1",
+      undefined,
+      undefined,
+      "instance-1",
+    );
+
+    expect(JSON.parse(unhealthy.captured.body)).toMatchObject({
+      status: "error",
+      session: "worker-1",
+      instanceId: "instance-1",
+      pid: process.pid,
     });
   });
 
@@ -1036,6 +2285,23 @@ describe("removePidFile ownership", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("replaces complete PID metadata without leaving a temporary file", () => {
+    writeFileSync(pidFile, JSON.stringify({ pid: 1, port: 9224 }));
+
+    replacePidFileAtomically(pidFile, {
+      pid: 2,
+      port: 9225,
+      lastActivityAt: "2026-08-05T12:00:00.000Z",
+    });
+
+    expect(JSON.parse(readFileSync(pidFile, "utf-8"))).toEqual({
+      pid: 2,
+      port: 9225,
+      lastActivityAt: "2026-08-05T12:00:00.000Z",
+    });
+    expect(readdirSync(dir)).toEqual(["bridge.pid"]);
   });
 
   it("leaves the winner's PID file intact when a same-session loser exits", () => {

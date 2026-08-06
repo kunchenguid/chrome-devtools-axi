@@ -21,7 +21,7 @@ Its frontmatter includes Hermes Agent metadata from `src/skill.ts`; update the g
 
 ## Project Conventions
 
-- Node 20+, TypeScript, ESM-only (`"type": "module"`, module resolution `Node16` - relative imports use `.js` extensions even from `.ts` files).
+- Use a Node version allowed by `package.json`'s `engines.node` declaration. The project is TypeScript and ESM-only (`"type": "module"`, module resolution `Node16` - relative imports use `.js` extensions even from `.ts` files).
 - Tests live in `test/*.test.ts` and run with Vitest.
 - Run `pnpm run build` and `pnpm test` before pushing.
 - Do not hand-edit generated files: `CHANGELOG.md` and `.release-please-manifest.json` (owned by release-please) or `skills/chrome-devtools-axi/SKILL.md` (owned by `build:skill`).
@@ -41,23 +41,25 @@ Every invocation is a short-lived process, so anything that must survive across 
 
 Three processes: CLI -> bridge -> chrome-devtools-mcp (which drives headless Chrome over CDP).
 
-The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP tools through the bridge, and formats output.
-`ensureBridge` (`src/client.ts`) reads its session's `bridge.pid` (`~/.chrome-devtools-axi/bridge.pid` for the default session) and reuses a live bridge only after a **deep** health check (`/health?deep=1` drives one CDP-backed `list_pages` call), so a bridge whose attached browser died gets terminated and respawned instead of reused as a stale endpoint.
+The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP tools through the bridge, and formats output. Each browser call carries the logical `CHROME_DEVTOOLS_AXI_SESSION`; in pooled mode the bridge serializes calls, restores that route's selected page, and tracks every page the route owns, including popup side effects.
+`ensureBridge` (`src/client.ts`) reads the active bridge's `bridge.pid` (`~/.chrome-devtools-axi/bridge.pid` for the unpooled default session, or a pool-slot PID file when pooled) and validates both bridge identity and CDP reachability before reuse. Its function documentation owns the replacement-safety mechanism; README.md owns the user-facing lifecycle contract.
 Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/bridge.ts`) **detached** as a process group leader and polls health until the `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` deadline (default 30s).
 
-The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
-Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
+The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, instance-ID-authenticated `POST /shutdown`, `GET /tools`, and `GET /health[?deep=1]`.
+Every non-diagnostic request refreshes the physical bridge watchdog. An unpooled request may update that watchdog through its effective idle policy, but a pooled request applies its policy only to its logical route; the pool-slot watchdog remains independent so one route cannot shorten another route's work. `resolvePhysicalBridgeIdleTimeoutMs` and `resolveRouteIdleTimeoutMs` own those defaults, and `BrowserPageRouter` owns per-route overrides.
+`stopBridgeSession` owns the physical-teardown identity and legacy pooled-route compatibility invariants; the bridge's `shutdown` path owns cross-platform chrome-devtools-mcp and Chrome process-tree reaping. README.md owns the user-facing lifecycle contract.
 
-`resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else an auto-detected global npm install (fast), else `npx -y chrome-devtools-mcp@latest` (slow first run).
+`resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else the package-owned pinned dependency, else an auto-detected global npm install, else `npx -y chrome-devtools-mcp@<pinned version>`.
 Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, `CHANNEL` (`--channel` to pick which installed Chrome release channel is attached to or launched, omitted in `BROWSER_URL`/`wsEndpoint` mode), and `HEADED`.
 
 The launch modes (`--isolated`/`--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS` so browsers we start cannot reach the machine owner's password store; attach modes deliberately omit them because that browser's keychain policy belongs to whoever started it.
 `test/keychain-isolation.test.ts` owns the regression rationale and structural invariant; README.md documents the user-facing behavior.
 
-Named sessions (`CHROME_DEVTOOLS_AXI_SESSION`, `src/sessions.ts`) give each name its own bridge - its own port (explicit `CHROME_DEVTOOLS_AXI_PORT`, else a deterministic FNV-1a hash of the name) and its own state dir under `~/.chrome-devtools-axi/sessions/<name>/` (PID file + generation counter) - so concurrent sessions don't share a bridge or each other's stale-ref tracking.
+Named sessions (`CHROME_DEVTOOLS_AXI_SESSION`, `src/sessions.ts`) always get their own state dir under `~/.chrome-devtools-axi/sessions/<name>/` (generation counter + optional agent idle policy). Without `CHROME_DEVTOOLS_AXI_POOL_SIZE`, each also gets its own bridge and deterministic FNV-1a-derived port; with pooling, logical names hash onto `pool-<slot>` bridges whose PID state lives under `~/.chrome-devtools-axi/pools/`, while page ownership and stale-ref generations remain isolated by logical session.
 The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-axi/` paths, so existing behavior is unchanged.
-`resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through; a session isolates only the bridge, so the connection mode and profile compose unchanged.
-`/health` reports the bridge's `session`, and `checkBridgeHealth`/`ensureBridge` reject a mismatched session so two sessions forced onto one port (a globally-exported `CHROME_DEVTOOLS_AXI_PORT`) fail loudly instead of silently sharing; the bridge exits with `BRIDGE_PORT_IN_USE_EXIT_CODE` (48) on an EADDRINUSE bind so the early-exit error attributes the collision (`buildBridgeEarlyExitError`).
+`resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through. Pooling is rejected with `BROWSER_URL` and `AUTO_CONNECT` because route ownership is intentionally bridge-local and cannot be recovered after an attached-browser bridge restart.
+`/health` reports the bridge's `session`, `instanceId`, and `pid`, and `checkBridgeHealth`/`ensureBridge` reject a mismatched identity so two sessions forced onto one port (a globally-exported `CHROME_DEVTOOLS_AXI_PORT`) fail loudly instead of silently sharing; the bridge exits with `BRIDGE_PORT_IN_USE_EXIT_CODE` (48) on an EADDRINUSE bind so the early-exit error attributes the collision (`buildBridgeEarlyExitError`).
+`chrome-devtools-axi sessions` (`src/doctor.ts`) inventories default, named, and pooled PID state without starting a browser or renewing its lifetime; cleanup remains opt-in and delegates live physical stops to the `stopBridgeSession` identity invariant.
 
 ### Snapshot generations and STALE_REF
 
@@ -69,7 +71,7 @@ Action commands parse refs through `parseUidFresh` (`src/cli.ts`), which fails l
 ### CLI output and AXI integration
 
 The CLI is built on `axi-sdk-js` (`runAxiCli`): `HOME_DESCRIPTION` and `TOP_HELP` are the shared static guidance, SDK built-ins such as `update` and `update --check` are appended by the runner at runtime, and the `home()` callback returns the live page snapshot when a bridge session is active.
-This is the same output that lands in the agent's optional `SessionStart` hook after `chrome-devtools-axi setup hooks` (`src/hooks.ts`, Claude Code + Codex + OpenCode); `shouldInstallHooksForExecPath` guards dev entrypoints like `pnpm run dev` from self-registering hooks.
+This is the same output that lands in the agent's optional `SessionStart` hook after `chrome-devtools-axi setup hooks` (`src/hooks.ts`, Claude Code + Codex + OpenCode); Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop`. Pi receives a native extension that injects the captured `session_start` context before agent work and stops only the inherited logical session at `session_shutdown`; a global symbol prevents Fleet and global installations from registering duplicate handlers. `src/cli.ts` is the persisted-policy consumption chokepoint: only `callTool` and `ensureBridge` renew it, while `test/cli-runtime.test.ts` guards non-browser commands and one-shot flags. `shouldInstallHooksForExecPath` guards dev entrypoints like `pnpm run dev` from self-registering hooks.
 `src/skill.ts` renders the installable Agent Skill (`skills/chrome-devtools-axi/SKILL.md`) from the same shared guidance plus the SDK built-in command list, rewriting invocations to non-interactive `npx -y chrome-devtools-axi ...`.
 
 Output format per command: TOON-encoded metadata block (`encode` from `@toon-format/toon`), then raw snapshot text, then a `help[N]:` block of contextual next-step suggestions (`src/suggestions.ts`).
@@ -88,6 +90,7 @@ Only the script's own `console.log` output reaches stdout: handlers return text 
 - `resolveOutputPath` (`src/paths.ts`) is the chokepoint for local output artifacts sent to the bridge.
   Use it for any new command or flag that asks the bridge/MCP to write a caller-supplied output file or directory, so relative paths resolve against the invoking CLI's `process.cwd()` and output can report the absolute path.
 - `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists; it also degrades an invalid `CHROME_DEVTOOLS_AXI_SESSION` to null here, while action commands (`ensureBridge`/`stopBridge`) still fail loudly.
+- Pooled page ownership is intentionally in memory (`BrowserPageRouter`), so any routed operation that can open a page must reconcile before/after page lists; persisting upstream page IDs across bridge restarts would attach stale ownership to unrelated tabs.
 - Generation-counter writes are best-effort; a failed write degrades to one missed stale-ref detection, never a hang (`src/generation.ts`).
 - Some `test/client.test.ts` cases exercise real SIGTERM/SIGKILL escalation timing and take a couple of seconds each; that is expected, not flakiness.
 

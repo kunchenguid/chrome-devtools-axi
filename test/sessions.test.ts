@@ -5,6 +5,14 @@ import {
   DEFAULT_BASE_PORT,
   DEFAULT_SESSION_NAME,
   defaultPortForSession,
+  isBrowserPoolEnabled,
+  poolSlotForSession,
+  resolveActiveBridgePidFile,
+  resolveBridgePidFile,
+  resolveBridgePort,
+  resolveBridgeSessionName,
+  resolveBridgeStateDir,
+  resolveBrowserPoolSize,
   resolveSessionName,
   resolveSessionPidFile,
   resolveSessionPort,
@@ -141,6 +149,98 @@ describe("resolveSessionPort", () => {
     expect(resolveSessionPort(DEFAULT_SESSION_NAME)).toBe(DEFAULT_BASE_PORT);
     process.env.CHROME_DEVTOOLS_AXI_PORT = "0";
     expect(resolveSessionPort(DEFAULT_SESSION_NAME)).toBe(DEFAULT_BASE_PORT);
+  });
+});
+
+describe("browser pool resolution", () => {
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    saved.CHROME_DEVTOOLS_AXI_POOL_SIZE =
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    saved.CHROME_DEVTOOLS_AXI_PORT = process.env.CHROME_DEVTOOLS_AXI_PORT;
+    saved.CHROME_DEVTOOLS_AXI_SESSION = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    delete process.env.CHROME_DEVTOOLS_AXI_PORT;
+    delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("is disabled when unset, blank, or zero", () => {
+    expect(resolveBrowserPoolSize()).toBeNull();
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "   ";
+    expect(resolveBrowserPoolSize()).toBeNull();
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "0";
+    expect(resolveBrowserPoolSize()).toBeNull();
+    expect(isBrowserPoolEnabled()).toBe(false);
+  });
+
+  it("rejects invalid pool sizes", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "-1";
+    expect(() => resolveBrowserPoolSize()).toThrow(/POOL_SIZE/);
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2.5";
+    expect(() => resolveBrowserPoolSize()).toThrow(/POOL_SIZE/);
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "two";
+    expect(() => resolveBrowserPoolSize()).toThrow(/POOL_SIZE/);
+  });
+
+  it("maps many logical sessions onto bounded bridge session names", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+
+    const names = ["worker-1", "worker-2", "worker-3", "worker-4"];
+    const bridgeNames = new Set(
+      names.map((name) => resolveBridgeSessionName(name)),
+    );
+
+    expect(bridgeNames.size).toBeLessThanOrEqual(2);
+    for (const bridgeName of bridgeNames) {
+      expect(bridgeName).toMatch(/^pool-[01]$/);
+    }
+  });
+
+  it("keeps logical state separate while sharing a pool bridge pid dir", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "1";
+
+    expect(resolveSessionStateDir("worker-1")).toBe(
+      join(STATE_DIR, "sessions", "worker-1"),
+    );
+    expect(resolveBridgeStateDir("worker-1")).toBe(
+      join(STATE_DIR, "pools", "pool-0"),
+    );
+    expect(resolveBridgePidFile("worker-1")).toBe(
+      join(STATE_DIR, "pools", "pool-0", "bridge.pid"),
+    );
+  });
+
+  it("uses CHROME_DEVTOOLS_AXI_PORT as a pool base port", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "4";
+    process.env.CHROME_DEVTOOLS_AXI_PORT = "11000";
+    const slot = poolSlotForSession("worker-1", 4);
+
+    expect(resolveBridgePort("worker-1")).toBe(11000 + slot);
+  });
+
+  it("resolves the active bridge pid file from a bridge process env", () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "pool-1";
+
+    expect(resolveActiveBridgePidFile()).toBe(
+      join(STATE_DIR, "pools", "pool-1", "bridge.pid"),
+    );
+  });
+
+  it("keeps a logical pool-number name in named session state when pooling is disabled", () => {
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "pool-1";
+
+    expect(resolveActiveBridgePidFile()).toBe(
+      join(STATE_DIR, "sessions", "pool-1", "bridge.pid"),
+    );
   });
 });
 

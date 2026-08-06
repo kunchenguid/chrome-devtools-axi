@@ -99,7 +99,9 @@ npm install -g chrome-devtools-axi
 chrome-devtools-axi setup hooks
 ```
 
-This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and usage guidance at the start of each session.
+This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and records the bounded idle policy described under Configuration. **Pi** gets the equivalent native extension: `session_start` captures ambient AXI context for its agent prompt, and `session_shutdown` stops the owned browser session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown and clears the policy.
+
+Pi installs into `${PI_CODING_AGENT_DIR:-~/.pi/agent}/extensions/chrome-devtools-axi.ts`. Run setup with `PI_CODING_AGENT_DIR` set when you use an isolated Pi profile such as Fleet's `~/.pi-fleet` profile.
 **Restart your agent session after running this** so the new hook takes effect.
 
 Development entrypoints such as `pnpm run dev` and `bin/chrome-devtools-axi.ts` are guarded from accidental hook installation.
@@ -113,6 +115,8 @@ pnpm install --frozen-lockfile
 pnpm run build
 pnpm link
 ```
+
+Use a Node version allowed by the `engines.node` declaration in `package.json`; it matches the packaged `chrome-devtools-mcp` runtime requirement.
 
 ## How It Works
 
@@ -132,8 +136,8 @@ pnpm link
 └───────────────────────┘
 ```
 
-- **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation
-- **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, and reaps child processes on stop
+- **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation; optional pooling hashes many logical sessions onto a bounded number of bridge/browser processes
+- **Auto-lifecycle** — the bridge starts on first command, writes identity-bearing PID state under `~/.chrome-devtools-axi/`, recycles a stale CDP target only after repeated probes confirm target loss against the same bridge identity, shuts down after 30 idle minutes, and reaps child processes on stop
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
 
@@ -175,13 +179,13 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 
 ### Page Management
 
-| Command           | Description                 |
-| ----------------- | --------------------------- |
-| `pages`           | List all open tabs          |
-| `newpage <url>`   | Open a new tab              |
-| `selectpage <id>` | Switch to a tab by ID       |
-| `closepage <id>`  | Close a tab by ID           |
-| `resize <w> <h>`  | Resize the browser viewport |
+| Command           | Description                              |
+| ----------------- | ---------------------------------------- |
+| `pages`           | List tabs; caller-owned tabs when pooled |
+| `newpage <url>`   | Open a new tab                           |
+| `selectpage <id>` | Switch to a tab by ID                    |
+| `closepage <id>`  | Close a tab by ID                        |
+| `resize <w> <h>`  | Resize the browser viewport              |
 
 ### Emulation
 
@@ -212,11 +216,12 @@ For large request or response bodies, prefer `network-get <id> --response-file <
 
 ### Bridge
 
-| Command       | Description                   |
-| ------------- | ----------------------------- |
-| `start`       | Start the bridge server       |
-| `stop`        | Stop the bridge server        |
-| `setup hooks` | Install or repair agent hooks |
+| Command       | Description                                    |
+| ------------- | ---------------------------------------------- |
+| `start`       | Start or reuse the session's bridge            |
+| `stop`        | Stop its bridge, or release its pooled pages   |
+| `sessions`    | Inspect bridge session state                   |
+| `setup hooks` | Install or repair agent lifecycle integrations |
 
 ### Maintenance
 
@@ -235,6 +240,7 @@ session is active or the no-session status/help block when one is not.
 | --------------------------- | ------------------------------------------- |
 | `--help`                    | Show usage information                      |
 | `-v`, `-V`, `--version`     | Show the installed CLI version              |
+| `--idle-timeout-ms <ms>`    | Set unpooled bridge or pooled-route timeout |
 | `--check`                   | Check for available updates (update)        |
 | `--full`                    | Show complete output without truncation     |
 | `--background`              | Open new page in background (newpage)       |
@@ -274,11 +280,49 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
+An unpooled bridge stays alive between commands, then shuts down its MCP and
+browser processes after 30 minutes without a request. Override that idle
+window in milliseconds when a workflow needs longer pauses:
+
+```sh
+export CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=7200000
+```
+
+Agent-facing integrations installed by `chrome-devtools-axi setup hooks`
+persist a 120-second idle policy for the logical agent session, and the packaged
+skill passes the equivalent portable `--idle-timeout-ms=120000` option on every
+command. Direct CLI users keep the 30-minute default unless they pass the flag
+or set `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS` themselves.
+
+Only a browser-owning command—`start` or a command that may auto-start the
+bridge—consumes and renews the persisted hook policy. The home view, help,
+`stop`, `sessions`, `setup`, and a one-shot `--idle-timeout-ms` invocation do not
+create or renew that file; without a qualifying browser command, it expires 120
+seconds after session start or its last consumption.
+
+The effective timeout precedence is the command-line flag, then
+`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, then a persisted agent-session policy,
+then 30 minutes. In unpooled mode, a request carrying an effective timeout
+updates the running bridge watchdog. In pooled mode, it updates only the
+calling logical session's route deadline; it never shortens another route or
+the physical pool-slot watchdog, which retains the 30-minute default.
+
+Normal installs start the pinned `chrome-devtools-mcp` binary from
+chrome-devtools-axi's dependency graph. `CHROME_DEVTOOLS_AXI_MCP_PATH` is an
+explicit development or emergency override; if neither path is available, the
+bridge checks a global npm install and finally runs the same pinned MCP version
+through `npx`.
+
 Connect to an existing Chrome instance instead of launching one:
 
 ```sh
 export CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222
 ```
+
+Browser pooling can't be combined with `CHROME_DEVTOOLS_AXI_BROWSER_URL` or
+`CHROME_DEVTOOLS_AXI_AUTO_CONNECT`: an attached browser survives bridge
+restarts, but its page ownership does not, so cleanup could no longer identify
+which logical session owns each tab.
 
 `CHROME_DEVTOOLS_AXI_BROWSER_URL` accepts both `http://` or `https://` URLs and `ws://` or `wss://` endpoints:
 
@@ -319,7 +363,7 @@ CHROME_DEVTOOLS_AXI_SESSION=worker-1 chrome-devtools-axi open https://example.co
 CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.org
 ```
 
-Each session name gets its own bridge process, port (auto-derived from the name, or pinned with `CHROME_DEVTOOLS_AXI_PORT`), and on-disk state.
+Without pooling, each session name gets its own bridge process, port (auto-derived from the name, or pinned with `CHROME_DEVTOOLS_AXI_PORT`), and on-disk state.
 In the default `--isolated` and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` launch modes each bridge also launches its own Chrome, so concurrent sessions share neither browser state nor each other's stale-ref tracking.
 Sessions that attach to the same external browser - multiple `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1` sessions on one running Chrome, or the same `CHROME_DEVTOOLS_AXI_BROWSER_URL`/`wsEndpoint` - drive that shared browser and are isolated only at the bridge level, where the per-session generation counter does not prevent cross-talk.
 A session only isolates the bridge - the connection mode and profile are unchanged; combine with `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` for a persistent per-session profile.
@@ -328,12 +372,33 @@ The default (unset) session keeps port 9224 and the legacy state paths below.
 Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.
 Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT` only inline per command.
 
-State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`):
+For high agent counts where one Chrome per named session is too heavy, opt into a bounded browser pool:
 
-| File                  | Purpose                               |
-| --------------------- | ------------------------------------- |
-| `bridge.pid`          | PID and port of the running bridge    |
-| `snapshot-generation` | Counter used to detect stale uid refs |
+```sh
+export CHROME_DEVTOOLS_AXI_POOL_SIZE=4
+CHROME_DEVTOOLS_AXI_SESSION=worker-1 chrome-devtools-axi open https://example.com
+CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.org
+```
+
+With pooling enabled, logical session state still lives under `sessions/<name>/`, but browser traffic hashes onto `pool-0` through `pool-(N-1)`.
+Each pooled bridge serializes its own browser calls and restores the logical session's selected page before every routed operation, so text/code agent concurrency stays high while browser concurrency is bounded by the pool size. `pages`, `selectpage`, and `closepage` are scoped to pages owned by the calling session, and pages opened as click or script side effects are claimed by that same owner.
+`chrome-devtools-axi stop` in pooled mode releases all pages owned by the calling logical session, including claimed popups: it closes them when another page exists, or navigates the last remaining page to `about:blank` because upstream cannot close the last tab. The physical pooled bridge stays available to other logical sessions.
+During an in-place upgrade, logical release also works with an already-running pooled bridge whose older PID record has no instance ID, after its health and session are validated. Physical bridge termination requires a current instance ID and uses an authenticated self-shutdown request, so cleanup never sends a terminating signal to a numeric PID that could have been reused.
+Transient or unclassified deep-health failures preserve the existing bridge instead of risking another active route; only repeated target-unreachable results for the recorded session, instance ID, and PID allow automatic replacement. Physical shutdown is bounded, so a stalled graceful close removes the owned PID identity and reaps the bridge's process tree instead of leaving browser children behind.
+If an agent exits without running `stop`, the route idle timeout releases that logical session's pages even while other sessions keep the pooled bridge alive. `CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS` sets the caller's route deadline when no explicit or persisted caller policy applies, and it travels with each routed request instead of changing the shared bridge. Routes without a caller policy fall back to the pooled bridge's independent 30-minute physical timeout. A caller's `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, `--idle-timeout-ms`, or persisted agent policy overrides the route setting only for its logical route.
+If `CHROME_DEVTOOLS_AXI_PORT` is set with a pool, it is treated as the base port and each pool slot uses `base + slot`; leaving it unset uses the normal derived pool-slot ports.
+
+State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`; pooled bridge PID files nest under `pools/pool-<slot>/`):
+
+| File                  | Purpose                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `bridge.pid`          | PID, port, session, instance ID, owner, start time, and last activity |
+| `snapshot-generation` | Per-logical-session counter used to detect stale uid refs             |
+| `agent-idle-timeout`  | Renewable per-logical-session policy from lifecycle hooks             |
+
+Use `chrome-devtools-axi sessions` to inspect bridge state without starting a browser or extending an existing bridge's lifetime: its health and page-list diagnostics don't update last activity or reset idle watchdogs. It inventories the default session plus named and pooled sessions such as `pool-3` when they have bridge PID state; reports PID liveness, process-group details when the platform exposes them, bridge health, page count and selected URL when reachable, and flags stale PID files, reused non-bridge PIDs, health failures, session mismatches, and orphan symptoms. `--json` prints machine-readable output for watchdogs.
+
+Cleanup is opt-in. `chrome-devtools-axi sessions --clean-stale` (also `--clean` or `--prune`) removes only well-formed `bridge.pid` files whose recorded PID is confirmed dead. `--stop-unhealthy` requires the recorded session, instance ID, and PID to match the live bridge, then asks that instance to shut itself down; a legacy record without an instance ID is never used for physical termination. Stopping an unhealthy pooled entry stops that physical pool slot, so every logical session hashed to the slot must start a fresh route afterward.
 
 ## Development
 

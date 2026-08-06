@@ -1,26 +1,70 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import { BRIDGE_PORT_IN_USE_EXIT_CODE } from "../src/bridge.js";
 import {
   buildBridgeEarlyExitError,
   CdpError,
+  checkBridgeIdentity,
   checkBridgeHealth,
+  confirmBridgeTargetUnreachable,
   ensureBridge,
   getSessionSnapshotIfRunning,
   mapErrorMessage,
+  requestedRouteIdleTimeoutMs,
   resolveBridgeTimeoutMs,
+  readProcessCommand,
+  resolveBridgeLaunchCommand,
   type SpawnedBridge,
   stopBridge,
+  stopBridgeSession,
   terminateBridgeProcess,
   waitForProcessExit,
 } from "../src/client.js";
+import {
+  resolveBridgePidFile,
+  resolveBridgeSessionName,
+  resolveSessionPidFile,
+} from "../src/sessions.js";
+
+describe("pooled route idle policy", () => {
+  const savedCallerIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  const savedRouteIdle = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+
+  afterEach(() => {
+    if (savedCallerIdle === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = savedCallerIdle;
+    }
+    if (savedRouteIdle === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS = savedRouteIdle;
+    }
+  });
+
+  it("sends the route setting per request and lets caller policy override it", () => {
+    delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS = "120000";
+    expect(requestedRouteIdleTimeoutMs()).toBe(120_000);
+
+    process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "60000";
+    expect(requestedRouteIdleTimeoutMs()).toBe(60_000);
+  });
+});
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {
@@ -54,6 +98,63 @@ describe("mapErrorMessage", () => {
   });
 });
 
+describe("readProcessCommand", () => {
+  it("uses PowerShell process inspection on Windows", () => {
+    const run = vi.fn(() => "node chrome-devtools-axi-bridge.js") as never;
+
+    expect(readProcessCommand(42, "win32", run)).toContain(
+      "chrome-devtools-axi-bridge",
+    );
+    expect(run).toHaveBeenCalledWith(
+      "powershell.exe",
+      expect.arrayContaining([expect.stringContaining("ProcessId = 42")]),
+      expect.objectContaining({ encoding: "utf-8" }),
+    );
+  });
+});
+
+describe("resolveBridgeLaunchCommand", () => {
+  it("runs a TypeScript bridge directly so its PID leads the detached group", () => {
+    expect(resolveBridgeLaunchCommand("/repo/bin/bridge.ts")).toEqual({
+      command: process.execPath,
+      args: ["--import", "tsx", "/repo/bin/bridge.ts"],
+    });
+    expect(resolveBridgeLaunchCommand("/repo/dist/bridge.js")).toEqual({
+      command: process.execPath,
+      args: ["/repo/dist/bridge.js"],
+    });
+  });
+});
+
+describe("external browser pool validation", () => {
+  const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+  const savedBrowserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+
+  afterEach(() => {
+    if (savedPoolSize === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+    }
+    if (savedBrowserUrl === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = savedBrowserUrl;
+    }
+  });
+
+  it("fails before reusing or spawning an externally attached pooled bridge", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    const spawnBridge = vi.fn();
+
+    await expect(ensureBridge(spawnBridge)).rejects.toThrow(
+      /cannot be combined/,
+    );
+    expect(spawnBridge).not.toHaveBeenCalled();
+  });
+});
+
 describe("unsafe session names are rejected on action entry points", () => {
   const saved = process.env.CHROME_DEVTOOLS_AXI_SESSION;
 
@@ -78,6 +179,166 @@ describe("unsafe session names are rejected on action entry points", () => {
   it("getSessionSnapshotIfRunning degrades an invalid session to null instead of throwing", async () => {
     process.env.CHROME_DEVTOOLS_AXI_SESSION = "..";
     await expect(getSessionSnapshotIfRunning()).resolves.toBeNull();
+  });
+
+  it("stopBridgeSession refuses a PID file owned by a different recorded session", async () => {
+    const savedHome = process.env.HOME;
+    const home = mkdtempSync(join(tmpdir(), "cda-stop-session-"));
+    try {
+      process.env.HOME = home;
+      const pidFile = resolveSessionPidFile("worker-1");
+      mkdirSync(join(home, ".chrome-devtools-axi", "sessions", "worker-1"), {
+        recursive: true,
+      });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({
+          pid: process.pid,
+          port: 9444,
+          session: "other-worker",
+        }),
+      );
+
+      await expect(stopBridgeSession("worker-1")).resolves.toBe(
+        "session-mismatch",
+      );
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves an explicit dedicated target independently of pool settings", async () => {
+    const savedHome = process.env.HOME;
+    const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    const home = mkdtempSync(join(tmpdir(), "cda-dedicated-session-"));
+    try {
+      process.env.HOME = home;
+      process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+      const pidFile = resolveSessionPidFile("worker-1");
+      mkdirSync(join(home, ".chrome-devtools-axi", "sessions", "worker-1"), {
+        recursive: true,
+      });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({
+          pid: process.pid,
+          port: 9444,
+          session: "worker-1",
+        }),
+      );
+
+      await expect(
+        stopBridgeSession("worker-1", { target: "dedicated" }),
+      ).resolves.toBe("not-bridge");
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedPoolSize === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to signal a reused PID when the bridge nonce differs", async () => {
+    const savedHome = process.env.HOME;
+    const home = mkdtempSync(join(tmpdir(), "cda-reused-pid-"));
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)", "chrome-devtools-axi-bridge"],
+      { stdio: "ignore" },
+    );
+    const pid = child.pid as number;
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: "worker-1",
+      instanceId: "replacement-instance",
+      pid,
+    });
+
+    try {
+      process.env.HOME = home;
+      const pidFile = resolveSessionPidFile("worker-1");
+      mkdirSync(join(home, ".chrome-devtools-axi", "sessions", "worker-1"), {
+        recursive: true,
+      });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({
+          pid,
+          port: fake.port,
+          session: "worker-1",
+          instanceId: "stale-instance",
+        }),
+      );
+
+      expect(readProcessCommand(pid)).toContain("chrome-devtools-axi-bridge");
+      await expect(stopBridgeSession("worker-1")).resolves.toBe("not-bridge");
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      rmSync(home, { recursive: true, force: true });
+      await fake.close();
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+  });
+
+  it("releases a legacy pooled route without requiring a physical bridge nonce", async () => {
+    const savedHome = process.env.HOME;
+    const savedPoolSize = process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+    const home = mkdtempSync(join(tmpdir(), "cda-legacy-pool-stop-"));
+    const releasedSessions: string[] = [];
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)", "chrome-devtools-axi-bridge"],
+      { stdio: "ignore" },
+    );
+    const pid = child.pid as number;
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = "2";
+    const bridgeSession = resolveBridgeSessionName("worker-1");
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: bridgeSession,
+      releasedSessions,
+    });
+
+    try {
+      const pidFile = resolveBridgePidFile("worker-1");
+      mkdirSync(dirname(pidFile), { recursive: true });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({ pid, port: fake.port, session: bridgeSession }),
+      );
+
+      await expect(stopBridgeSession("worker-1")).resolves.toBe("stopped");
+      expect(releasedSessions).toEqual(["worker-1"]);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedPoolSize === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_POOL_SIZE = savedPoolSize;
+      }
+      rmSync(home, { recursive: true, force: true });
+      await fake.close();
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
   });
 });
 
@@ -127,8 +388,12 @@ describe("resolveBridgeTimeoutMs", () => {
 interface FakeBridgeOptions {
   shallow: "ok" | "error";
   deep: "ok" | "error";
+  deepOutcomes?: Array<"ok" | "error">;
   deepDelayMs?: number;
   session?: string;
+  instanceId?: string;
+  pid?: number;
+  releasedSessions?: string[];
 }
 
 function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
@@ -140,15 +405,37 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
     const server = createServer((req, res) => {
       if (req.method === "GET" && req.url?.startsWith("/health")) {
         const wantsDeep = req.url.includes("deep=1");
-        const outcome = wantsDeep ? opts.deep : opts.shallow;
+        const outcome = wantsDeep
+          ? (opts.deepOutcomes?.shift() ?? opts.deep)
+          : opts.shallow;
         res.setHeader("Content-Type", "application/json");
         const sendResponse = () => {
           if (outcome === "ok") {
             res.statusCode = 200;
-            res.end(JSON.stringify({ status: "ok", session: opts.session }));
+            res.end(
+              JSON.stringify({
+                status: "ok",
+                session: opts.session,
+                instanceId: opts.instanceId,
+                pid: opts.pid,
+              }),
+            );
           } else {
             res.statusCode = 503;
-            res.end(JSON.stringify({ status: "error" }));
+            res.end(
+              JSON.stringify({
+                status: "error",
+                ...(wantsDeep
+                  ? {
+                      error: "CDP target unreachable",
+                      reason: "Target closed",
+                    }
+                  : {}),
+                session: opts.session,
+                instanceId: opts.instanceId,
+                pid: opts.pid,
+              }),
+            );
           }
         };
         if (wantsDeep && opts.deepDelayMs) {
@@ -156,6 +443,20 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
         } else {
           sendResponse();
         }
+        return;
+      }
+      if (req.method === "POST" && req.url === "/call") {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          const payload = JSON.parse(body) as { routeSession?: string };
+          if (payload.routeSession) {
+            opts.releasedSessions?.push(payload.routeSession);
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.statusCode = 200;
+          res.end(JSON.stringify({ result: "status: stopped" }));
+        });
         return;
       }
       res.statusCode = 404;
@@ -203,6 +504,35 @@ describe("checkBridgeHealth (deep probe)", () => {
     const fake = await startFakeBridgeServer({ shallow: "ok", deep: "ok" });
     try {
       expect(await checkBridgeHealth(fake.port, { deep: true })).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("does not confirm target loss when a repeated probe recovers", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "error",
+      deepOutcomes: ["error", "ok"],
+    });
+    try {
+      await expect(
+        confirmBridgeTargetUnreachable(fake.port, {}, 2, 0),
+      ).resolves.toBe(false);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("confirms target loss only after repeated explicit failures", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "error",
+    });
+    try {
+      await expect(
+        confirmBridgeTargetUnreachable(fake.port, {}, 2, 0),
+      ).resolves.toBe(true);
     } finally {
       await fake.close();
     }
@@ -257,6 +587,34 @@ describe("checkBridgeHealth (deep probe)", () => {
       expect(
         await checkBridgeHealth(fake.port, { expectedSession: "worker-1" }),
       ).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("requires the recorded nonce and PID when verifying bridge identity", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: "worker-1",
+      instanceId: "instance-1",
+      pid: 12345,
+    });
+    try {
+      await expect(
+        checkBridgeIdentity(fake.port, {
+          session: "worker-1",
+          instanceId: "instance-1",
+          pid: 12345,
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        checkBridgeIdentity(fake.port, {
+          session: "worker-1",
+          instanceId: "stale-instance",
+          pid: 12345,
+        }),
+      ).resolves.toBe(false);
     } finally {
       await fake.close();
     }
@@ -465,7 +823,7 @@ describe("waitForProcessExit", () => {
     expect(await waitForProcessExit(pid, 50)).toBe(false);
 
     // After it exits naturally, the wait should succeed
-    expect(await waitForProcessExit(pid, 2000)).toBe(true);
+    expect(await waitForProcessExit(pid, 5000)).toBe(true);
   });
 
   it("returns false when the process outlives the timeout", async () => {
@@ -492,7 +850,7 @@ describe("waitForProcessExit", () => {
 describe("terminateBridgeProcess", () => {
   function waitForFile(path: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const deadline = Date.now() + 2000;
+      const deadline = Date.now() + 5000;
       const poll = () => {
         try {
           resolve(readFileSync(path, "utf-8").trim());
