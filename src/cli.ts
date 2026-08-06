@@ -142,15 +142,16 @@ environment:
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
   CHROME_DEVTOOLS_AXI_PORT          Bridge server port (default: 9224)
   CHROME_DEVTOOLS_AXI_SESSION       Named session for concurrent isolation. Each session name gets
-                                    its own bridge process, port (auto-derived from the name, or set
-                                    CHROME_DEVTOOLS_AXI_PORT), and on-disk state, so multiple sessions
-                                    run at once without colliding. Connection mode and profile are
-                                    unchanged. Defaults to "default" (port 9224, legacy state paths).
+                                    separate on-disk state and, without pooling, its own bridge and
+                                    port (auto-derived from the name, or set CHROME_DEVTOOLS_AXI_PORT).
+                                    Connection mode and profile are unchanged. Without pooling,
+                                    "default" uses port 9224 and the legacy state paths.
                                     e.g. CHROME_DEVTOOLS_AXI_SESSION=worker-1
   CHROME_DEVTOOLS_AXI_POOL_SIZE     Optional browser pool size. When set to a positive integer,
                                     logical sessions keep separate refs/state but hash onto N shared
                                     bridge/browser processes. The bridge routes each session to its
-                                    own page and pooled stop closes/blanks only that page. Unset or 0
+                                    owned page set; pooled stop closes/blanks all pages in that set.
+                                    Cannot be combined with BROWSER_URL or AUTO_CONNECT. Unset or 0
                                     preserves one bridge/browser per named session.
   CHROME_DEVTOOLS_AXI_BROWSER_URL   Connect to an existing Chrome instance instead of launching one.
                                     http(s):// uses --browserUrl (fetches /json/version).
@@ -173,7 +174,7 @@ environment:
                                     In pooled mode, release a logical session's routed pages after
                                     this many ms without that session's browser activity, even if
                                     other sessions keep the pooled bridge alive
-                                    (default: 1800000 / 30 minutes, min: 1000)
+                                    (default: effective bridge idle timeout, min: 1000)
 
 gpu:
   Headless Chrome cannot access hardware GPU on most Linux systems.
@@ -382,13 +383,15 @@ examples:
   EOF`,
 
   start: `usage: chrome-devtools-axi start
-Start the bridge server (launches headless Chrome).
+Start or reuse the active session's bridge and browser.
 
 examples:
   chrome-devtools-axi start`,
 
   stop: `usage: chrome-devtools-axi stop
-Stop the bridge server and close the browser.
+Stop the active logical browser session. Without pooling, this stops its bridge
+and closes its browser. With pooling, it releases every page owned by the caller
+while leaving the shared bridge available to other sessions.
 
 examples:
   chrome-devtools-axi stop`,
@@ -408,7 +411,8 @@ examples:
 
   // Page management
   pages: `usage: chrome-devtools-axi pages
-List all open pages/tabs in the browser.
+List pages/tabs owned by the active logical session. Without pooling, this is
+every open page in the session's browser.
 
 examples:
   chrome-devtools-axi pages`,
@@ -1544,7 +1548,7 @@ async function handleClosePage(args: string[]): Promise<string> {
     blocks.push(
       renderHelp([
         "Run `chrome-devtools-axi newpage <url>` to open another tab first",
-        "Run `chrome-devtools-axi stop` to shut down the browser entirely",
+        "Run `chrome-devtools-axi stop` to stop this bridge or release this session's pooled pages",
       ]),
     );
     return renderOutput(blocks);
