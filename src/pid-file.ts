@@ -440,8 +440,10 @@ function releaseReclaimLease(lease: ReclaimLease): void {
  * published. Takeover anchors are owner-and-inode identified: a live anchor is
  * removed only by the contender that published it, while dead-owner recovery
  * follows only same-target anchors through a chain bounded by inode-identity
- * cycle detection. Ownerless directories are age-reclaimed solely for
- * compatibility with the legacy mkdir-then-write lock format.
+ * cycle detection. Each replacement claim persists its predecessor's inode and
+ * owner so a successor can remove candidate aliases and takeover anchors left
+ * by a crash after atomic publication. Ownerless directories are age-reclaimed
+ * solely for compatibility with the legacy mkdir-then-write lock format.
  */
 export function removeStalePidFileLock(
   lockPath: string,

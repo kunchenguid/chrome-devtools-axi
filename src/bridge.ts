@@ -1669,10 +1669,7 @@ export async function closeBridgeResourcesWithinDeadline(
     timer.unref();
   });
   try {
-    return await Promise.race([
-      closeResources().then(() => true),
-      deadline,
-    ]);
+    return await Promise.race([closeResources().then(() => true), deadline]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }

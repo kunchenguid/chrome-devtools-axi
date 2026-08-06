@@ -534,9 +534,10 @@ export function buildBridgeEarlyExitError(
  * Ensure the bridge is running, starting it if needed. Returns the port.
  *
  * Verifies a *deep* health check (one round-trip CDP-backed MCP call) before
- * declaring the bridge ready, so a bridge whose attached browser/Electron
- * target was killed while still answering local /health requests gets torn
- * down + restarted instead of being reused as a stale endpoint.
+ * declaring the bridge ready. Automatic replacement requires the recorded
+ * session/instance/PID identity and repeated target-unreachable probes; other
+ * deep-health failures preserve the existing bridge because another route may
+ * still be active.
  *
  * `spawnBridge` is injectable for tests; production uses {@link spawnBridgeProcess}.
  */
@@ -552,8 +553,8 @@ export async function ensureBridge(
   const port = resolveBridgePort(sessionName);
   const pidFile = resolveBridgePidFile(sessionName);
 
-  // Check existing bridge via PID file. Use a deep probe so a bridge whose
-  // attached CDP target has gone away gets recycled instead of returned.
+  // Check the existing bridge via its PID file. Recycle it only after exact
+  // identity and repeated deep probes confirm persistent CDP target loss.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
     const recordedSessionMatches =

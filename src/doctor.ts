@@ -1,8 +1,9 @@
 /**
  * Read-only-by-default diagnostics for default, named, and pooled browser
- * bridge state. Cleanup options are explicit and either remove a PID file only
- * after confirming the PID is dead or request authenticated self-shutdown only
- * after confirming the live bridge's recorded instance identity.
+ * bridge state. Diagnostic probes do not refresh activity or idle watchdogs.
+ * Cleanup options are explicit and either remove a PID file only after
+ * confirming the PID is dead or request authenticated self-shutdown only after
+ * confirming the live bridge's recorded instance identity.
  */
 
 import { execFileSync } from "node:child_process";

@@ -419,7 +419,7 @@ examples:
   chrome-devtools-axi stop`,
 
   sessions: `usage: chrome-devtools-axi sessions [--json] [--clean-stale] [--stop-unhealthy]
-Inventory bridge session state without starting a browser.
+Inventory bridge session state without starting a browser or renewing its idle lifetime.
 
 flags:
   --json            Print machine-readable JSON for watchdogs/Fleet
