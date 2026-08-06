@@ -543,8 +543,27 @@ export class BrowserPageRouter {
         return result;
       }
 
-      await this.ensureSessionPage(routeSession, call);
-      const result = await call(payload.name, payload.args);
+      const pagesBeforeCall = await this.ensureSessionPage(routeSession, call);
+      let result: string;
+      try {
+        result = await call(payload.name, payload.args);
+      } catch (error) {
+        // A failed click/script can still have opened or closed a page. Reconcile
+        // best-effort so route cleanup does not leak that side effect, while
+        // preserving the original tool error for the caller.
+        try {
+          await this.reconcilePagesAfterCall(
+            routeSession,
+            pagesBeforeCall,
+            call,
+          );
+        } catch {
+          // The original MCP error is more useful than a follow-up list failure.
+        }
+        this.touchRoute(routeSession, call);
+        throw error;
+      }
+      await this.reconcilePagesAfterCall(routeSession, pagesBeforeCall, call);
       this.touchRoute(routeSession, call);
       return result;
     } finally {
@@ -593,7 +612,7 @@ export class BrowserPageRouter {
   private async ensureSessionPage(
     routeSession: string,
     call: BridgeToolCall,
-  ): Promise<void> {
+  ): Promise<ParsedPage[]> {
     let pages = await this.listPages(call);
     const ownedPages = this.pagesByRouteSession.get(routeSession) ?? new Set();
     const activePageId = this.activePageByRouteSession.get(routeSession);
@@ -607,7 +626,7 @@ export class BrowserPageRouter {
         await call("select_page", { pageId: existing.id, bringToFront: false });
       }
       this.rememberPage(routeSession, existing.id, true);
-      return;
+      return pages;
     }
 
     this.forgetMissingPages(pages);
@@ -621,11 +640,38 @@ export class BrowserPageRouter {
         undefined,
       );
 
-    if (!target) return;
+    if (!target) return pages;
     if (!target.selected) {
       await call("select_page", { pageId: target.id, bringToFront: false });
     }
     this.rememberPage(routeSession, target.id, true);
+    return pages;
+  }
+
+  /**
+   * Claim pages created as a side effect of a routed tool call. Interactions
+   * such as clicks and evaluated scripts can open a popup without going
+   * through the explicit `new_page` tool; without this reconciliation those
+   * pages have no route owner and survive both `stop` and route-idle cleanup.
+   */
+  private async reconcilePagesAfterCall(
+    routeSession: string,
+    before: ParsedPage[],
+    call: BridgeToolCall,
+  ): Promise<void> {
+    const beforeIds = new Set(before.map((page) => page.id));
+    const after = await this.listPages(call);
+    this.forgetMissingPages(after);
+
+    const created = after.filter((page) => !beforeIds.has(page.id));
+    for (const page of created) {
+      this.rememberPage(routeSession, page.id, page.selected);
+    }
+
+    const selected = after.find((page) => page.selected);
+    if (selected && this.routeSessionByPage.get(selected.id) === routeSession) {
+      this.activePageByRouteSession.set(routeSession, selected.id);
+    }
   }
 
   private async openOwnedPage(

@@ -68,7 +68,8 @@ describe("bridge idle lifecycle", () => {
 
   it("inherits a 2-minute Fleet bridge idle env when route idle is unset", () => {
     const savedBridgeIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
-    const savedRouteIdle = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+    const savedRouteIdle =
+      process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
     try {
       process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "120000";
       delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
@@ -434,6 +435,57 @@ describe("BrowserPageRouter", () => {
     expect(pages).toContain("1: https://a.example/ [selected]");
     expect(pages).toContain("2: https://background.example/");
     expect(snapshot).toBe("snapshot:1");
+  });
+
+  it("owns and releases a popup opened as a side effect of a routed call", async () => {
+    const router = new BrowserPageRouter();
+    const fake = new FakeMcpPages();
+    const callWithPopup = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      if (name === "click") {
+        fake.calls.push({ name, args });
+        fake.pages = fake.pages.map((page) => ({
+          ...page,
+          selected: false,
+        }));
+        fake.pages.push({
+          id: 2,
+          url: "https://popup.example/",
+          selected: true,
+        });
+        return "";
+      }
+      return fake.call(name, args);
+    };
+
+    await router.run(
+      {
+        name: "navigate_page",
+        args: { type: "url", url: "https://a.example/" },
+        routeSession: "worker-a",
+      },
+      callWithPopup,
+    );
+    await router.run(
+      { name: "click", args: { uid: "button-1" }, routeSession: "worker-a" },
+      callWithPopup,
+    );
+
+    const owned = await router.run(
+      { name: "list_pages", args: {}, routeSession: "worker-a" },
+      callWithPopup,
+    );
+    expect(owned).toContain("1: https://a.example/");
+    expect(owned).toContain("2: https://popup.example/ [selected]");
+
+    const released = await router.run(
+      { name: "__axi_release_session", args: {}, routeSession: "worker-a" },
+      callWithPopup,
+    );
+    expect(released).toContain("closed 2");
+    expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
   });
 
   it("releases a routed session by closing its page when a survivor exists", async () => {
