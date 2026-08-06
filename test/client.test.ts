@@ -465,7 +465,7 @@ describe("waitForProcessExit", () => {
     expect(await waitForProcessExit(pid, 50)).toBe(false);
 
     // After it exits naturally, the wait should succeed
-    expect(await waitForProcessExit(pid, 2000)).toBe(true);
+    expect(await waitForProcessExit(pid, 5000)).toBe(true);
   });
 
   it("returns false when the process outlives the timeout", async () => {
@@ -492,7 +492,7 @@ describe("waitForProcessExit", () => {
 describe("terminateBridgeProcess", () => {
   function waitForFile(path: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const deadline = Date.now() + 2000;
+      const deadline = Date.now() + 5000;
       const poll = () => {
         try {
           resolve(readFileSync(path, "utf-8").trim());

@@ -6,7 +6,11 @@ import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
 import { AxiError } from "axi-sdk-js";
-import { BRIDGE_PORT_IN_USE_EXIT_CODE, resolveBridgeScript } from "./bridge.js";
+import {
+  BRIDGE_PORT_IN_USE_EXIT_CODE,
+  MCP_PACKAGE_SPEC,
+  resolveBridgeScript,
+} from "./bridge.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -314,10 +318,11 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
  *
  * The guidance is attributed by exit code. Only {@link BRIDGE_PORT_IN_USE_EXIT_CODE}
  * (the bridge's EADDRINUSE sentinel) gets the port-in-use explanation; any
- * other early death is a startup failure (npx could not resolve/download
- * chrome-devtools-mcp, a broken `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a
- * Chrome launch failure) and gets the generic startup guidance, so a
- * single-session user with a broken install is not misdirected to port advice.
+ * other early death is a startup failure (packaged MCP could not start, the
+ * pinned npx fallback could not resolve/download chrome-devtools-mcp, a broken
+ * `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a Chrome launch failure) and gets the
+ * generic startup guidance, so a single-session user with a broken install is
+ * not misdirected to port advice.
  */
 export function buildBridgeEarlyExitError(
   sessionName: string,
@@ -339,7 +344,7 @@ export function buildBridgeEarlyExitError(
   }
 
   const suggestions = [
-    "Check that chrome-devtools-mcp can start: npx chrome-devtools-mcp@latest --help",
+    "Reinstall chrome-devtools-axi so its packaged MCP dependency is present.",
   ];
   if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH) {
     suggestions.push(
@@ -347,8 +352,7 @@ export function buildBridgeEarlyExitError(
     );
   } else {
     suggestions.push(
-      "`npx -y chrome-devtools-mcp@latest` may have failed to resolve/download the package (offline, or a slow cold first run); install it globally and set:",
-      '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
+      `If the packaged dependency is unavailable, check the pinned fallback directly: npx -y ${MCP_PACKAGE_SPEC} --help`,
     );
   }
   suggestions.push(
@@ -411,7 +415,8 @@ export async function ensureBridge(
     exitSignal = signal;
   });
 
-  // Poll for health — Chrome launch + npx bootstrap can be slow.
+  // Poll for health — Chrome launch can be slow, and broken installs may hit
+  // the slower pinned npx fallback.
   // Track whether the *shallow* health check ever passed so we can attribute
   // the failure correctly: shallow-but-no-deep means the MCP server came up
   // but the attached CDP target is dead, vs. nothing-came-up which is the
@@ -462,14 +467,16 @@ export async function ensureBridge(
     );
   }
 
-  const usingNpx = !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
   const suggestions = [
-    "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
+    "Reinstall chrome-devtools-axi so its packaged MCP dependency is present.",
   ];
-  if (usingNpx) {
+  if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH) {
     suggestions.push(
-      "If `npx -y chrome-devtools-mcp@latest` is slow on this machine, install mcp globally and set:",
-      '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
+      "Verify CHROME_DEVTOOLS_AXI_MCP_PATH points to a valid chrome-devtools-mcp build.",
+    );
+  } else {
+    suggestions.push(
+      `If the packaged dependency is unavailable, check the pinned fallback directly: npx -y ${MCP_PACKAGE_SPEC} --help`,
     );
   }
   suggestions.push(

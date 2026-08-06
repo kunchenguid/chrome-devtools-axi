@@ -46,6 +46,7 @@ npx skills add kunchenguid/chrome-devtools-axi --skill chrome-devtools-axi -g
 
 That is the entire setup - no npm install needed.
 The skill teaches your agent to run chrome-devtools-axi through `npx -y chrome-devtools-axi`, so the CLI comes along on demand.
+chrome-devtools-axi ships a pinned `chrome-devtools-mcp` dependency, so after that package install the persistent bridge starts MCP from its own dependency graph instead of resolving `chrome-devtools-mcp` through `npx` for every new browser session.
 
 The skill is not a user-facing slash command (`user-invocable: false`).
 Just ask for anything that needs a real browser - opening a page, clicking through a flow, extracting page content, debugging console or network, auditing performance - and the agent loads the skill on its own when it recognizes the task.
@@ -89,6 +90,8 @@ Just tell your agent:
 Execute `npx -y chrome-devtools-axi` to get browser automation tools.
 ```
 
+The first `npx` invocation still has to download chrome-devtools-axi itself, but the MCP server it wraps is installed as part of that package and is pinned to the tested version.
+
 ### Session hook
 
 Want ambient browser context - including the live page state of an active session - fed into every agent session instead of loading on demand?
@@ -113,6 +116,8 @@ pnpm install --frozen-lockfile
 pnpm run build
 pnpm link
 ```
+
+Use Node `20.19+`, `22.12+`, or `23+`; this matches the packaged `chrome-devtools-mcp` runtime requirement.
 
 ## How It Works
 

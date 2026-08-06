@@ -93,11 +93,9 @@ environment:
   CHROME_DEVTOOLS_AXI_USER_DATA_DIR Persistent Chrome profile directory (skips --isolated mode)
                                     e.g. "/path/to/.chrome-profile"
   CHROME_DEVTOOLS_AXI_MCP_PATH      Absolute path to a chrome-devtools-mcp script. When set, the
-                                    bridge spawns 'node \$MCP_PATH' directly instead of
-                                    'npx -y chrome-devtools-mcp@latest'. Avoids ~30s npx bootstrap
-                                    on slow/cold systems. Recommended:
-                                      npm install -g chrome-devtools-mcp
-                                      export CHROME_DEVTOOLS_AXI_MCP_PATH="\$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+                                    bridge spawns 'node \$MCP_PATH' directly instead of the
+                                    package-owned chrome-devtools-mcp dependency. For local MCP
+                                    development or emergency overrides; normal installs do not need it.
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
   CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS

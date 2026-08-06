@@ -40,12 +40,13 @@
   },
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || ^22.12.0 || >=23"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@toon-format/toon": "^2.1.0",
-    "axi-sdk-js": "^0.1.8"
+    "axi-sdk-js": "^0.1.8",
+    "chrome-devtools-mcp": "1.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

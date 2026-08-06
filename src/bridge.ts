@@ -29,6 +29,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import {
   resolveSessionName,
@@ -553,8 +554,14 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
   "--password-store=basic",
 ] as const;
 
+export const MCP_PACKAGE_NAME = "chrome-devtools-mcp";
+export const MCP_PACKAGE_VERSION = "1.6.0";
+export const MCP_PACKAGE_SPEC = `${MCP_PACKAGE_NAME}@${MCP_PACKAGE_VERSION}`;
+
+const requireFromBridge = createRequire(import.meta.url);
+
 export function buildTransportArgs(): string[] {
-  const args = ["-y", "chrome-devtools-mcp@latest"];
+  const args = ["-y", MCP_PACKAGE_SPEC];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -638,10 +645,20 @@ export function buildTransportArgs(): string[] {
 export interface McpPathProbe {
   existsSync: (path: string) => boolean;
   getNpmPrefix: () => string | null;
+  readFileSync: (path: string) => string;
+  resolvePackageJson: (packageName: string) => string | null;
 }
 
 const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
   existsSync: (path) => existsSync(path),
+  readFileSync: (path) => readFileSync(path, "utf8"),
+  resolvePackageJson: (packageName) => {
+    try {
+      return requireFromBridge.resolve(`${packageName}/package.json`);
+    } catch {
+      return null;
+    }
+  },
   getNpmPrefix: () => {
     try {
       return execSync("npm prefix -g", {
@@ -654,13 +671,51 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
   },
 };
 
+function getPackageBinPath(manifest: unknown, binName: string): string | null {
+  if (manifest === null || typeof manifest !== "object") return null;
+  const bin = (manifest as { bin?: unknown }).bin;
+  if (typeof bin === "string") return bin;
+  if (bin === null || typeof bin !== "object" || Array.isArray(bin)) {
+    return null;
+  }
+  const binPath = (bin as Record<string, unknown>)[binName];
+  return typeof binPath === "string" ? binPath : null;
+}
+
+/**
+ * Resolve the chrome-devtools-mcp binary from chrome-devtools-axi's own
+ * dependency graph. Published chrome-devtools-axi installs ship this pinned
+ * dependency, so normal bridge startup can spawn `node <local mcp bin>`
+ * directly without a per-session npm/npx resolution step.
+ */
+export function detectPackagedMcpPath(
+  probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
+): string | null {
+  const packageJsonPath = probe.resolvePackageJson(MCP_PACKAGE_NAME);
+  if (!packageJsonPath) return null;
+
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(probe.readFileSync(packageJsonPath));
+  } catch {
+    return null;
+  }
+
+  const binPath = getPackageBinPath(manifest, MCP_PACKAGE_NAME);
+  if (!binPath) return null;
+
+  const candidate = resolve(dirname(packageJsonPath), binPath);
+  return probe.existsSync(candidate) ? candidate : null;
+}
+
 /**
  * Auto-detect a globally-installed chrome-devtools-mcp by probing
  * `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
  *
  * Returns the resolved path on success, or null if npm is unavailable or the
- * package isn't installed. Used as the auto-fallback in
- * {@link resolveTransportSpec} when `CHROME_DEVTOOLS_AXI_MCP_PATH` isn't set.
+ * package isn't installed. This is a compatibility fallback for damaged or
+ * partial installs; normal packaged installs use {@link detectPackagedMcpPath}
+ * first so the MCP server version stays pinned to chrome-devtools-axi.
  */
 export function detectGlobalMcpPath(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -671,7 +726,7 @@ export function detectGlobalMcpPath(
     prefix,
     "lib",
     "node_modules",
-    "chrome-devtools-mcp",
+    MCP_PACKAGE_NAME,
     "build",
     "src",
     "bin",
@@ -685,14 +740,13 @@ export function detectGlobalMcpPath(
  *
  * Resolution order (most → least specific):
  *   1. `CHROME_DEVTOOLS_AXI_MCP_PATH` env var — explicit override, always wins.
- *   2. Auto-detect: probe a globally-installed `chrome-devtools-mcp` via
+ *   2. Package-owned `chrome-devtools-mcp` dependency pinned by chrome-devtools-axi.
+ *      This is the normal install path and avoids per-session npm/npx bootstrap.
+ *   3. Auto-detect: probe a globally-installed `chrome-devtools-mcp` via
  *      `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
- *      If found, spawn `node <path>` directly — starts in ~1-2s vs. the
- *      30s+ npx-bootstrap path.
- *   3. Fall back to `npx -y chrome-devtools-mcp@latest`. On systems with a
- *      slow link or large global cache this can race the bridge's readiness
- *      deadline; install the package globally to skip it:
- *        npm install -g chrome-devtools-mcp
+ *      If found, spawn `node <path>` directly.
+ *   4. Fall back to `npx -y chrome-devtools-mcp@<pinned version>` for source
+ *      checkouts or broken installs where the package dependency is unavailable.
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -700,9 +754,11 @@ export function resolveTransportSpec(
   const mcpArgs = buildTransportArgs();
   const explicit = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
   const mcpPath =
-    explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
+    explicit && explicit.length > 0
+      ? explicit
+      : (detectPackagedMcpPath(probe) ?? detectGlobalMcpPath(probe));
   if (mcpPath) {
-    // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
+    // Strip the npx prefix `["-y", MCP_PACKAGE_SPEC]` — direct
     // node spawn doesn't need it.
     return {
       command: process.execPath,
