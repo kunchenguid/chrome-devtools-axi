@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -248,5 +249,55 @@ describe("PID file locking", () => {
     expect(existsSync(reclaimCandidatePath)).toBe(false);
     expect(existsSync(takeoverPath)).toBe(false);
     expect(existsSync(takeoverCandidatePath)).toBe(false);
+  });
+
+  it("recovers predecessor artifacts after a takeover crashes post-publish", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-post-publish-takeover-"));
+    roots.push(root);
+    const pidFile = join(root, "bridge.pid");
+    const lockPath = `${pidFile}.lock`;
+    const reclaimPath = `${lockPath}.reclaim`;
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, token: "stale-owner" }),
+    );
+    const staleLock = lstatSync(lockPath);
+    const predecessor = {
+      dev: staleLock.dev,
+      ino: staleLock.ino,
+      owner: { pid: 99999999, token: "first-dead-reclaimer" },
+    };
+    const predecessorCandidatePath = `${reclaimPath}.${predecessor.owner.token}`;
+    writeFileSync(predecessorCandidatePath, JSON.stringify(predecessor));
+    linkSync(predecessorCandidatePath, reclaimPath);
+    const predecessorStat = lstatSync(reclaimPath);
+
+    const replacement = {
+      dev: staleLock.dev,
+      ino: staleLock.ino,
+      owner: { pid: 99999999, token: "second-dead-reclaimer" },
+      predecessor: {
+        dev: predecessorStat.dev,
+        ino: predecessorStat.ino,
+        owner: predecessor.owner,
+      },
+    };
+    const replacementCandidatePath = `${reclaimPath}.${replacement.owner.token}`;
+    const predecessorAnchorPath = `${reclaimPath}.takeover-${predecessorStat.dev}-${predecessorStat.ino}`;
+    writeFileSync(replacementCandidatePath, JSON.stringify(replacement));
+    linkSync(replacementCandidatePath, predecessorAnchorPath);
+    renameSync(replacementCandidatePath, reclaimPath);
+
+    let entered = false;
+    withPidFileLock(pidFile, () => {
+      entered = true;
+    });
+
+    expect(entered).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(reclaimPath)).toBe(false);
+    expect(existsSync(predecessorCandidatePath)).toBe(false);
+    expect(existsSync(predecessorAnchorPath)).toBe(false);
+    expect(existsSync(replacementCandidatePath)).toBe(false);
   });
 });

@@ -30,6 +30,13 @@ type ReclaimClaim = {
   dev: number;
   ino: number;
   owner: LockOwner;
+  predecessor?: ReclaimIdentity;
+};
+
+type ReclaimIdentity = {
+  dev: number;
+  ino: number;
+  owner: LockOwner;
 };
 
 type ReclaimSnapshot = {
@@ -140,14 +147,27 @@ function readReclaimSnapshot(path: string): ReclaimSnapshot | undefined {
       dev?: unknown;
       ino?: unknown;
       owner?: Partial<LockOwner>;
+      predecessor?: {
+        dev?: unknown;
+        ino?: unknown;
+        owner?: Partial<LockOwner>;
+      };
     };
+    const predecessor = parsed.predecessor;
     if (
       typeof parsed.dev !== "number" ||
       typeof parsed.ino !== "number" ||
       !Number.isInteger(parsed.owner?.pid) ||
       (parsed.owner?.pid as number) <= 0 ||
       typeof parsed.owner?.token !== "string" ||
-      !/^[A-Za-z0-9_-]+$/.test(parsed.owner.token)
+      !/^[A-Za-z0-9_-]+$/.test(parsed.owner.token) ||
+      (predecessor !== undefined &&
+        (typeof predecessor.dev !== "number" ||
+          typeof predecessor.ino !== "number" ||
+          !Number.isInteger(predecessor.owner?.pid) ||
+          (predecessor.owner?.pid as number) <= 0 ||
+          typeof predecessor.owner?.token !== "string" ||
+          !/^[A-Za-z0-9_-]+$/.test(predecessor.owner.token)))
     ) {
       return undefined;
     }
@@ -161,6 +181,17 @@ function readReclaimSnapshot(path: string): ReclaimSnapshot | undefined {
           pid: parsed.owner.pid as number,
           token: parsed.owner.token,
         },
+        predecessor:
+          predecessor === undefined
+            ? undefined
+            : {
+                dev: predecessor.dev as number,
+                ino: predecessor.ino as number,
+                owner: {
+                  pid: predecessor.owner?.pid as number,
+                  token: predecessor.owner?.token as string,
+                },
+              },
       },
     };
   } catch {
@@ -181,14 +212,55 @@ function sameReclaimIdentity(
   left: ReclaimSnapshot | undefined,
   right: ReclaimSnapshot,
 ): boolean {
+  const leftPredecessor = left?.claim.predecessor;
+  const rightPredecessor = right.claim.predecessor;
   return (
     left?.dev === right.dev &&
     left.ino === right.ino &&
     left.claim.dev === right.claim.dev &&
     left.claim.ino === right.claim.ino &&
     left.claim.owner.pid === right.claim.owner.pid &&
-    left.claim.owner.token === right.claim.owner.token
+    left.claim.owner.token === right.claim.owner.token &&
+    (leftPredecessor === undefined) === (rightPredecessor === undefined) &&
+    (leftPredecessor === undefined ||
+      (rightPredecessor !== undefined &&
+        leftPredecessor.dev === rightPredecessor.dev &&
+        leftPredecessor.ino === rightPredecessor.ino &&
+        leftPredecessor.owner.pid === rightPredecessor.owner.pid &&
+        leftPredecessor.owner.token === rightPredecessor.owner.token))
   );
+}
+
+function removeInheritedReclaimArtifacts(
+  reclaimPath: string,
+  snapshot: ReclaimSnapshot,
+): void {
+  const predecessor = snapshot.claim.predecessor;
+  if (!predecessor) return;
+
+  const predecessorCandidatePath = `${reclaimPath}.${predecessor.owner.token}`;
+  const predecessorCandidate = readReclaimSnapshot(predecessorCandidatePath);
+  if (
+    predecessorCandidate?.dev === predecessor.dev &&
+    predecessorCandidate.ino === predecessor.ino &&
+    predecessorCandidate.claim.dev === snapshot.claim.dev &&
+    predecessorCandidate.claim.ino === snapshot.claim.ino &&
+    predecessorCandidate.claim.owner.pid === predecessor.owner.pid &&
+    predecessorCandidate.claim.owner.token === predecessor.owner.token
+  ) {
+    try {
+      unlinkSync(predecessorCandidatePath);
+    } catch {}
+  }
+
+  const predecessorAnchorPath = `${reclaimPath}.takeover-${predecessor.dev}-${predecessor.ino}`;
+  if (
+    sameReclaimIdentity(readReclaimSnapshot(predecessorAnchorPath), snapshot)
+  ) {
+    try {
+      unlinkSync(predecessorAnchorPath);
+    } catch {}
+  }
 }
 
 function removeReclaimCandidateAlias(
@@ -268,6 +340,11 @@ function takeOverReclaimClaim(
     dev: stale.claim.dev,
     ino: stale.claim.ino,
     owner,
+    predecessor: {
+      dev: stale.dev,
+      ino: stale.ino,
+      owner: stale.claim.owner,
+    },
   };
   const candidatePath = `${reclaimPath}.${owner.token}`;
   let predecessor = stale;
@@ -307,13 +384,14 @@ function takeOverReclaimClaim(
 
     const current = readReclaimSnapshot(reclaimPath);
     if (
-      current?.dev !== stale.dev ||
-      current.ino !== stale.ino ||
+      !current ||
+      !sameReclaimIdentity(current, stale) ||
       isAlive(current.claim.owner.pid)
     ) {
       return undefined;
     }
 
+    removeInheritedReclaimArtifacts(reclaimPath, current);
     renameSync(candidatePath, reclaimPath);
     removeReclaimCandidateAlias(reclaimPath, stale);
     for (const anchor of staleAnchors.reverse()) {
