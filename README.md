@@ -99,7 +99,7 @@ npm install -g chrome-devtools-axi
 chrome-devtools-axi setup hooks
 ```
 
-This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and records a 120-second idle policy for later browser commands in that agent session. Activity renews the policy, and it expires after 120 seconds without a command when an agent lacks a shutdown callback. **Pi** gets the equivalent native extension: `session_start` captures ambient AXI context for its agent prompt, and `session_shutdown` stops the owned browser session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown and clears the policy.
+This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and records the bounded idle policy described under Configuration. **Pi** gets the equivalent native extension: `session_start` captures ambient AXI context for its agent prompt, and `session_shutdown` stops the owned browser session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown and clears the policy.
 
 Pi installs into `${PI_CODING_AGENT_DIR:-~/.pi/agent}/extensions/chrome-devtools-axi.ts`. Run setup with `PI_CODING_AGENT_DIR` set when you use an isolated Pi profile such as Fleet's `~/.pi-fleet` profile.
 **Restart your agent session after running this** so the new hook takes effect.
@@ -293,6 +293,12 @@ persist a 120-second idle policy for the logical agent session, and the packaged
 skill passes the equivalent portable `--idle-timeout-ms=120000` option on every
 command. Direct CLI users keep the 30-minute default unless they pass the flag
 or set `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS` themselves.
+
+Only a browser-owning command—`start` or a command that may auto-start the
+bridge—consumes and renews the persisted hook policy. The home view, help,
+`stop`, `sessions`, `setup`, and a one-shot `--idle-timeout-ms` invocation do not
+create or renew that file; without a qualifying browser command, it expires 120
+seconds after session start or its last consumption.
 
 The effective timeout precedence is the command-line flag, then
 `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS`, then a persisted agent-session policy,
