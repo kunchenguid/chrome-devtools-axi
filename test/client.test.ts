@@ -25,6 +25,7 @@ import {
   requestedRouteIdleTimeoutMs,
   resolveBridgeTimeoutMs,
   readProcessCommand,
+  resolveBridgeLaunchCommand,
   type SpawnedBridge,
   stopBridge,
   stopBridgeSession,
@@ -104,6 +105,19 @@ describe("readProcessCommand", () => {
       expect.arrayContaining([expect.stringContaining("ProcessId = 42")]),
       expect.objectContaining({ encoding: "utf-8" }),
     );
+  });
+});
+
+describe("resolveBridgeLaunchCommand", () => {
+  it("runs a TypeScript bridge directly so its PID leads the detached group", () => {
+    expect(resolveBridgeLaunchCommand("/repo/bin/bridge.ts")).toEqual({
+      command: process.execPath,
+      args: ["--import", "tsx", "/repo/bin/bridge.ts"],
+    });
+    expect(resolveBridgeLaunchCommand("/repo/dist/bridge.js")).toEqual({
+      command: process.execPath,
+      args: ["/repo/dist/bridge.js"],
+    });
   });
 });
 

@@ -258,7 +258,12 @@ describe("main CLI runtime", () => {
   });
 
   it("preserves an explicit idle environment during session start", async () => {
+    const originalHome = process.env.HOME;
+    const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
     const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    const home = mkdtempSync(join(tmpdir(), "axi-session-start-env-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "worker-session-start-env";
     process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "600000";
     let observedTimeout: string | undefined;
     try {
@@ -270,11 +275,55 @@ describe("main CLI runtime", () => {
 
       expect(observedTimeout).toBe("600000");
     } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = originalSession;
+      }
       if (previousIdleTimeout === undefined) {
         delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
       } else {
         process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = previousIdleTimeout;
       }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves an explicit idle flag during session start", async () => {
+    const originalHome = process.env.HOME;
+    const originalSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    const previousIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    const home = mkdtempSync(join(tmpdir(), "axi-session-start-flag-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "worker-session-start-flag";
+    delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    let observedTimeout: string | undefined;
+    try {
+      runAxiCli.mockImplementationOnce(async () => {
+        observedTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      });
+
+      await main({
+        argv: ["--agent-session-start", "--idle-timeout-ms=600000"],
+      });
+
+      expect(observedTimeout).toBe("600000");
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = originalSession;
+      }
+      if (previousIdleTimeout === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = previousIdleTimeout;
+      }
+      rmSync(home, { recursive: true, force: true });
     }
   });
 

@@ -395,23 +395,29 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
   const script = existsSync(bridgeScript.replace(/\.js$/, ".ts"))
     ? bridgeScript.replace(/\.js$/, ".ts")
     : bridgeScript;
-  const runner = script.endsWith(".ts") ? "tsx" : "node";
+  const launch = resolveBridgeLaunchCommand(script);
 
-  const child = spawn(
-    runner === "tsx" ? "npx" : "node",
-    runner === "tsx" ? ["tsx", script] : [script],
-    {
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        CHROME_DEVTOOLS_AXI_PORT: String(port),
-        CHROME_DEVTOOLS_AXI_SESSION: sessionName,
-      },
-      detached: true,
+  const child = spawn(launch.command, launch.args, {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      CHROME_DEVTOOLS_AXI_PORT: String(port),
+      CHROME_DEVTOOLS_AXI_SESSION: sessionName,
     },
-  );
+    detached: true,
+  });
   child.unref();
   return child;
+}
+
+export function resolveBridgeLaunchCommand(script: string): {
+  command: string;
+  args: string[];
+} {
+  return {
+    command: process.execPath,
+    args: script.endsWith(".ts") ? ["--import", "tsx", script] : [script],
+  };
 }
 
 /**
