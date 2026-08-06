@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -110,8 +110,10 @@ describe("browser session diagnostics", () => {
 
   it("flags session mismatches and failed deep health as unhealthy", async () => {
     writePid("worker-1", { pid: 222, port: 9444 });
+    const stopSession = vi.fn();
 
     const report = await inspectBrowserSessions({
+      stopUnhealthy: true,
       runtime: {
         isProcessAlive: (pid) => pid === 222,
         isBridgeProcess: () => true,
@@ -120,6 +122,7 @@ describe("browser session diagnostics", () => {
           command: "chrome-devtools-axi-bridge",
         }),
         checkHealth: async (_port, opts) => opts?.expectedSession === undefined,
+        stopSession,
       },
     });
 
@@ -129,6 +132,35 @@ describe("browser session diagnostics", () => {
     expect(worker?.status).toBe("unhealthy");
     expect(worker?.flags).toContain("session_mismatch");
     expect(worker?.flags).toContain("bridge_health_failed");
+    expect(stopSession).not.toHaveBeenCalled();
+    expect(worker?.cleanup).toBeUndefined();
+  });
+
+  it("stops unhealthy bridges only when health fails for the same session", async () => {
+    writePid("worker-1", { pid: 222, port: 9444, session: "worker-1" });
+    const stopSession = vi.fn(async () => "stopped" as const);
+
+    const report = await inspectBrowserSessions({
+      stopUnhealthy: true,
+      runtime: {
+        isProcessAlive: (pid) => pid === 222,
+        isBridgeProcess: () => true,
+        readProcessInfo: () => ({
+          pgid: 222,
+          command: "chrome-devtools-axi-bridge",
+        }),
+        checkHealth: async (_port, opts) => opts?.deep !== true,
+        stopSession,
+      },
+    });
+
+    const worker = report.sessions.find(
+      (session) => session.session === "worker-1",
+    );
+    expect(worker?.status).toBe("unhealthy");
+    expect(worker?.flags).toContain("deep_health_failed");
+    expect(worker?.flags).toContain("stop_unhealthy_stopped");
+    expect(stopSession).toHaveBeenCalledWith("worker-1");
   });
 
   it("cleans stale PID files only when explicitly requested and the PID is dead", async () => {

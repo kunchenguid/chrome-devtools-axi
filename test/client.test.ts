@@ -3,7 +3,13 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AxiError } from "axi-sdk-js";
@@ -18,9 +24,11 @@ import {
   resolveBridgeTimeoutMs,
   type SpawnedBridge,
   stopBridge,
+  stopBridgeSession,
   terminateBridgeProcess,
   waitForProcessExit,
 } from "../src/client.js";
+import { resolveSessionPidFile } from "../src/sessions.js";
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {
@@ -78,6 +86,34 @@ describe("unsafe session names are rejected on action entry points", () => {
   it("getSessionSnapshotIfRunning degrades an invalid session to null instead of throwing", async () => {
     process.env.CHROME_DEVTOOLS_AXI_SESSION = "..";
     await expect(getSessionSnapshotIfRunning()).resolves.toBeNull();
+  });
+
+  it("stopBridgeSession refuses a PID file owned by a different recorded session", async () => {
+    const savedHome = process.env.HOME;
+    const home = mkdtempSync(join(tmpdir(), "cda-stop-session-"));
+    try {
+      process.env.HOME = home;
+      const pidFile = resolveSessionPidFile("worker-1");
+      mkdirSync(join(home, ".chrome-devtools-axi", "sessions", "worker-1"), {
+        recursive: true,
+      });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({
+          pid: process.pid,
+          port: 9444,
+          session: "other-worker",
+        }),
+      );
+
+      await expect(stopBridgeSession("worker-1")).resolves.toBe(
+        "session-mismatch",
+      );
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

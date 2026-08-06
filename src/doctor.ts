@@ -402,7 +402,8 @@ async function inspectOneSession(
         deep: deepExpected,
         sessionMatches: !shallowAny || shallowExpected,
       };
-      if (shallowAny && !shallowExpected) flags.push("session_mismatch");
+      const sessionMismatch = shallowAny && !shallowExpected;
+      if (sessionMismatch) flags.push("session_mismatch");
       if (!shallowExpected) flags.push("bridge_health_failed");
       if (shallowExpected && !deepExpected) flags.push("deep_health_failed");
 
@@ -418,7 +419,7 @@ async function inspectOneSession(
         }
       } else {
         status = "unhealthy";
-        if (options.stopUnhealthy) {
+        if (options.stopUnhealthy && !sessionMismatch) {
           const stopResult = await options.runtime.stopSession(session);
           cleanup = { ...(cleanup ?? {}), stopResult };
           flags.push(`stop_unhealthy_${stopResult.replace("-", "_")}`);

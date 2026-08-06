@@ -389,17 +389,26 @@ export async function ensureBridge(
   // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
-    if (
-      await checkBridgeHealth(pidInfo.port, {
-        deep: true,
-        expectedSession: sessionName,
-      })
-    ) {
-      return pidInfo.port;
-    }
-    await terminateBridgeProcess(pidInfo.pid, {
-      killProcessGroup: isBridgeProcess(pidInfo.pid),
+    const recordedSessionMatches =
+      pidInfo.session === undefined || pidInfo.session === sessionName;
+    const shallowAny = await checkBridgeHealth(pidInfo.port);
+    const shallowExpected = await checkBridgeHealth(pidInfo.port, {
+      expectedSession: sessionName,
     });
+    const healthSessionMatches = !shallowAny || shallowExpected;
+    if (recordedSessionMatches && healthSessionMatches) {
+      if (
+        await checkBridgeHealth(pidInfo.port, {
+          deep: true,
+          expectedSession: sessionName,
+        })
+      ) {
+        return pidInfo.port;
+      }
+      await terminateBridgeProcess(pidInfo.pid, {
+        killProcessGroup: isBridgeProcess(pidInfo.pid),
+      });
+    }
   }
 
   // Start a new bridge
@@ -598,7 +607,11 @@ export async function stopBridge(): Promise<boolean> {
   return (await stopBridgeSession()) === "stopped";
 }
 
-export type StopBridgeSessionResult = "stopped" | "not-running" | "not-bridge";
+export type StopBridgeSessionResult =
+  | "stopped"
+  | "not-running"
+  | "not-bridge"
+  | "session-mismatch";
 
 /**
  * Stop one named bridge session after validating that the PID file still points
@@ -611,6 +624,9 @@ export async function stopBridgeSession(
   const pidInfo = readPidFile(resolveSessionPidFile(sessionName));
   if (!pidInfo) return "not-running";
   if (!isProcessAlive(pidInfo.pid)) return "not-running";
+  if (pidInfo.session !== undefined && pidInfo.session !== sessionName) {
+    return "session-mismatch";
+  }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
   await terminateBridgeProcess(pidInfo.pid, {
     killProcessGroup: true,
