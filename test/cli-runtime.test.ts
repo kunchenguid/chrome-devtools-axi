@@ -135,6 +135,7 @@ describe("main CLI runtime", () => {
     expect(installHooksOrThrow).toHaveBeenCalledTimes(1);
     expect(output).toContain("hooks:");
     expect(output).toContain("status: installed");
+    expect(output).toContain("Pi");
     expect(output).toContain("Restart your agent session");
   });
 

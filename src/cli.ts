@@ -612,7 +612,7 @@ examples:
   chrome-devtools-axi heap ./snapshot.heapsnapshot`,
 
   setup: `usage: chrome-devtools-axi setup hooks
-Install or repair agent SessionStart/SessionEnd hooks for chrome-devtools-axi ambient context and cleanup.
+Install or repair Claude Code, Codex, OpenCode, and Pi lifecycle hooks for chrome-devtools-axi ambient context and cleanup.
 
 examples:
   chrome-devtools-axi setup hooks`,
@@ -1737,7 +1737,7 @@ async function handleSetup(args: string[]): Promise<string> {
   installHooksOrThrow();
 
   return renderOutput([
-    "hooks:\n  status: installed\n  integrations: Claude Code, Codex, OpenCode",
+    "hooks:\n  status: installed\n  integrations: Claude Code, Codex, OpenCode, Pi",
     renderHelp([
       "Restart your agent session to receive chrome-devtools-axi ambient context",
     ]),

@@ -43,6 +43,7 @@ const HOOK_MARKER = "chrome-devtools-axi";
 export const AGENT_BRIDGE_IDLE_TIMEOUT_MS = 120_000;
 const HOOK_TIMEOUT_SECONDS = 10;
 export const SESSION_END_HOOK_TIMEOUT_SECONDS = 3;
+export const PI_EXTENSION_FILENAME = "chrome-devtools-axi.ts";
 
 /**
  * Only install hooks from packaged or installed entrypoints.
@@ -155,11 +156,63 @@ function removeManagedEventHooks(
  */
 export function getHookTargets(): HookTarget[] {
   const home = homedir();
+  const piConfigDir = resolve(
+    process.env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent"),
+  );
   return [
     { path: join(home, ".claude", "settings.json") },
     { path: join(home, ".codex", "hooks.json") },
     { path: join(home, ".codex", "config.toml") },
+    { path: join(piConfigDir, "extensions", PI_EXTENSION_FILENAME) },
   ];
+}
+
+/**
+ * Build a dependency-free Pi extension that mirrors SessionStart/SessionEnd.
+ * A global symbol prevents duplicate lifecycle handlers when Fleet also loads
+ * its generated extension into the same Pi process.
+ */
+export function buildPiExtension(command: string): string {
+  return (
+    `// Managed by chrome-devtools-axi setup hooks. Re-run setup to repair.\n` +
+    `import { spawnSync } from "node:child_process";\n\n` +
+    `const AXI_COMMAND = ${JSON.stringify(command)};\n` +
+    `const AXI_IDLE_TIMEOUT_MS = ${AGENT_BRIDGE_IDLE_TIMEOUT_MS};\n` +
+    `const STATE_KEY = Symbol.for("chrome-devtools-axi.pi.lifecycle");\n\n` +
+    `const shared = globalThis;\n\n` +
+    `function run(args, timeout) {\n` +
+    `  const result = spawnSync(AXI_COMMAND, args, {\n` +
+    `    encoding: "utf8",\n` +
+    `    stdio: ["ignore", "pipe", "ignore"],\n` +
+    `    timeout,\n` +
+    `    env: {\n` +
+    `      ...process.env,\n` +
+    `      CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS: String(AXI_IDLE_TIMEOUT_MS),\n` +
+    `    },\n` +
+    `  });\n` +
+    `  if (result.error || result.status !== 0) return "";\n` +
+    `  return (result.stdout ?? "").trim();\n` +
+    `}\n\n` +
+    `export default function (pi) {\n` +
+    `  const owner = Symbol("chrome-devtools-axi.pi.extension");\n` +
+    `  const state = shared[STATE_KEY] ??= {};\n` +
+    `  if (state.owner) return;\n` +
+    `  state.owner = owner;\n\n` +
+    `  pi.on("session_start", () => {\n` +
+    `    state.context = run([], 10000);\n` +
+    `  });\n\n` +
+    `  pi.on("before_agent_start", (event) => {\n` +
+    `    if (state.owner !== owner || !state.context) return;\n` +
+    `    return { systemPrompt: event.systemPrompt + "\\n\\n" + state.context };\n` +
+    `  });\n\n` +
+    `  pi.on("session_shutdown", () => {\n` +
+    `    if (state.owner !== owner) return;\n` +
+    `    run(["stop"], 3000);\n` +
+    `    state.context = undefined;\n` +
+    `    state.owner = undefined;\n` +
+    `  });\n` +
+    `}\n`
+  );
 }
 
 /**
@@ -252,6 +305,28 @@ function installJsonHooks(command: string, onError: (message: string) => void) {
   }
 }
 
+function installPiExtension(
+  command: string,
+  onError: (message: string) => void,
+): void {
+  const target = getHookTargets().find((candidate) =>
+    candidate.path.endsWith(PI_EXTENSION_FILENAME),
+  )?.path;
+  if (!target) return;
+
+  try {
+    const content = buildPiExtension(command);
+    if (existsSync(target) && readFileSync(target, "utf-8") === content) {
+      return;
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content, "utf-8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    onError(`${target}: ${message}`);
+  }
+}
+
 /**
  * Pure function: ensure Codex hooks are enabled in config.toml.
  * Returns [updatedToml, changed].
@@ -285,6 +360,9 @@ export function installHooksOrThrow(): void {
   const command = resolveInstalledHookCommand();
   if (command) {
     installJsonHooks(command, (message) => {
+      errors.push(message);
+    });
+    installPiExtension(command, (message) => {
       errors.push(message);
     });
   }

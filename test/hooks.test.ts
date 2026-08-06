@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const { installSessionStartHooks } = vi.hoisted(() => ({
   installSessionStartHooks: vi.fn(),
@@ -15,6 +18,7 @@ vi.mock("axi-sdk-js", async () => {
 
 import {
   AGENT_BRIDGE_IDLE_TIMEOUT_MS,
+  buildPiExtension,
   computeCodexConfigUpdate,
   computeHookUpdate,
   getHookTargets,
@@ -23,6 +27,62 @@ import {
   shouldInstallHooksForExecPath,
   withAgentBridgeIdleTimeout,
 } from "../src/hooks.js";
+
+describe("buildPiExtension", () => {
+  it("maps Pi startup context and shutdown to the inherited AXI session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "chrome-devtools-axi-pi-"));
+    const command = join(dir, "fake-axi");
+    const log = join(dir, "axi.log");
+    writeFileSync(
+      command,
+      `#!/bin/sh\nprintf '%s\\t%s\\t%s\\n' "\${1:-start}" "\${CHROME_DEVTOOLS_AXI_SESSION:-}" "\${CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS:-}" >> "${log}"\nprintf 'browser context for pi\\n'\n`,
+    );
+    chmodSync(command, 0o755);
+
+    const source = buildPiExtension(command);
+    const module = await import(
+      `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`
+    );
+    const handlers: Record<string, (...args: any[]) => any> = {};
+    module.default({
+      on(event: string, handler: (...args: any[]) => any) {
+        handlers[event] = handler;
+      },
+    });
+
+    const previousSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "fleet-pi-owned";
+    try {
+      handlers.session_start();
+      expect(
+        handlers.before_agent_start({ systemPrompt: "base prompt" }),
+      ).toEqual({
+        systemPrompt: "base prompt\n\nbrowser context for pi",
+      });
+      handlers.session_shutdown();
+    } finally {
+      if (previousSession === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_SESSION = previousSession;
+      }
+    }
+
+    expect(readFileSync(log, "utf-8")).toBe(
+      `start\tfleet-pi-owned\t${AGENT_BRIDGE_IDLE_TIMEOUT_MS}\n` +
+        `stop\tfleet-pi-owned\t${AGENT_BRIDGE_IDLE_TIMEOUT_MS}\n`,
+    );
+  });
+
+  it("uses a shared owner marker so Fleet and global Pi hooks cannot duplicate", () => {
+    const source = buildPiExtension("/usr/bin/chrome-devtools-axi");
+    expect(source).toContain('Symbol.for("chrome-devtools-axi.pi.lifecycle")');
+    expect(source).toContain('pi.on("session_start"');
+    expect(source).toContain('pi.on("before_agent_start"');
+    expect(source).toContain('pi.on("session_shutdown"');
+    expect(source).not.toContain('pi.on("turn_end"');
+  });
+});
 
 describe("installHooksOrThrow", () => {
   it("throws when the hook installer reports an internal install error", () => {
@@ -354,9 +414,9 @@ describe("shouldInstallHooksForExecPath", () => {
 });
 
 describe("getHookTargets", () => {
-  it("returns Claude and both Codex targets", () => {
+  it("returns Claude, both Codex targets, and the Pi extension", () => {
     const targets = getHookTargets();
-    expect(targets.length).toBe(3);
+    expect(targets.length).toBe(4);
     expect(targets.some((t) => t.path.includes(".claude"))).toBe(true);
     expect(targets.some((t) => t.path.includes(".codex/hooks.json"))).toBe(
       true,
@@ -364,6 +424,11 @@ describe("getHookTargets", () => {
     expect(targets.some((t) => t.path.includes(".codex/config.toml"))).toBe(
       true,
     );
+    expect(
+      targets.some((t) =>
+        t.path.includes(".pi/agent/extensions/chrome-devtools-axi.ts"),
+      ),
+    ).toBe(true);
   });
 
   it("Claude target reads from settings.json", () => {
@@ -381,6 +446,25 @@ describe("getHookTargets", () => {
       t.path.includes(".codex/config.toml"),
     );
     expect(codex!.path).toMatch(/config\.toml$/);
+  });
+
+  it("Pi target follows PI_CODING_AGENT_DIR", () => {
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = "/tmp/pi-fleet-profile";
+    try {
+      const pi = getHookTargets().find((target) =>
+        target.path.endsWith("chrome-devtools-axi.ts"),
+      );
+      expect(pi?.path).toBe(
+        "/tmp/pi-fleet-profile/extensions/chrome-devtools-axi.ts",
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = previous;
+      }
+    }
   });
 });
 

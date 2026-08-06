@@ -102,7 +102,9 @@ npm install -g chrome-devtools-axi
 chrome-devtools-axi setup hooks
 ```
 
-This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and usage guidance at the start of each session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown, plus a 120-second bridge idle timeout on managed hook invocations as a backstop for abandoned headless Chrome sessions.
+This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and usage guidance at the start of each session. **Pi** gets the equivalent native extension: `session_start` captures ambient AXI context for its agent prompt, and `session_shutdown` stops the owned browser session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown. Every managed integration uses a 120-second bridge idle timeout as a backstop for abandoned headless Chrome sessions.
+
+Pi installs into `${PI_CODING_AGENT_DIR:-~/.pi/agent}/extensions/chrome-devtools-axi.ts`. Run setup with `PI_CODING_AGENT_DIR` set when you use an isolated Pi profile such as Fleet's `~/.pi-fleet` profile.
 **Restart your agent session after running this** so the new hook takes effect.
 
 Development entrypoints such as `pnpm run dev` and `bin/chrome-devtools-axi.ts` are guarded from accidental hook installation.
