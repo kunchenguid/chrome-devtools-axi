@@ -73,6 +73,7 @@ export interface BridgeClient {
 
 export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_ROUTE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+export const BRIDGE_SHUTDOWN_DEADLINE_MS = 4_000;
 
 /**
  * Resolve how long an unused bridge stays alive. The bridge is intentionally
@@ -556,6 +557,10 @@ export class BrowserPageRouter {
     string,
     ReturnType<typeof setTimeout>
   >();
+  private readonly pendingPageOpeningsByRouteSession = new Map<
+    string,
+    { beforeIds: Set<number>; makeActive: boolean }
+  >();
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -588,8 +593,7 @@ export class BrowserPageRouter {
     }
 
     if (payload.name === "list_pages") {
-      const pages = await this.listPages(call);
-      this.forgetMissingPages(pages);
+      const pages = await this.observePages(routeSession, call);
       this.touchRoute(routeSession, call, payload.routeIdleTimeoutMs);
       return this.formatOwnedPages(routeSession, pages);
     }
@@ -631,6 +635,10 @@ export class BrowserPageRouter {
       }
 
       const pagesBeforeCall = await this.ensureSessionPage(routeSession, call);
+      this.pendingPageOpeningsByRouteSession.set(routeSession, {
+        beforeIds: new Set(pagesBeforeCall.map((page) => page.id)),
+        makeActive: true,
+      });
       let result: string;
       try {
         result = await call(payload.name, payload.args);
@@ -660,6 +668,61 @@ export class BrowserPageRouter {
 
   private async listPages(call: BridgeToolCall): Promise<ParsedPage[]> {
     return parsePagesList(await call("list_pages", {}));
+  }
+
+  private async observePages(
+    routeSession: string,
+    call: BridgeToolCall,
+  ): Promise<ParsedPage[]> {
+    const pages = await this.listPages(call);
+    const pending = this.pendingPageOpeningsByRouteSession.get(routeSession);
+    if (pending) {
+      const created = pages.filter(
+        (page) =>
+          !pending.beforeIds.has(page.id) &&
+          this.routeSessionByPage.get(page.id) === undefined,
+      );
+      for (const page of created) {
+        this.rememberPage(
+          routeSession,
+          page.id,
+          pending.makeActive && page.selected,
+        );
+      }
+      if (pending.makeActive) {
+        const active = created.find((page) => page.selected) ?? created.at(-1);
+        if (active) this.rememberPage(routeSession, active.id, true);
+      }
+      this.pendingPageOpeningsByRouteSession.delete(routeSession);
+    }
+    this.forgetMissingPages(pages);
+    return pages;
+  }
+
+  private async openPageAndReconcile(
+    routeSession: string,
+    args: Record<string, unknown>,
+    call: BridgeToolCall,
+    makeActive: boolean,
+  ): Promise<{ result: string; before: ParsedPage[]; after: ParsedPage[] }> {
+    const before = await this.observePages(routeSession, call);
+    this.pendingPageOpeningsByRouteSession.set(routeSession, {
+      beforeIds: new Set(before.map((page) => page.id)),
+      makeActive,
+    });
+
+    let result: string;
+    try {
+      result = await call("new_page", args);
+    } catch (error) {
+      try {
+        await this.observePages(routeSession, call);
+      } catch {}
+      throw error;
+    }
+
+    const after = await this.observePages(routeSession, call);
+    return { result, before, after };
   }
 
   private formatOwnedPages(routeSession: string, pages: ParsedPage[]): string {
@@ -700,7 +763,7 @@ export class BrowserPageRouter {
     routeSession: string,
     call: BridgeToolCall,
   ): Promise<ParsedPage[]> {
-    let pages = await this.listPages(call);
+    let pages = await this.observePages(routeSession, call);
     const ownedPages = this.pagesByRouteSession.get(routeSession) ?? new Set();
     const activePageId = this.activePageByRouteSession.get(routeSession);
     const existing =
@@ -716,13 +779,18 @@ export class BrowserPageRouter {
       return pages;
     }
 
-    this.forgetMissingPages(pages);
-
-    await call("new_page", { url: "about:blank" });
-    pages = await this.listPages(call);
+    const opened = await this.openPageAndReconcile(
+      routeSession,
+      { url: "about:blank" },
+      call,
+      true,
+    );
+    pages = opened.after;
+    const beforeIds = new Set(opened.before.map((page) => page.id));
+    const created = pages.filter((page) => !beforeIds.has(page.id));
     const target =
-      pages.find((page) => page.selected) ??
-      pages.reduce<ParsedPage | undefined>(
+      created.find((page) => page.selected) ??
+      created.reduce<ParsedPage | undefined>(
         (latest, page) => (!latest || page.id > latest.id ? page : latest),
         undefined,
       );
@@ -740,8 +808,7 @@ export class BrowserPageRouter {
     payload: BridgeCallPayload,
     call: BridgeToolCall,
   ): Promise<string> {
-    const pages = await this.listPages(call);
-    this.forgetMissingPages(pages);
+    const pages = await this.observePages(routeSession, call);
     const ownedPages = this.pagesByRouteSession.get(routeSession);
     const activePageId = this.activePageByRouteSession.get(routeSession);
     const target =
@@ -772,8 +839,7 @@ export class BrowserPageRouter {
     call: BridgeToolCall,
   ): Promise<void> {
     const beforeIds = new Set(before.map((page) => page.id));
-    const after = await this.listPages(call);
-    this.forgetMissingPages(after);
+    const after = await this.observePages(routeSession, call);
 
     const created = after.filter((page) => !beforeIds.has(page.id));
     for (const page of created) {
@@ -791,16 +857,15 @@ export class BrowserPageRouter {
     args: Record<string, unknown>,
     call: BridgeToolCall,
   ): Promise<string> {
-    const before = await this.listPages(call);
-    const beforeIds = new Set(before.map((page) => page.id));
     const previousActive = this.activePageByRouteSession.get(routeSession);
-    const result = await call("new_page", args);
-    const after = await this.listPages(call);
+    const { result, before, after } = await this.openPageAndReconcile(
+      routeSession,
+      args,
+      call,
+      args.background !== true,
+    );
+    const beforeIds = new Set(before.map((page) => page.id));
     const created = after.filter((page) => !beforeIds.has(page.id));
-
-    for (const page of created) {
-      this.rememberPage(routeSession, page.id, args.background !== true);
-    }
 
     if (args.background === true) {
       if (previousActive !== undefined) {
@@ -832,7 +897,7 @@ export class BrowserPageRouter {
     if (pageId === null) return await call("close_page", args);
     await this.requireOwnedPage(routeSession, pageId);
 
-    const pages = await this.listPages(call);
+    const pages = await this.observePages(routeSession, call);
     const target = pages.find((page) => page.id === pageId);
     if (!target || pages.length <= 1) {
       return await call("close_page", args);
@@ -881,6 +946,7 @@ export class BrowserPageRouter {
     call: BridgeToolCall,
     reason: "explicit" | "idle",
   ): Promise<string> {
+    await this.observePages(routeSession, call);
     const owned = [...(this.pagesByRouteSession.get(routeSession) ?? [])];
     if (owned.length === 0) {
       this.clearRoute(routeSession);
@@ -890,7 +956,7 @@ export class BrowserPageRouter {
     let closed = 0;
     let blanked = 0;
     for (const pageId of owned) {
-      const pages = await this.listPages(call);
+      const pages = await this.observePages(routeSession, call);
       const target = pages.find((page) => page.id === pageId);
       if (!target) {
         this.forgetPage(pageId);
@@ -1016,6 +1082,7 @@ export class BrowserPageRouter {
     this.lastActivityByRouteSession.delete(routeSession);
     this.idleTimeoutByRouteSession.delete(routeSession);
     this.activePageByRouteSession.delete(routeSession);
+    this.pendingPageOpeningsByRouteSession.delete(routeSession);
     for (const pageId of this.pagesByRouteSession.get(routeSession) ?? []) {
       this.routeSessionByPage.delete(pageId);
     }
@@ -1211,6 +1278,12 @@ export function createBridgeServer(
       );
       return;
     }
+    const isDiagnostic =
+      (req.method === "GET" &&
+        (req.url === "/tools" ||
+          req.url === "/health" ||
+          req.url?.startsWith("/health?"))) ||
+      req.headers["x-axi-diagnostic"] === "1";
     if (!router && req.method === "POST" && req.url === "/call") {
       const requestedIdleTimeout = req.headers["x-axi-idle-timeout-ms"];
       const rawIdleTimeout = Array.isArray(requestedIdleTimeout)
@@ -1223,8 +1296,10 @@ export function createBridgeServer(
         }
       }
     }
-    touchPidFileActivity();
-    const finishRequest = idleWatchdog?.beginRequest();
+    if (!isDiagnostic) touchPidFileActivity();
+    const finishRequest = isDiagnostic
+      ? undefined
+      : idleWatchdog?.beginRequest();
     void handleBridgeRequest(
       client,
       req,
@@ -1580,6 +1655,29 @@ export async function closeBridgeResources(
   if (closeError !== undefined) throw closeError;
 }
 
+export async function closeBridgeResourcesWithinDeadline(
+  closeResources: () => Promise<void>,
+  deadlineMs: number,
+  onDeadline: () => void,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => {
+      onDeadline();
+      resolve(false);
+    }, deadlineMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([
+      closeResources().then(() => true),
+      deadline,
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 interface ProcessTreeReaperOptions {
   platform?: NodeJS.Platform;
   pid?: number;
@@ -1682,7 +1780,16 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
       if (shutdownOwnedWindowsBridgeProcessTree()) return;
     }
     try {
-      await closeBridgeResources(server, client, transport);
+      const closed = await closeBridgeResourcesWithinDeadline(
+        () => closeBridgeResources(server, client, transport),
+        BRIDGE_SHUTDOWN_DEADLINE_MS,
+        () => {
+          removePidFile();
+          reapOwnedBridgeProcessTree();
+          process.exit(0);
+        },
+      );
+      if (!closed) return;
     } catch (error) {
       logBridgeMessage(`Shutdown cleanup failed: ${getErrorMessage(error)}`);
     }

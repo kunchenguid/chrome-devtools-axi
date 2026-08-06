@@ -303,6 +303,7 @@ function httpPost(
         headers: {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(payload),
+          "X-Axi-Diagnostic": "1",
         },
       },
       (res) => {

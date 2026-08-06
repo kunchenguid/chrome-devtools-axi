@@ -19,6 +19,7 @@ import {
   CdpError,
   checkBridgeIdentity,
   checkBridgeHealth,
+  confirmBridgeTargetUnreachable,
   ensureBridge,
   getSessionSnapshotIfRunning,
   mapErrorMessage,
@@ -387,6 +388,7 @@ describe("resolveBridgeTimeoutMs", () => {
 interface FakeBridgeOptions {
   shallow: "ok" | "error";
   deep: "ok" | "error";
+  deepOutcomes?: Array<"ok" | "error">;
   deepDelayMs?: number;
   session?: string;
   instanceId?: string;
@@ -403,7 +405,9 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
     const server = createServer((req, res) => {
       if (req.method === "GET" && req.url?.startsWith("/health")) {
         const wantsDeep = req.url.includes("deep=1");
-        const outcome = wantsDeep ? opts.deep : opts.shallow;
+        const outcome = wantsDeep
+          ? (opts.deepOutcomes?.shift() ?? opts.deep)
+          : opts.shallow;
         res.setHeader("Content-Type", "application/json");
         const sendResponse = () => {
           if (outcome === "ok") {
@@ -418,7 +422,20 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
             );
           } else {
             res.statusCode = 503;
-            res.end(JSON.stringify({ status: "error" }));
+            res.end(
+              JSON.stringify({
+                status: "error",
+                ...(wantsDeep
+                  ? {
+                      error: "CDP target unreachable",
+                      reason: "Target closed",
+                    }
+                  : {}),
+                session: opts.session,
+                instanceId: opts.instanceId,
+                pid: opts.pid,
+              }),
+            );
           }
         };
         if (wantsDeep && opts.deepDelayMs) {
@@ -487,6 +504,35 @@ describe("checkBridgeHealth (deep probe)", () => {
     const fake = await startFakeBridgeServer({ shallow: "ok", deep: "ok" });
     try {
       expect(await checkBridgeHealth(fake.port, { deep: true })).toBe(true);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("does not confirm target loss when a repeated probe recovers", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "error",
+      deepOutcomes: ["error", "ok"],
+    });
+    try {
+      await expect(
+        confirmBridgeTargetUnreachable(fake.port, {}, 2, 0),
+      ).resolves.toBe(false);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("confirms target loss only after repeated explicit failures", async () => {
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "error",
+    });
+    try {
+      await expect(
+        confirmBridgeTargetUnreachable(fake.port, {}, 2, 0),
+      ).resolves.toBe(true);
     } finally {
       await fake.close();
     }

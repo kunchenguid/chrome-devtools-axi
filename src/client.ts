@@ -28,6 +28,8 @@ const DEFAULT_BRIDGE_TIMEOUT_MS = 30_000;
 const MIN_BRIDGE_TIMEOUT_MS = 1_000;
 const HEALTH_TIMEOUT_MS = 2_000;
 const DEEP_HEALTH_TIMEOUT_MS = 5_000;
+const TARGET_LOSS_CONFIRMATION_ATTEMPTS = 2;
+const TARGET_LOSS_CONFIRMATION_DELAY_MS = 250;
 
 /**
  * Resolve the bridge readiness deadline in milliseconds.
@@ -210,32 +212,75 @@ export async function checkBridgeHealth(
     expectedPid?: number;
   } = {},
 ): Promise<boolean> {
+  return (await probeBridgeHealth(port, opts)).status === "ok";
+}
+
+export type BridgeHealthProbe =
+  | { status: "ok" }
+  | { status: "target-unreachable"; reason?: string }
+  | { status: "unhealthy" }
+  | { status: "identity-mismatch" }
+  | { status: "unreachable" };
+
+export async function probeBridgeHealth(
+  port: number,
+  opts: {
+    deep?: boolean;
+    expectedSession?: string;
+    expectedInstanceId?: string;
+    expectedPid?: number;
+  } = {},
+): Promise<BridgeHealthProbe> {
   try {
     const path = opts.deep ? "/health?deep=1" : "/health";
     const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
     const resp = await httpGet(port, path, timeoutMs);
     const data = JSON.parse(resp);
-    if (data.status !== "ok") return false;
     if (
       opts.expectedSession !== undefined &&
       typeof data.session === "string" &&
       data.session !== opts.expectedSession
     ) {
-      return false;
+      return { status: "identity-mismatch" };
     }
     if (
       opts.expectedInstanceId !== undefined &&
       data.instanceId !== opts.expectedInstanceId
     ) {
-      return false;
+      return { status: "identity-mismatch" };
     }
     if (opts.expectedPid !== undefined && data.pid !== opts.expectedPid) {
-      return false;
+      return { status: "identity-mismatch" };
     }
-    return true;
+    if (data.status === "ok") return { status: "ok" };
+    if (opts.deep && data.error === "CDP target unreachable") {
+      return {
+        status: "target-unreachable",
+        ...(typeof data.reason === "string" ? { reason: data.reason } : {}),
+      };
+    }
+    return { status: "unhealthy" };
   } catch {
-    return false;
+    return { status: "unreachable" };
   }
+}
+
+export async function confirmBridgeTargetUnreachable(
+  port: number,
+  opts: {
+    expectedSession?: string;
+    expectedInstanceId?: string;
+    expectedPid?: number;
+  },
+  attempts = TARGET_LOSS_CONFIRMATION_ATTEMPTS,
+  delayMs = TARGET_LOSS_CONFIRMATION_DELAY_MS,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await sleep(delayMs);
+    const probe = await probeBridgeHealth(port, { ...opts, deep: true });
+    if (probe.status !== "target-unreachable") return false;
+  }
+  return true;
 }
 
 export async function checkBridgeIdentity(
@@ -527,28 +572,50 @@ export async function ensureBridge(
     });
     const healthSessionMatches = !shallowAny || shallowExpected;
     if (recordedSessionMatches && healthSessionMatches) {
-      if (
-        await checkBridgeHealth(pidInfo.port, {
-          deep: true,
-          expectedSession: bridgeSessionName,
-          ...identityOptions,
-        })
-      ) {
+      const deepOptions = {
+        expectedSession: bridgeSessionName,
+        ...identityOptions,
+      };
+      const deepProbe = await probeBridgeHealth(pidInfo.port, {
+        ...deepOptions,
+        deep: true,
+      });
+      if (deepProbe.status === "ok") {
         return pidInfo.port;
       }
-      if (
+      const identityMatches =
         pidInfo.instanceId !== undefined &&
         (await checkBridgeIdentity(pidInfo.port, {
           session: bridgeSessionName,
           instanceId: pidInfo.instanceId,
           pid: pidInfo.pid,
-        }))
-      ) {
-        await requestAuthenticatedBridgeShutdown(
+        }));
+      const targetLossConfirmed =
+        deepProbe.status === "target-unreachable" &&
+        identityMatches &&
+        (await confirmBridgeTargetUnreachable(pidInfo.port, deepOptions));
+      if (targetLossConfirmed && pidInfo.instanceId !== undefined) {
+        const shutdownAccepted = await requestAuthenticatedBridgeShutdown(
           pidInfo.port,
           pidInfo.instanceId,
         );
-        await waitForProcessExit(pidInfo.pid, 5_000);
+        const exited =
+          shutdownAccepted && (await waitForProcessExit(pidInfo.pid, 5_000));
+        if (!exited) {
+          throw new CdpError(
+            "The stale bridge accepted shutdown but did not exit before its deadline",
+            "BRIDGE_NOT_READY",
+            ["Retry after the bridge process has exited."],
+          );
+        }
+      } else if (shallowExpected) {
+        throw new CdpError(
+          "The bridge target health check failed without confirmed persistent target loss",
+          "BRIDGE_NOT_READY",
+          [
+            "Retry the command; the bridge was preserved because another route may still be active.",
+          ],
+        );
       }
     }
   }
@@ -772,7 +839,8 @@ export type StopBridgeSessionResult =
   | "stopped"
   | "not-running"
   | "not-bridge"
-  | "session-mismatch";
+  | "session-mismatch"
+  | "shutdown-timeout";
 
 export type StopBridgeSessionTarget = "logical" | "dedicated" | "physical-pool";
 
@@ -860,6 +928,7 @@ export async function stopBridgeSession(
   ) {
     return "not-running";
   }
-  await waitForProcessExit(pidInfo.pid, 5_000);
-  return "stopped";
+  return (await waitForProcessExit(pidInfo.pid, 5_000))
+    ? "stopped"
+    : "shutdown-timeout";
 }
