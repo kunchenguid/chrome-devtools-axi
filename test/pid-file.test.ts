@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -113,5 +114,60 @@ describe("PID file locking", () => {
       pid: process.pid,
       token: "replacement-owner",
     });
+  });
+
+  it("recovers an orphaned reclaimer lease before admitting a writer", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-orphaned-reclaim-"));
+    roots.push(root);
+    const pidFile = join(root, "bridge.pid");
+    const lockPath = `${pidFile}.lock`;
+    const reclaimPath = `${lockPath}.reclaim`;
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, token: "stale-owner" }),
+    );
+    const stale = lstatSync(lockPath);
+    writeFileSync(
+      reclaimPath,
+      JSON.stringify({
+        dev: stale.dev,
+        ino: stale.ino,
+        owner: { pid: 99999999, token: "dead-reclaimer" },
+      }),
+    );
+
+    let entered = false;
+    withPidFileLock(pidFile, () => {
+      entered = true;
+    });
+
+    expect(entered).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(reclaimPath)).toBe(false);
+  });
+
+  it("does not join an active reclaimer lease", () => {
+    const root = mkdtempSync(join(tmpdir(), "axi-active-reclaim-"));
+    roots.push(root);
+    const lockPath = join(root, "bridge.pid.lock");
+    const reclaimPath = `${lockPath}.reclaim`;
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, token: "stale-owner" }),
+    );
+    const stale = lstatSync(lockPath);
+    writeFileSync(
+      reclaimPath,
+      JSON.stringify({
+        dev: stale.dev,
+        ino: stale.ino,
+        owner: { pid: process.pid, token: "active-reclaimer" },
+      }),
+    );
+
+    removeStalePidFileLock(lockPath);
+
+    expect(existsSync(lockPath)).toBe(true);
+    expect(existsSync(reclaimPath)).toBe(true);
   });
 });
