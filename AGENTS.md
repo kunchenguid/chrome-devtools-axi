@@ -70,7 +70,7 @@ Action commands parse refs through `parseUidFresh` (`src/cli.ts`), which fails l
 ### CLI output and AXI integration
 
 The CLI is built on `axi-sdk-js` (`runAxiCli`): `HOME_DESCRIPTION` and `TOP_HELP` are the shared static guidance, SDK built-ins such as `update` and `update --check` are appended by the runner at runtime, and the `home()` callback returns the live page snapshot when a bridge session is active.
-This is the same output that lands in the agent's optional `SessionStart` hook after `chrome-devtools-axi setup hooks` (`src/hooks.ts`, Claude Code + Codex + OpenCode); `shouldInstallHooksForExecPath` guards dev entrypoints like `pnpm run dev` from self-registering hooks.
+This is the same output that lands in the agent's optional `SessionStart` hook after `chrome-devtools-axi setup hooks` (`src/hooks.ts`, Claude Code + Codex + OpenCode); Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop`, and managed hook commands are wrapped with `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=120000` as an abandoned-agent backstop without changing the direct CLI default. `shouldInstallHooksForExecPath` guards dev entrypoints like `pnpm run dev` from self-registering hooks.
 `src/skill.ts` renders the installable Agent Skill (`skills/chrome-devtools-axi/SKILL.md`) from the same shared guidance plus the SDK built-in command list, rewriting invocations to non-interactive `npx -y chrome-devtools-axi ...`.
 
 Output format per command: TOON-encoded metadata block (`encode` from `@toon-format/toon`), then raw snapshot text, then a `help[N]:` block of contextual next-step suggestions (`src/suggestions.ts`).

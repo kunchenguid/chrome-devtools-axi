@@ -1,4 +1,5 @@
 import { HOME_DESCRIPTION, TOP_HELP } from "./cli.js";
+import { AGENT_BRIDGE_IDLE_TIMEOUT_MS } from "./hooks.js";
 
 // Trigger string Claude Code (and other agents) match against to auto-load the skill.
 // Kept terse and outcome-focused so it fires on "needs a real browser" intents.
@@ -51,6 +52,7 @@ export const SKILL_HERMES_TAGS = [
 export const SKILL_HERMES_CATEGORY = "automation";
 
 export function createSkillMarkdown(): string {
+  const agentCommandPrefix = `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} npx -y chrome-devtools-axi`;
   return `---
 name: chrome-devtools-axi
 description: ${yamlDoubleQuote(SKILL_DESCRIPTION)}
@@ -66,8 +68,9 @@ metadata:
 
 ${HOME_DESCRIPTION}
 
-You do not need chrome-devtools-axi installed globally - invoke it with \`npx -y chrome-devtools-axi <command>\`.
-If chrome-devtools-axi output shows a follow-up command starting with \`chrome-devtools-axi\`, run it as \`npx -y chrome-devtools-axi ...\` instead.
+You do not need chrome-devtools-axi installed globally - invoke it with \`${agentCommandPrefix} <command>\`.
+The idle timeout prefix keeps agent-started headless Chrome sessions bounded if an agent exits without running \`stop\`.
+If chrome-devtools-axi output shows a follow-up command starting with \`chrome-devtools-axi\`, run it as \`${agentCommandPrefix} ...\` instead.
 
 ## When to use
 
@@ -77,7 +80,7 @@ Skip it when a plain \`fetch\`/\`curl\` suffices - ordinary web search, curl-abl
 
 ## Workflow
 
-1. Run \`npx -y chrome-devtools-axi open <url>\` to navigate. Output includes the page's accessibility snapshot; interactive elements carry \`uid=\` refs.
+1. Run \`${agentCommandPrefix} open <url>\` to navigate. Output includes the page's accessibility snapshot; interactive elements carry \`uid=\` refs.
 2. Interact by ref: \`click @<uid>\`, \`fill @<uid> <text>\`, \`fillform @<uid>=<val>...\`, \`hover @<uid>\`, \`drag @<from> @<to>\`, \`upload @<uid> <path>\`.
 3. Pass refs back exactly as printed, including the \`g<N>:\` generation prefix. If the page re-rendered since the snapshot, the action fails loudly with \`STALE_REF\` - run \`snapshot\` again and retry with fresh refs.
 4. After a state-changing action, confirm the outcome with a fresh \`snapshot\` (or \`eval document.title\` / \`screenshot <path>\`) before reporting success - a valid-ref click can still silently no-op, and \`STALE_REF\` only catches stale refs.
@@ -93,7 +96,7 @@ ${extractCommandsBlock()}
 ${SDK_BUILT_IN_COMMANDS_BLOCK}
 \`\`\`
 
-Run \`npx -y chrome-devtools-axi --help\` for flags and environment variables, or \`npx -y chrome-devtools-axi <command> --help\` for per-command usage.
+Run \`${agentCommandPrefix} --help\` for flags and environment variables, or \`${agentCommandPrefix} <command> --help\` for per-command usage.
 
 ## Tips
 

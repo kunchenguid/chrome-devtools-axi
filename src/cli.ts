@@ -586,7 +586,7 @@ examples:
   chrome-devtools-axi heap ./snapshot.heapsnapshot`,
 
   setup: `usage: chrome-devtools-axi setup hooks
-Install or repair agent SessionStart hooks for chrome-devtools-axi ambient context.
+Install or repair agent SessionStart/SessionEnd hooks for chrome-devtools-axi ambient context and cleanup.
 
 examples:
   chrome-devtools-axi setup hooks`,

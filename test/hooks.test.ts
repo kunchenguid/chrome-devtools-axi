@@ -14,11 +14,14 @@ vi.mock("axi-sdk-js", async () => {
 });
 
 import {
+  AGENT_BRIDGE_IDLE_TIMEOUT_MS,
   computeCodexConfigUpdate,
   computeHookUpdate,
   getHookTargets,
   installHooksOrThrow,
+  SESSION_END_HOOK_TIMEOUT_SECONDS,
   shouldInstallHooksForExecPath,
+  withAgentBridgeIdleTimeout,
 } from "../src/hooks.js";
 
 describe("installHooksOrThrow", () => {
@@ -45,7 +48,23 @@ describe("computeHookUpdate", () => {
     expect(updated.hooks!.SessionStart).toBeDefined();
     expect(updated.hooks!.SessionStart!.length).toBeGreaterThan(0);
     const hookCmd = JSON.stringify(updated);
+    expect(hookCmd).toContain(
+      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS}`,
+    );
     expect(hookCmd).toContain("chrome-devtools-axi");
+    expect(updated.hooks!.SessionEnd).toBeDefined();
+    expect(JSON.stringify(updated.hooks!.SessionEnd)).toContain(
+      "chrome-devtools-axi stop",
+    );
+    expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBe(
+      SESSION_END_HOOK_TIMEOUT_SECONDS,
+    );
+    expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBeLessThanOrEqual(
+      3,
+    );
+    expect(JSON.stringify(updated.hooks!.Stop ?? [])).not.toContain(
+      "chrome-devtools-axi",
+    );
   });
 
   it("installs hook alongside existing hooks", () => {
@@ -75,7 +94,44 @@ describe("computeHookUpdate", () => {
     expect(str).toContain("chrome-devtools-axi");
   });
 
-  it("is a no-op when hook exists with correct path", () => {
+  it("is a no-op when agent hooks already have the timeout wrapper and session teardown", () => {
+    const command = withAgentBridgeIdleTimeout("/usr/bin/chrome-devtools-axi");
+    const settings = {
+      hooks: {
+        SessionStart: [
+          {
+            matcher: "",
+            hooks: [
+              {
+                type: "command" as const,
+                command,
+                timeout: 10,
+              },
+            ],
+          },
+        ],
+        SessionEnd: [
+          {
+            matcher: "",
+            hooks: [
+              {
+                type: "command" as const,
+                command: `${command} stop`,
+                timeout: SESSION_END_HOOK_TIMEOUT_SECONDS,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const [, changed] = computeHookUpdate(
+      settings,
+      "/usr/bin/chrome-devtools-axi",
+    );
+    expect(changed).toBe(false);
+  });
+
+  it("repairs a legacy bare hook by adding the timeout wrapper and SessionEnd hook", () => {
     const settings = {
       hooks: {
         SessionStart: [
@@ -92,11 +148,107 @@ describe("computeHookUpdate", () => {
         ],
       },
     };
-    const [, changed] = computeHookUpdate(
+    const [updated, changed] = computeHookUpdate(
       settings,
       "/usr/bin/chrome-devtools-axi",
     );
-    expect(changed).toBe(false);
+
+    expect(changed).toBe(true);
+    const str = JSON.stringify(updated);
+    expect(str).toContain(
+      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} /usr/bin/chrome-devtools-axi`,
+    );
+    expect(str).toContain("/usr/bin/chrome-devtools-axi stop");
+    expect(str).toContain("SessionEnd");
+    expect(str).not.toContain('"Stop"');
+  });
+
+  it("migrates the mistaken managed Stop hook to SessionEnd", () => {
+    const command = withAgentBridgeIdleTimeout("/usr/bin/chrome-devtools-axi");
+    const settings = {
+      hooks: {
+        SessionStart: [
+          {
+            matcher: "",
+            hooks: [
+              {
+                type: "command" as const,
+                command,
+                timeout: 10,
+              },
+            ],
+          },
+        ],
+        Stop: [
+          {
+            matcher: "",
+            hooks: [
+              {
+                type: "command" as const,
+                command: `${command} stop`,
+                timeout: 10,
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const [updated, changed] = computeHookUpdate(
+      settings,
+      "/usr/bin/chrome-devtools-axi",
+    );
+
+    expect(changed).toBe(true);
+    expect(JSON.stringify(updated.hooks!.SessionEnd)).toContain(
+      `${command} stop`,
+    );
+    expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBe(
+      SESSION_END_HOOK_TIMEOUT_SECONDS,
+    );
+    expect(updated.hooks!.Stop).toBeUndefined();
+  });
+
+  it("removes only managed Stop hooks and preserves unrelated Stop hooks", () => {
+    const command = withAgentBridgeIdleTimeout("/usr/bin/chrome-devtools-axi");
+    const settings = {
+      hooks: {
+        Stop: [
+          {
+            matcher: "",
+            hooks: [
+              {
+                type: "command" as const,
+                command: `${command} stop`,
+                timeout: 10,
+              },
+              {
+                type: "command" as const,
+                command: "other-stop-guard",
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const [updated, changed] = computeHookUpdate(
+      settings,
+      "/usr/bin/chrome-devtools-axi",
+    );
+
+    expect(changed).toBe(true);
+    expect(JSON.stringify(updated.hooks!.SessionEnd)).toContain(
+      `${command} stop`,
+    );
+    expect(updated.hooks!.SessionEnd![0].hooks[0].timeout).toBeLessThanOrEqual(
+      3,
+    );
+    expect(JSON.stringify(updated.hooks!.Stop)).toContain("other-stop-guard");
+    expect(JSON.stringify(updated.hooks!.Stop)).not.toContain(
+      "chrome-devtools-axi",
+    );
   });
 
   it("repairs hook when executable path changed", () => {
@@ -122,7 +274,9 @@ describe("computeHookUpdate", () => {
     );
     expect(changed).toBe(true);
     const str = JSON.stringify(updated);
-    expect(str).toContain("/new/path/chrome-devtools-axi");
+    expect(str).toContain(
+      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} /new/path/chrome-devtools-axi`,
+    );
     expect(str).not.toContain("/old/path/");
   });
 
@@ -176,7 +330,7 @@ describe("computeHookUpdate", () => {
     );
     expect(changed).toBe(true);
     expect(JSON.stringify(updated)).toContain(
-      "/Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts",
+      `CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=${AGENT_BRIDGE_IDLE_TIMEOUT_MS} /Users/kunchen/.airlock/worktrees/bf2b16b1f6b6/pool-3/bin/chrome-devtools-axi.ts`,
     );
   });
 });

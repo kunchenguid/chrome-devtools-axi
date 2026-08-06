@@ -99,7 +99,7 @@ npm install -g chrome-devtools-axi
 chrome-devtools-axi setup hooks
 ```
 
-This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and usage guidance at the start of each session.
+This installs a `SessionStart` hook for **Claude Code**, **Codex**, and **OpenCode** that surfaces the current browser session and usage guidance at the start of each session. Claude Code and Codex also get a managed `SessionEnd` hook that runs `chrome-devtools-axi stop` during session teardown, plus a 120-second bridge idle timeout on managed hook invocations as a backstop for abandoned headless Chrome sessions.
 **Restart your agent session after running this** so the new hook takes effect.
 
 Development entrypoints such as `pnpm run dev` and `bin/chrome-devtools-axi.ts` are guarded from accidental hook installation.
@@ -281,6 +281,12 @@ milliseconds when a workflow needs longer pauses:
 ```sh
 export CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=7200000
 ```
+
+Agent-facing integrations installed by `chrome-devtools-axi setup hooks`, and
+the packaged `chrome-devtools-axi` skill, use
+`CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS=120000` so abandoned agent browser sessions
+are reaped sooner. Direct CLI users keep the 30-minute default unless they set
+the variable themselves.
 
 Connect to an existing Chrome instance instead of launching one:
 
