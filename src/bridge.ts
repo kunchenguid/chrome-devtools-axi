@@ -66,7 +66,6 @@ export interface BridgeClient {
 
 export const DEFAULT_BRIDGE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_ROUTE_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-const ROUTE_SESSION_MARKER_KEY = "__chromeDevtoolsAxiRouteSession";
 
 /**
  * Resolve how long an unused bridge stays alive. The bridge is intentionally
@@ -506,9 +505,10 @@ export class BrowserPageRouter {
     }
 
     if (payload.name === "list_pages") {
-      await this.recoverMarkedOwnership(call);
+      const pages = await this.listPages(call);
+      this.forgetMissingPages(pages);
       this.touchRoute(routeSession, call);
-      return this.formatOwnedPages(routeSession, await this.listPages(call));
+      return this.formatOwnedPages(routeSession, pages);
     }
 
     this.activeRouteSessions.add(routeSession);
@@ -516,10 +516,9 @@ export class BrowserPageRouter {
       if (payload.name === "select_page") {
         const pageId = numericArg(payload.args.pageId);
         if (pageId === null) return await call(payload.name, payload.args);
-        await this.requireOwnedPage(routeSession, pageId, call);
+        await this.requireOwnedPage(routeSession, pageId);
         const result = await call(payload.name, payload.args);
         this.activePageByRouteSession.set(routeSession, pageId);
-        await this.markSelectedPage(routeSession, call);
         this.touchRoute(routeSession, call);
         return result;
       }
@@ -546,7 +545,6 @@ export class BrowserPageRouter {
 
       await this.ensureSessionPage(routeSession, call);
       const result = await call(payload.name, payload.args);
-      await this.markSelectedPage(routeSession, call);
       this.touchRoute(routeSession, call);
       return result;
     } finally {
@@ -596,7 +594,6 @@ export class BrowserPageRouter {
     routeSession: string,
     call: BridgeToolCall,
   ): Promise<void> {
-    await this.recoverMarkedOwnership(call);
     let pages = await this.listPages(call);
     const ownedPages = this.pagesByRouteSession.get(routeSession) ?? new Set();
     const activePageId = this.activePageByRouteSession.get(routeSession);
@@ -610,33 +607,25 @@ export class BrowserPageRouter {
         await call("select_page", { pageId: existing.id, bringToFront: false });
       }
       this.rememberPage(routeSession, existing.id, true);
-      await this.markSelectedPage(routeSession, call);
       return;
     }
 
     this.forgetMissingPages(pages);
 
-    const owned = new Set(this.routeSessionByPage.keys());
-    let target = pages.find(
-      (page) => isBlankPage(page.url) && !owned.has(page.id),
-    );
-    if (!target) {
-      await call("new_page", { url: "about:blank" });
-      pages = await this.listPages(call);
-      target =
-        pages.find((page) => page.selected) ??
-        pages.reduce<ParsedPage | undefined>(
-          (latest, page) => (!latest || page.id > latest.id ? page : latest),
-          undefined,
-        );
-    }
+    await call("new_page", { url: "about:blank" });
+    pages = await this.listPages(call);
+    const target =
+      pages.find((page) => page.selected) ??
+      pages.reduce<ParsedPage | undefined>(
+        (latest, page) => (!latest || page.id > latest.id ? page : latest),
+        undefined,
+      );
 
     if (!target) return;
     if (!target.selected) {
       await call("select_page", { pageId: target.id, bringToFront: false });
     }
     this.rememberPage(routeSession, target.id, true);
-    await this.markSelectedPage(routeSession, call);
   }
 
   private async openOwnedPage(
@@ -669,7 +658,6 @@ export class BrowserPageRouter {
       if (selected) this.rememberPage(routeSession, selected.id, true);
     }
 
-    await this.markSelectedPage(routeSession, call);
     return result;
   }
 
@@ -680,7 +668,7 @@ export class BrowserPageRouter {
   ): Promise<string> {
     const pageId = numericArg(args.pageId);
     if (pageId === null) return await call("close_page", args);
-    await this.requireOwnedPage(routeSession, pageId, call);
+    await this.requireOwnedPage(routeSession, pageId);
 
     const pages = await this.listPages(call);
     const target = pages.find((page) => page.id === pageId);
@@ -689,7 +677,12 @@ export class BrowserPageRouter {
     }
 
     if (target.selected) {
-      const survivor = pages.find((page) => page.id !== pageId);
+      const survivor =
+        pages.find(
+          (page) =>
+            page.id !== pageId &&
+            this.routeSessionByPage.get(page.id) === routeSession,
+        ) ?? pages.find((page) => page.id !== pageId);
       if (survivor) {
         await call("select_page", {
           pageId: survivor.id,
@@ -716,9 +709,7 @@ export class BrowserPageRouter {
   private async requireOwnedPage(
     routeSession: string,
     pageId: number,
-    call: BridgeToolCall,
   ): Promise<void> {
-    await this.recoverMarkedOwnership(call);
     if (this.routeSessionByPage.get(pageId) === routeSession) return;
     throw new Error(`Page ${pageId} is not owned by session "${routeSession}"`);
   }
@@ -816,42 +807,6 @@ export class BrowserPageRouter {
     return run;
   }
 
-  private async recoverMarkedOwnership(call: BridgeToolCall): Promise<void> {
-    const pages = await this.listPages(call);
-    this.forgetMissingPages(pages);
-
-    for (const page of pages) {
-      if (this.routeSessionByPage.has(page.id)) continue;
-      await call("select_page", { pageId: page.id, bringToFront: false });
-      let owner: string | null = null;
-      try {
-        const output = await call("evaluate_script", {
-          function: `() => globalThis[${JSON.stringify(ROUTE_SESSION_MARKER_KEY)}] ?? null`,
-        });
-        owner = parseJsonToolValue(output);
-      } catch {
-        owner = null;
-      }
-      if (typeof owner === "string" && owner.length > 0) {
-        this.rememberPage(owner, page.id, false);
-      }
-    }
-  }
-
-  private async markSelectedPage(
-    routeSession: string,
-    call: BridgeToolCall,
-  ): Promise<void> {
-    try {
-      await call("evaluate_script", {
-        function: `() => { globalThis[${JSON.stringify(ROUTE_SESSION_MARKER_KEY)}] = ${JSON.stringify(routeSession)}; return true; }`,
-      });
-    } catch {
-      // A marker miss only affects bridge-restart recovery; live in-memory
-      // routing still owns the page.
-    }
-  }
-
   private forgetMissingPages(pages: ParsedPage[]): void {
     const live = new Set(pages.map((page) => page.id));
     for (const pageId of this.routeSessionByPage.keys()) {
@@ -885,21 +840,6 @@ export class BrowserPageRouter {
 
 function numericArg(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
-}
-
-function isBlankPage(url: string): boolean {
-  return url === "about:blank" || url === "chrome://newtab/";
-}
-
-function parseJsonToolValue(output: string): string | null {
-  const jsonBlock = output.match(/```json\n([\s\S]*?)\n```/);
-  const raw = jsonBlock ? jsonBlock[1].trim() : output.trim();
-  try {
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "string" ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 export function resolveBridgeScript(importMetaDir: string): string {

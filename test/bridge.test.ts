@@ -202,7 +202,6 @@ describe("parseBridgeCallPayload", () => {
 describe("BrowserPageRouter", () => {
   class FakeMcpPages {
     pages = [{ id: 0, url: "about:blank", selected: true }];
-    markers = new Map<number, string>();
     calls: { name: string; args: Record<string, unknown> }[] = [];
 
     async call(name: string, args: Record<string, unknown>): Promise<string> {
@@ -243,20 +242,11 @@ describe("BrowserPageRouter", () => {
         return "";
       }
       if (name === "evaluate_script") {
-        const selected = this.pages.find((page) => page.selected);
-        const source = String(args.function);
-        const assignment = source.match(/=\s*"([^"]+)";\s*return true/);
-        if (selected && assignment) {
-          this.markers.set(selected.id, assignment[1]);
-          return "Script ran on page and returned:\n```json\ntrue\n```";
-        }
-        const marker = selected ? this.markers.get(selected.id) : undefined;
-        return `Script ran on page and returned:\n\`\`\`json\n${JSON.stringify(marker ?? null)}\n\`\`\``;
+        throw new Error("router must not use page-visible ownership markers");
       }
       if (name === "close_page") {
         const pageId = args.pageId as number;
         this.pages = this.pages.filter((page) => page.id !== pageId);
-        this.markers.delete(pageId);
         if (!this.pages.some((page) => page.selected) && this.pages[0]) {
           this.pages[0].selected = true;
         }
@@ -294,10 +284,11 @@ describe("BrowserPageRouter", () => {
       (name, args) => fake.call(name, args),
     );
 
-    expect(snapshotA).toBe("snapshot:0");
+    expect(snapshotA).toBe("snapshot:1");
     expect(fake.pages).toEqual([
-      { id: 0, url: "https://a.example/", selected: true },
-      { id: 1, url: "https://b.example/", selected: false },
+      { id: 0, url: "about:blank", selected: false },
+      { id: 1, url: "https://a.example/", selected: true },
+      { id: 2, url: "https://b.example/", selected: false },
     ]);
   });
 
@@ -327,7 +318,7 @@ describe("BrowserPageRouter", () => {
       (name, args) => fake.call(name, args),
     );
 
-    expect(pagesA).toContain("0: https://a.example/ [selected]");
+    expect(pagesA).toContain("1: https://a.example/ [selected]");
     expect(pagesA).not.toContain("https://b.example/");
   });
 
@@ -352,12 +343,12 @@ describe("BrowserPageRouter", () => {
       (name, args) => fake.call(name, args),
     );
     await router.run(
-      { name: "select_page", args: { pageId: 0 }, routeSession: "worker-a" },
+      { name: "select_page", args: { pageId: 1 }, routeSession: "worker-a" },
       (name, args) => fake.call(name, args),
     );
     fake.calls = [];
     await router.run(
-      { name: "close_page", args: { pageId: 0 }, routeSession: "worker-a" },
+      { name: "close_page", args: { pageId: 1 }, routeSession: "worker-a" },
       (name, args) => fake.call(name, args),
     );
 
@@ -366,10 +357,11 @@ describe("BrowserPageRouter", () => {
     );
     const selectBeforeClose = fake.calls
       .slice(0, closeIndex)
-      .some((call) => call.name === "select_page" && call.args.pageId === 1);
+      .some((call) => call.name === "select_page" && call.args.pageId === 2);
     expect(selectBeforeClose).toBe(true);
     expect(fake.pages).toEqual([
-      { id: 1, url: "https://a2.example/", selected: true },
+      { id: 0, url: "about:blank", selected: false },
+      { id: 2, url: "https://a2.example/", selected: true },
     ]);
   });
 
@@ -439,9 +431,9 @@ describe("BrowserPageRouter", () => {
       (name, args) => fake.call(name, args),
     );
 
-    expect(pages).toContain("0: https://a.example/ [selected]");
-    expect(pages).toContain("1: https://background.example/");
-    expect(snapshot).toBe("snapshot:0");
+    expect(pages).toContain("1: https://a.example/ [selected]");
+    expect(pages).toContain("2: https://background.example/");
+    expect(snapshot).toBe("snapshot:1");
   });
 
   it("releases a routed session by closing its page when a survivor exists", async () => {
@@ -472,11 +464,12 @@ describe("BrowserPageRouter", () => {
 
     expect(result).toContain("closed 1");
     expect(fake.pages).toEqual([
-      { id: 1, url: "https://b.example/", selected: true },
+      { id: 0, url: "about:blank", selected: false },
+      { id: 2, url: "https://b.example/", selected: true },
     ]);
   });
 
-  it("releases the last routed session by blanking the last page", async () => {
+  it("releases the last routed session by closing its page when an unowned baseline exists", async () => {
     const router = new BrowserPageRouter();
     const fake = new FakeMcpPages();
 
@@ -494,11 +487,11 @@ describe("BrowserPageRouter", () => {
       (name, args) => fake.call(name, args),
     );
 
-    expect(result).toContain("blanked 1");
+    expect(result).toContain("closed 1");
     expect(fake.pages).toEqual([{ id: 0, url: "about:blank", selected: true }]);
   });
 
-  it("recovers marked page ownership after bridge router restart", async () => {
+  it("leaves existing pages unclaimed after bridge router restart", async () => {
     const firstRouter = new BrowserPageRouter();
     const fake = new FakeMcpPages();
 
@@ -525,11 +518,47 @@ describe("BrowserPageRouter", () => {
       (name, args) => fake.call(name, args),
     );
 
-    expect(pagesA).toContain("https://a.example/");
-    expect(pagesA).not.toContain("https://b.example/");
+    expect(pagesA).toBe("");
     await expect(
       restartedRouter.run(
-        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-b" },
+        { name: "select_page", args: { pageId: 0 }, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-a" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      restartedRouter.run(
+        { name: "select_page", args: { pageId: 1 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 1 }, routeSession: "worker-b" },
+        (name, args) => fake.call(name, args),
+      ),
+    ).rejects.toThrow(/not owned/);
+
+    const snapshotA = await restartedRouter.run(
+      { name: "take_snapshot", args: {}, routeSession: "worker-a" },
+      (name, args) => fake.call(name, args),
+    );
+
+    expect(snapshotA).toBe("snapshot:3");
+    expect(fake.pages).toEqual([
+      { id: 0, url: "about:blank", selected: false },
+      { id: 1, url: "https://a.example/", selected: false },
+      { id: 2, url: "https://b.example/", selected: false },
+      { id: 3, url: "about:blank", selected: true },
+    ]);
+    await expect(
+      restartedRouter.run(
+        { name: "close_page", args: { pageId: 0 }, routeSession: "worker-a" },
         (name, args) => fake.call(name, args),
       ),
     ).rejects.toThrow(/not owned/);
@@ -565,7 +594,8 @@ describe("BrowserPageRouter", () => {
       await vi.advanceTimersByTimeAsync(600);
 
       expect(fake.pages).toEqual([
-        { id: 1, url: "https://b.example/", selected: true },
+        { id: 0, url: "about:blank", selected: false },
+        { id: 2, url: "https://b.example/", selected: true },
       ]);
     } finally {
       vi.useRealTimers();
