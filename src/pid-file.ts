@@ -172,7 +172,9 @@ function sameReclaimTarget(
   left: ReclaimSnapshot,
   right: ReclaimSnapshot,
 ): boolean {
-  return left.claim.dev === right.claim.dev && left.claim.ino === right.claim.ino;
+  return (
+    left.claim.dev === right.claim.dev && left.claim.ino === right.claim.ino
+  );
 }
 
 function sameReclaimIdentity(
@@ -357,8 +359,11 @@ function releaseReclaimLease(lease: ReclaimLease): void {
  * Reclaim only the stale lock generation named by a filesystem-identity
  * lease. The fixed device/inode claim prevents a delayed reclaimer from
  * deleting a replacement generation, and writers yield while that lease is
- * published. Ownerless directories are age-reclaimed solely for compatibility
- * with the legacy mkdir-then-write lock format.
+ * published. Takeover anchors are owner-and-inode identified: a live anchor is
+ * removed only by the contender that published it, while dead-owner recovery
+ * follows only same-target anchors through a chain bounded by inode-identity
+ * cycle detection. Ownerless directories are age-reclaimed solely for
+ * compatibility with the legacy mkdir-then-write lock format.
  */
 export function removeStalePidFileLock(
   lockPath: string,
