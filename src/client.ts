@@ -647,10 +647,7 @@ export async function stopBridgeSession(
   );
   if (!pidInfo) return "not-running";
   if (!isProcessAlive(pidInfo.pid)) return "not-running";
-  if (
-    pidInfo.session !== undefined &&
-    pidInfo.session !== bridgeSessionName
-  ) {
+  if (pidInfo.session !== undefined && pidInfo.session !== bridgeSessionName) {
     return "session-mismatch";
   }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";
