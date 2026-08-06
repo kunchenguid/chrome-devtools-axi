@@ -91,9 +91,10 @@ export function resolveBridgeIdleTimeoutMs(
 
 export function resolveRouteIdleTimeoutMs(
   value = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS,
+  bridgeIdleTimeoutMs = resolveBridgeIdleTimeoutMs(),
 ): number {
   if (value === undefined || value === "") {
-    return DEFAULT_ROUTE_IDLE_TIMEOUT_MS;
+    return bridgeIdleTimeoutMs;
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1000) {

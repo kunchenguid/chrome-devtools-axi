@@ -637,6 +637,9 @@ export async function stopBridgeSession(
   sessionName: string = resolveSessionName(),
 ): Promise<StopBridgeSessionResult> {
   const isPoolBridgeSession = isPooledBridgeSessionName(sessionName);
+  const bridgeSessionName = isPoolBridgeSession
+    ? sessionName
+    : resolveBridgeSessionName(sessionName);
   const pidInfo = readPidFile(
     isPoolBridgeSession
       ? resolveBridgePidFileForBridgeSession(sessionName)
@@ -644,7 +647,10 @@ export async function stopBridgeSession(
   );
   if (!pidInfo) return "not-running";
   if (!isProcessAlive(pidInfo.pid)) return "not-running";
-  if (pidInfo.session !== undefined && pidInfo.session !== sessionName) {
+  if (
+    pidInfo.session !== undefined &&
+    pidInfo.session !== bridgeSessionName
+  ) {
     return "session-mismatch";
   }
   if (!isBridgeProcess(pidInfo.pid)) return "not-bridge";

@@ -58,10 +58,34 @@ describe("bridge idle lifecycle", () => {
   });
 
   it("defaults route idle release to the bridge idle window and validates overrides", () => {
-    expect(resolveRouteIdleTimeoutMs("")).toBe(DEFAULT_ROUTE_IDLE_TIMEOUT_MS);
+    expect(resolveRouteIdleTimeoutMs("", DEFAULT_ROUTE_IDLE_TIMEOUT_MS)).toBe(
+      DEFAULT_ROUTE_IDLE_TIMEOUT_MS,
+    );
     expect(resolveRouteIdleTimeoutMs("60000")).toBe(60_000);
     expect(() => resolveRouteIdleTimeoutMs("999")).toThrow(/integer >= 1000/);
     expect(() => resolveRouteIdleTimeoutMs("nope")).toThrow(/integer >= 1000/);
+  });
+
+  it("inherits a 2-minute Fleet bridge idle env when route idle is unset", () => {
+    const savedBridgeIdle = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    const savedRouteIdle = process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+    try {
+      process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "120000";
+      delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+
+      expect(resolveRouteIdleTimeoutMs()).toBe(120_000);
+    } finally {
+      if (savedBridgeIdle === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = savedBridgeIdle;
+      }
+      if (savedRouteIdle === undefined) {
+        delete process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.CHROME_DEVTOOLS_AXI_ROUTE_IDLE_TIMEOUT_MS = savedRouteIdle;
+      }
+    }
   });
 
   it("shuts down after inactivity but never during an active request", async () => {
