@@ -1,0 +1,28 @@
+chrome-devtools-axi built CLI verification
+==========================================
+
+Command shape:
+  node dist/bin/chrome-devtools-axi.js <flag>
+
+Version aliases (hex includes the trailing newline byte 0a):
+  -v        | exit=0 | stdout=0.1.28 | hex=302e312e32380a
+  -V        | exit=0 | stdout=0.1.28 | hex=302e312e32380a
+  --version | exit=0 | stdout=0.1.28 | hex=302e312e32380a
+
+Normal slow path remains available:
+  $ node dist/bin/chrome-devtools-axi.js --help
+  usage: chrome-devtools-axi [command] [args] [flags]
+  commands[35]:
+    open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
+    type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
+    run,
+  exit=0
+
+Automated executable module-graph verification:
+  pnpm test test/version-path.test.ts
+
+The focused test executes the built entrypoint and verifies that the version
+path loads dist/src/version.js but not dist/src/cli.js, @toon-format, or the MCP
+SDK. Its --help negative control verifies that the same trace detects the heavy
+command graph on the normal slow path. It also verifies all three aliases and
+the conservative multi-argument fall-through behavior.

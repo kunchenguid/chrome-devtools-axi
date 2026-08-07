@@ -97,9 +97,9 @@ describe("--version path", () => {
   it("--version does not load the heavy cli.js command graph", () => {
     const { modules, status } = traceModules([CLI_BIN, "--version"]);
     expect(status).toBe(0);
-    expect(
-      modules.some((url) => url.endsWith("/dist/src/version.js")),
-    ).toBe(true);
+    expect(modules.some((url) => url.endsWith("/dist/src/version.js"))).toBe(
+      true,
+    );
     expect(modules.some((url) => url.endsWith("/dist/src/cli.js"))).toBe(false);
     expect(modules.some((url) => url.includes("@toon-format"))).toBe(false);
   });
