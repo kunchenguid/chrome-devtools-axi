@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.29](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.28...chrome-devtools-axi-v0.1.29) (2026-08-07)
+
+
+### Bug Fixes
+
+* **cli:** avoid loading MCP SDK for every command ([#102](https://github.com/kunchenguid/chrome-devtools-axi/issues/102)) ([22df96b](https://github.com/kunchenguid/chrome-devtools-axi/commit/22df96b8e3beda5d235e23e6959537537e281a0c))
+* **cli:** speed up version flag startup ([#104](https://github.com/kunchenguid/chrome-devtools-axi/issues/104)) ([8d31478](https://github.com/kunchenguid/chrome-devtools-axi/commit/8d31478136f564a9a1bbfd883b7403d0e441a5ec))
+
 ## [0.1.28](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.27...chrome-devtools-axi-v0.1.28) (2026-07-25)
 
 
