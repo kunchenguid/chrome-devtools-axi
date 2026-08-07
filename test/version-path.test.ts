@@ -8,9 +8,9 @@ import pkg from "../package.json" with { type: "json" };
 
 /**
  * Guards the property that made `chrome-devtools-axi --version` slow: the CLI
- * entry point must never pull in the MCP SDK (~45ms), which only the bridge
- * subprocess needs. Both assertions observe real runtime behavior - process
- * timing and the module graph the ESM loader actually resolved.
+ * entry point must never pull in the heavy command graph, and the MCP SDK must
+ * remain isolated to the bridge subprocess. The assertions observe the module
+ * graph the ESM loader actually resolved rather than relying on timing.
  */
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -21,15 +21,6 @@ const TRACE_REGISTER = join(
   "fixtures",
   "module-trace-register.mjs",
 );
-const TIMING_REGISTER = join(
-  import.meta.dirname,
-  "fixtures",
-  "process-timing-register.mjs",
-);
-const MCP_IMPORT_ARGS = [
-  "-e",
-  "import('@modelcontextprotocol/sdk/client/index.js')",
-];
 
 beforeAll(() => {
   // The test spawns the built CLI, so `pnpm test` on a fresh checkout has to
@@ -42,53 +33,6 @@ beforeAll(() => {
     expect(built.status, built.stderr).toBe(0);
   }
 }, 120_000);
-
-function runtimeMs(args: string[]): number {
-  const dir = mkdtempSync(join(tmpdir(), "cdt-axi-timing-"));
-  const timingPath = join(dir, "runtime.txt");
-  try {
-    const result = spawnSync(
-      process.execPath,
-      ["--import", TIMING_REGISTER, ...args],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          CHROME_DEVTOOLS_AXI_PROCESS_TIMING: timingPath,
-        },
-      },
-    );
-    expect(result.status).toBe(0);
-    return Number(readFileSync(timingPath, "utf8").trim());
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-function lowContentionDeltaMs(
-  actualArgs: string[],
-  baselineArgs = ["-e", ""],
-  runs = 11,
-): number {
-  const deltas: number[] = [];
-  for (let i = 0; i < runs; i++) {
-    // Start each CPU clock inside the child after Node and the instrumentation
-    // preload initialize. Parent-side spawn latency and time spent descheduled
-    // are irrelevant to the CLI import path and vary dramatically when Vitest
-    // workers contend in CI.
-    // Keep each baseline measurement adjacent and alternate their order so any
-    // remaining short-lived load does not consistently penalize one command.
-    const baselineFirst = i % 2 === 0;
-    const first = runtimeMs(baselineFirst ? baselineArgs : actualArgs);
-    const second = runtimeMs(baselineFirst ? actualArgs : baselineArgs);
-    deltas.push(baselineFirst ? second - first : first - second);
-  }
-  deltas.sort((a, b) => a - b);
-  // CPU timings can still include short-lived host noise. Use the lower
-  // quartile rather than a single minimum so several observations must
-  // demonstrate the fast path while noisy samples cannot dominate it.
-  return deltas[Math.floor((deltas.length - 1) / 4)]!;
-}
 
 function traceModules(
   args: string[],
@@ -133,20 +77,6 @@ describe("--version path", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("runs substantially faster than loading the MCP SDK", () => {
-    // An absolute wall-clock budget is flaky across machines; measure child CPU
-    // time inside the child instead. Even CPU time varies between Node builds
-    // and operating systems, so measure the MCP import's delta over the CLI on
-    // the same runner. Adjacent, alternating samples keep changing host load
-    // from consistently favoring either path. Reintroducing the SDK into the
-    // CLI path removes this gap.
-    const mcpImportDelta = lowContentionDeltaMs(MCP_IMPORT_ARGS, [
-      CLI_BIN,
-      "--version",
-    ]);
-    expect(mcpImportDelta).toBeGreaterThan(10);
-  }, 60_000);
-
   it("does not load the MCP SDK", () => {
     const { modules } = traceModules([CLI_BIN, "--version"]);
     expect(modules.filter(isMcpModule)).toEqual([]);
@@ -155,14 +85,45 @@ describe("--version path", () => {
 
   it("loads the MCP SDK in the bridge entry point", () => {
     // Negative control: without it, a probe that silently stopped tracing would
-    // pass vacuously. After the extraction the MCP SDK is absent from every CLI
-    // path, so the only legitimate consumer left is the bridge process. Point
-    // it at a nonexistent MCP binary so the transport fails immediately - the
-    // SDK is imported statically, well before that failure.
+    // pass vacuously. Point the bridge at a nonexistent MCP binary so transport
+    // setup fails immediately; the SDK is imported before that failure.
     const { modules, status } = traceModules([BRIDGE_BIN], {
       CHROME_DEVTOOLS_AXI_MCP_PATH: join(tmpdir(), "no-such-mcp-binary.js"),
     });
     expect(status).not.toBe(0);
     expect(modules.filter(isMcpModule).length).toBeGreaterThan(0);
   }, 60_000);
+
+  it("--version does not load the heavy cli.js command graph", () => {
+    const { modules, status } = traceModules([CLI_BIN, "--version"]);
+    expect(status).toBe(0);
+    expect(
+      modules.some((url) => url.endsWith("/dist/src/version.js")),
+    ).toBe(true);
+    expect(modules.some((url) => url.endsWith("/dist/src/cli.js"))).toBe(false);
+    expect(modules.some((url) => url.includes("@toon-format"))).toBe(false);
+  });
+
+  it("loads the heavy cli.js command graph for --help", () => {
+    const { modules, status } = traceModules([CLI_BIN, "--help"]);
+    expect(status).toBe(0);
+    expect(modules.some((url) => url.endsWith("/dist/src/cli.js"))).toBe(true);
+  });
+
+  it.each(["-v", "-V", "--version"])(
+    "%s prints exactly the version and exits 0",
+    (flag) => {
+      const result = spawnSync(process.execPath, [CLI_BIN, flag], {
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(`${pkg.version}\n`);
+      expect(result.stderr).toBe("");
+    },
+  );
+
+  it("falls through for a multi-argument version flag", () => {
+    const { modules } = traceModules([CLI_BIN, "--help", "--version"]);
+    expect(modules.some((url) => url.endsWith("/dist/src/cli.js"))).toBe(true);
+  });
 });

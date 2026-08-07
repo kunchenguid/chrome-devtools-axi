@@ -68,6 +68,9 @@ Action commands parse refs through `parseUidFresh` (`src/cli.ts`), which fails l
 
 ### CLI output and AXI integration
 
+`bin/chrome-devtools-axi.ts` answers a bare `-v`/`-V`/`--version` through `tryFastPath` (`axi-sdk-js/fast-path`) and only then dynamically imports `src/cli.js`, so the version path stays at the node floor (~20ms).
+That makes `src/version.ts` a LEAF module: it may import node builtins only, and nothing on the version path may pull in the heavy command graph. `test/version-path.test.ts` enforces this with a module-resolution trace plus a negative control; keep it free of wall-clock assertions (flaky on CI).
+
 The CLI is built on `axi-sdk-js` (`runAxiCli`): `HOME_DESCRIPTION` and `TOP_HELP` are the shared static guidance, SDK built-ins such as `update` and `update --check` are appended by the runner at runtime, and the `home()` callback returns the live page snapshot when a bridge session is active.
 This is the same output that lands in the agent's optional `SessionStart` hook after `chrome-devtools-axi setup hooks` (`src/hooks.ts`, Claude Code + Codex + OpenCode); `shouldInstallHooksForExecPath` guards dev entrypoints like `pnpm run dev` from self-registering hooks.
 `src/skill.ts` renders the installable Agent Skill (`skills/chrome-devtools-axi/SKILL.md`) from the same shared guidance plus the SDK built-in command list, rewriting invocations to non-interactive `npx -y chrome-devtools-axi ...`.

@@ -1,6 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { encode } from "@toon-format/toon";
 import { runAxiCli } from "axi-sdk-js";
 import {
@@ -31,11 +28,11 @@ import {
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
 import { resolveOutputPath } from "./paths.js";
+import { VERSION } from "./version.js";
 
 export const HOME_DESCRIPTION =
   "Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.";
 
-const VERSION = readPackageVersion();
 const RAW_STDOUT_MARKER = "__CHROME_DEVTOOLS_AXI_RAW__";
 const PAGE_GENERATION_KEY = "__chromeDevtoolsAxiSnapshotGeneration";
 
@@ -864,28 +861,6 @@ function renderError(
 
 function renderOutput(blocks: string[]): string {
   return blocks.filter(Boolean).join("\n");
-}
-
-function readPackageVersion(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-
-  for (const candidate of [
-    join(here, "..", "package.json"),
-    join(here, "..", "..", "package.json"),
-  ]) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-
-    const parsed = JSON.parse(readFileSync(candidate, "utf-8")) as {
-      version?: unknown;
-    };
-    if (typeof parsed.version === "string" && parsed.version.length > 0) {
-      return parsed.version;
-    }
-  }
-
-  throw new Error("Could not determine chrome-devtools-axi package version");
 }
 
 function splitFullFlag(args: string[]): { args: string[]; full: boolean } {

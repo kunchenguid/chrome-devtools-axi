@@ -1,4 +1,8 @@
 #!/usr/bin/env node
-import { main } from "../src/cli.js";
+import { tryFastPath } from "axi-sdk-js/fast-path";
+import { VERSION } from "../src/version.js";
 
-main(process.argv.slice(2));
+if (!tryFastPath(process.argv.slice(2), { version: VERSION })) {
+  const { main } = await import("../src/cli.js");
+  await main(process.argv.slice(2));
+}
