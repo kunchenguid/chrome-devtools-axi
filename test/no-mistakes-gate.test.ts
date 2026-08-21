@@ -46,13 +46,17 @@ if (process.env.CI && !runnable) {
   );
 }
 
-function runGate(body: string): { code: number; output: string } {
+function runGate(
+  body: string,
+  headSha: string = HEAD_SHA,
+): { code: number; output: string } {
   const result = spawnSync("bash", [scriptPath], {
     env: {
       ...process.env,
       PR_BODY: body,
       PR_AUTHOR: "somedev",
       PR_NUMBER: "42",
+      PR_HEAD_SHA: headSha,
     },
     encoding: "utf8",
   });
@@ -81,9 +85,12 @@ function prBody(attestationPayload?: string): string {
   ].join("\n");
 }
 
-function attestation(steps: Array<[string, string]>): string {
+function attestation(
+  steps: Array<[string, string]>,
+  headSha: string = HEAD_SHA,
+): string {
   return JSON.stringify({
-    head_sha: HEAD_SHA,
+    head_sha: headSha,
     steps: steps.map(([step, status]) => ({ step, status })),
   });
 }
@@ -180,6 +187,49 @@ describe.runIf(runnable)("no-mistakes PR gate", () => {
       expect(output).toContain(`skip indicator(s) [${key}]`);
     });
   }
+
+  // Head binding: the attestation describes the commit no-mistakes ran on, so
+  // an attestation naming any other commit says nothing about what is being
+  // merged. A synchronize whose body was not rewritten by no-mistakes going red
+  // is the contract, not a false positive.
+  it("accepts an attestation whose head_sha is the PR's current head", () => {
+    const { code, output } = runGate(
+      prBody(attestation(HEALTHY_STEPS, HEAD_SHA)),
+      HEAD_SHA,
+    );
+    expect(code).toBe(0);
+    expect(output).toContain(`Attestation head_sha: ${HEAD_SHA}`);
+  });
+
+  it("rejects an attestation whose head_sha is not the PR's current head", () => {
+    const staleSha = "0000000000000000000000000000000000000000";
+    const { code, output } = runGate(
+      prBody(attestation(HEALTHY_STEPS, staleSha)),
+      HEAD_SHA,
+    );
+    expect(code).toBe(1);
+    expect(output).toContain("attestation is STALE for the current head");
+    expect(output).toContain("Re-run 'git push no-mistakes' to refresh it");
+    expect(output).toContain(staleSha);
+    expect(output).toContain(HEAD_SHA);
+  });
+
+  it("fails closed when the attestation carries no head_sha at all", () => {
+    const payload = JSON.stringify({
+      steps: HEALTHY_STEPS.map(([step, status]) => ({ step, status })),
+    });
+    const { code, output } = runGate(prBody(payload), HEAD_SHA);
+    expect(code).toBe(1);
+    expect(output).toContain("attestation is STALE for the current head");
+    expect(output).toContain("Attestation head_sha: (absent)");
+  });
+
+  it("fails closed when the PR head sha is unavailable", () => {
+    const { code, output } = runGate(prBody(attestation(HEALTHY_STEPS)), "");
+    expect(code).toBe(1);
+    expect(output).toContain("attestation is STALE for the current head");
+    expect(output).toMatch(/PR head sha: +\(absent\)/);
+  });
 
   it("fails closed on an attestation payload that is not valid JSON", () => {
     const { code, output } = runGate(
