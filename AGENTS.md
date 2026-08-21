@@ -30,7 +30,8 @@ Its frontmatter includes Hermes Agent metadata from `src/skill.ts`; update the g
 - Keep `skills/chrome-devtools-axi/` in the npm `files` list when changing package contents; the skill-first install path depends on it shipping with the package.
 - `pnpm-workspace.yaml` enforces a minimum release age for dependency updates as a supply-chain guard; `axi-sdk-js` and `chrome-devtools-axi` are exempt.
 - `.airlock/lint.sh` must use pnpm (never `npm install` or `npx`); `test/airlock-lint.test.ts` enforces this.
-- Human-authored PRs to `main` must go through [`no-mistakes`](https://github.com/kunchenguid/no-mistakes); CI enforces a deterministic signature in the PR body. See CONTRIBUTING.md.
+- Human-authored PRs to `main` must go through [`no-mistakes`](https://github.com/kunchenguid/no-mistakes); the gate in `no-mistakes-required.yml` requires both the body signature and the `no-mistakes-pipeline-attestation:v1` comment (review/test/document all `completed`). See CONTRIBUTING.md.
+- That gate's inline `run:` script is mirrored byte-for-byte across repos (upstream: `kunchenguid/gh-axi`); only this repo's `on:`/`if:`/`concurrency` differ. `test/no-mistakes-gate.test.ts` extracts the exact block from the YAML and executes it against fixtures, so edit the script rather than the test's copy of it.
 
 ## Architecture
 
