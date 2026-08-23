@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
   createSkillMarkdown,
-  extractCommandsBlock,
+  MAX_SKILL_MARKDOWN_CHARS,
   SKILL_AUTHOR,
   SKILL_DESCRIPTION,
   SKILL_HERMES_CATEGORY,
@@ -16,6 +16,14 @@ function parseFrontmatter(markdown: string): Record<string, unknown> {
     throw new Error("Missing frontmatter");
   }
   return parseYaml(match[1]) as Record<string, unknown>;
+}
+
+function skillBody(markdown: string): string {
+  const end = markdown.indexOf("\n---\n", 4);
+  if (end < 0) {
+    throw new Error("Missing frontmatter close");
+  }
+  return markdown.slice(end + 5);
 }
 
 describe("createSkillMarkdown", () => {
@@ -50,13 +58,20 @@ describe("createSkillMarkdown", () => {
     const markdown = createSkillMarkdown();
     expect(markdown).toContain("npx -y chrome-devtools-axi");
   });
-});
 
-describe("extractCommandsBlock", () => {
-  it("pulls the commands list from the top-level help", () => {
-    const block = extractCommandsBlock();
-    expect(block).toMatch(/^commands\[\d+\]:\n/);
-    expect(block).toContain("open <url>");
-    expect(block).toContain("setup hooks");
+  it("stays a short stub that defers to the CLI", () => {
+    const markdown = createSkillMarkdown();
+    expect(markdown.length).toBeLessThanOrEqual(MAX_SKILL_MARKDOWN_CHARS);
+    expect(markdown).toContain("`npx -y chrome-devtools-axi --help`");
+    expect(markdown).toContain("`npx -y chrome-devtools-axi <command> --help`");
+    expect(markdown).toMatch(/next-step hints/i);
+  });
+
+  it("does not bake CLI-owned instruction sections into the skill", () => {
+    const body = skillBody(createSkillMarkdown());
+    expect(body).not.toMatch(/^## Commands\b/m);
+    expect(body).not.toMatch(/^## Tips\b/m);
+    expect(body).not.toMatch(/^## Workflow\b/m);
+    expect(body).not.toMatch(/^commands\[\d+\]:/m);
   });
 });

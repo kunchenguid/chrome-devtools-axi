@@ -1,5 +1,6 @@
-// Generates skills/chrome-devtools-axi/SKILL.md from shared CLI guidance and
-// documented SDK built-ins so the installable skill stays aligned with help.
+// Generates skills/chrome-devtools-axi/SKILL.md from createSkillMarkdown() so
+// the committed stub cannot drift from the generator. The stub defers to the
+// CLI for guidance.
 //
 //   pnpm run build:skill            # write the file
 //   pnpm run build:skill -- --check # fail (exit 1) if the committed file is stale
