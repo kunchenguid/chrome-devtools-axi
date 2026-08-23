@@ -11,7 +11,8 @@ Pushing through it runs an AI-driven review/test/build pipeline in an isolated w
 
 A GitHub Actions check (`Require no-mistakes`) runs on PRs targeting `main` and fails if the body is missing the deterministic signature that no-mistakes writes.
 It also requires the machine-readable pipeline attestation that no-mistakes >= 1.46.0 writes next to that signature: the `review`, `test`, and `document` steps must all be recorded as `completed`, and the attested `head_sha` must be the PR's current head.
-So pushing a commit after the pipeline ran turns the check red until you `git push no-mistakes` again and the body is rewritten for the new head.
+The gate runs when a PR is opened, edited, or reopened, not when commits are pushed.
+If a direct push leaves a stale attestation, head binding rejects it the next time one of those gate events runs; use `git push no-mistakes` so the body is rewritten for the new head.
 The release and dependency bots are exempt so their automation keeps working, but regular contributor PRs without the signature and a current attestation will not be reviewed or merged.
 
 ## Workflow

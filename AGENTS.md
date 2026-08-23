@@ -32,7 +32,7 @@ Its frontmatter includes Hermes Agent metadata from `src/skill.ts`; update the g
 - `.airlock/lint.sh` must use pnpm (never `npm install` or `npx`); `test/airlock-lint.test.ts` enforces this.
 - Human-authored PRs to `main` must go through [`no-mistakes`](https://github.com/kunchenguid/no-mistakes) (>= 1.46.0); the gate in `no-mistakes-required.yml` requires the body signature, the `no-mistakes-pipeline-attestation:v1` comment (review/test/document all `completed`), and the attested `head_sha` to equal the PR's current head. See CONTRIBUTING.md.
 - `.github/workflows/no-mistakes-required.yml` is a thin caller of the shared `kunchenguid/no-mistakes/.github/actions/require-no-mistakes` composite action, pinned to an immutable commit SHA and never `@main`. Enforcement logic and its tests live upstream in the no-mistakes repository; change enforcement there rather than copying it back here, and bump this repository's pin in a deliberate separate PR. This repo still owns its `on:`, `paths-ignore`, `concurrency`, `permissions`, job name, and author-exemption `if:`.
-- The shared action's head binding means a PR whose body no-mistakes did not rewrite for the current head goes red. That is the attestation contract, not a flake: push through `git push no-mistakes` so the body is refreshed.
+- The gate runs on opened, edited, and reopened events, not on pushes. When one of those events runs, the shared action's head binding rejects a body that no-mistakes did not rewrite for the current head. That is the attestation contract, not a flake: push through `git push no-mistakes` so the body is refreshed.
 
 ## Architecture
 
