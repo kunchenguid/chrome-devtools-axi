@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.30](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.29...chrome-devtools-axi-v0.1.30) (2026-08-23)
+
+
+### Bug Fixes
+
+* **skill:** defer installed guidance to the current CLI ([#112](https://github.com/kunchenguid/chrome-devtools-axi/issues/112)) ([75dd6ca](https://github.com/kunchenguid/chrome-devtools-axi/commit/75dd6ca57eda1e160df82d73985d471cd405eee3))
+
 ## [0.1.29](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.28...chrome-devtools-axi-v0.1.29) (2026-08-07)
 
 
