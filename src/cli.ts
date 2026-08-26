@@ -28,6 +28,7 @@ import {
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
 import { parsePagesList } from "./pages.js";
+import { overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
 
@@ -1332,7 +1333,7 @@ async function handleStop(): Promise<string> {
 
 async function handlePages(): Promise<string> {
   const result = await callTool("list_pages");
-  const pages = parsePagesList(result);
+  const pages = overlaySessionSelected(parsePagesList(result));
   if (pages.length === 0) {
     return "pages: 0 pages open";
   }

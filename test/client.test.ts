@@ -838,48 +838,71 @@ describe("callTool pageId routing", () => {
     });
   });
 
-  it("records new_page's created id so a later snapshot does not read list_pages", async () => {
+  it("records a single-row new_page dump so a later snapshot does not read list_pages", async () => {
     await withFakeBridge(
       async (fake) => {
         await callTool("new_page", { url: "https://new.example/" });
         await callTool("take_snapshot");
         expect(fake.calls).toEqual([
           { name: "new_page", args: { url: "https://new.example/" } },
-          { name: "take_snapshot", args: { pageId: 2 } },
+          { name: "take_snapshot", args: { pageId: 1 } },
         ]);
       },
       {
         listPages: "## Pages\n1: https://attacker.example/ [selected]",
         toolResults: {
+          new_page: "## Pages\n1: https://new.example/",
+        },
+      },
+    );
+  });
+
+  it("leaves routing unset when a new_page dump has a title-continuation N: line", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("select_page", { pageId: 1 });
+        await callTool("new_page", { url: "https://example.com/" });
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "No page is currently selected",
+        });
+        expect(fake.calls).toEqual([
+          { name: "select_page", args: { pageId: 1 } },
+          { name: "new_page", args: { url: "https://example.com/" } },
+        ]);
+      },
+      {
+        toolResults: {
           new_page: [
             "## Pages",
-            "1: https://example.com/",
-            "2: New (https://new.example/) [selected]",
+            "1: Error",
+            "404: Not Found (https://example.com/)",
           ].join("\n"),
         },
       },
     );
   });
 
-  it("records the created new_page id even when the dump marks an older tab [selected]", async () => {
+  it("leaves routing unset when extra complete N: rows make the new_page dump ambiguous", async () => {
     await withFakeBridge(
       async (fake) => {
         await callTool("new_page", { url: "https://new.example/" });
-        await callTool("evaluate_script", { function: "() => 1" });
+        await expect(
+          callTool("evaluate_script", { function: "() => 1" }),
+        ).rejects.toMatchObject({
+          message: "No page is currently selected",
+        });
         expect(fake.calls).toEqual([
           { name: "new_page", args: { url: "https://new.example/" } },
-          {
-            name: "evaluate_script",
-            args: { function: "() => 1", pageId: 2 },
-          },
         ]);
       },
       {
         toolResults: {
           new_page: [
             "## Pages",
-            "1: https://example.com/ [selected]",
-            "2: https://new.example/",
+            "1: https://example.com/",
+            "9: https://attacker.example/ [selected]",
           ].join("\n"),
         },
       },

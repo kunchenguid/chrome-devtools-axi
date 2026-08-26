@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AxiError } from "axi-sdk-js";
 
@@ -24,6 +26,7 @@ vi.mock("../src/client.js", () => ({
 
 import { main } from "../src/cli.js";
 import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
+import { setSelectedPageId } from "../src/selected-page.js";
 
 describe("main", () => {
   afterEach(() => {
@@ -238,5 +241,68 @@ describe("main", () => {
     await main(["perf-stop", "--file"]);
 
     expect(callTool).toHaveBeenCalledWith("performance_stop_trace", {});
+  });
+});
+
+describe("pages selected overlay", () => {
+  const savedHome = process.env.HOME;
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  let tmpHome = "";
+
+  afterEach(() => {
+    callTool.mockReset();
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    if (savedSession === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
+    }
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function isolateSession(): void {
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-pages-"));
+    process.env.HOME = tmpHome;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "pages-overlay";
+  }
+
+  it("does not show selected=true from MCP [selected] when AXI has no select_page", async () => {
+    isolateSession();
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce(
+      "## Pages\n1: https://example.com/ [selected]",
+    );
+
+    await main(["pages"]);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(output).toContain("1,https://example.com/,false");
+    expect(output).not.toMatch(/,true(?:\n|$)/);
+  });
+
+  it("shows selected=true for the session id, not MCP [selected]", async () => {
+    isolateSession();
+    setSelectedPageId(2);
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce(
+      [
+        "## Pages",
+        "1: https://example.com/ [selected]",
+        "2: https://other.example/",
+      ].join("\n"),
+    );
+
+    await main(["pages"]);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(output).toContain("1,https://example.com/,false");
+    expect(output).toContain("2,https://other.example/,true");
   });
 });

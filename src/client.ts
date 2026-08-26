@@ -544,7 +544,7 @@ function resolveToolArgs(
  *
  * Page-scoped tools (eval/snapshot/click/fill and the rest of
  * `PAGE_SCOPED_TOOLS` in `src/pages.ts`) get the session's last
- * `select_page` / `new_page` `pageId` injected so they satisfy
+ * `select_page` / unambiguous `new_page` `pageId` injected so they satisfy
  * chrome-devtools-mcp 1.8+ defaults. `list_pages` is never consulted.
  */
 export async function callTool(
