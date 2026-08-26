@@ -234,6 +234,40 @@ describe("parsePagesList", () => {
     );
     expect(result).toEqual([{ id: 1, url: "https://a.com/", selected: true }]);
   });
+
+  it("treats untitled blob:/devtools:/view-source:/edge: rows as complete pages", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "0: blob:https://example.com/abc",
+        "1: devtools://devtools/bundled/inspector.html",
+        "2: view-source:https://example.com/",
+        "3: edge://settings/",
+        "4: https://example.com/ [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 0, url: "blob:https://example.com/abc", selected: false },
+      {
+        id: 1,
+        url: "devtools://devtools/bundled/inspector.html",
+        selected: false,
+      },
+      { id: 2, url: "view-source:https://example.com/", selected: false },
+      { id: 3, url: "edge://settings/", selected: false },
+      { id: 4, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("peels a trailing blob: URL wrapper on a titled page", () => {
+    const result = parsePagesList(
+      "## Pages\n0: Preview (blob:https://example.com/abc)\n1: Example (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 0, url: "blob:https://example.com/abc", selected: false },
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
 });
 
 describe("parseSelectedPageId", () => {
@@ -283,6 +317,20 @@ describe("parseSelectedPageId", () => {
     expect(
       parseSelectedPageId(
         "## Pages\n1: Error\n404: Not Found (https://example.com/) [selected]",
+      ),
+    ).toBe(1);
+  });
+
+  it("does not fold a later [selected] page into an earlier untitled blob: tab", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "# Open dialog",
+          "alert: Confirm?",
+          "## Pages",
+          "0: blob:https://example.com/abc",
+          "1: https://example.com/ [selected]",
+        ].join("\n"),
       ),
     ).toBe(1);
   });

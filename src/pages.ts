@@ -74,17 +74,34 @@ export function needsPageId(
 }
 
 /**
- * Trailing MCP title wrapper: ` (<url>)`. Only peel when the parenthesized
- * payload starts with a URL scheme so untitled raw URLs that happen to
- * contain `)` (Wikipedia `Foo_(bar)`, many `data:` URLs) stay intact.
+ * Schemes MCP/Puppeteer emit on untitled `list_pages` rows (and in the
+ * trailing ` (<url>)` title wrapper). Shared so completeness and URL
+ * peeling cannot drift. Includes blob:/devtools:/view-source:/edge: so an
+ * earlier unselected tab with one of those URLs is not left "incomplete"
+ * (which would fold the real `[selected]` page into it).
  */
-const TRAILING_URL_WRAPPER =
-  /\s+\(((?:https?:\/\/|about:|data:|chrome:|file:).*)\)\s*$/i;
+const PAGE_URL_SCHEMES = [
+  "https?:\\/\\/",
+  "about:",
+  "data:",
+  "chrome:",
+  "file:",
+  "blob:",
+  "devtools:",
+  "view-source:",
+  "edge:",
+] as const;
+const PAGE_URL_SCHEME_SOURCE = `(?:${PAGE_URL_SCHEMES.join("|")})`;
+
+const TRAILING_URL_WRAPPER = new RegExp(
+  `\\s+\\((${PAGE_URL_SCHEME_SOURCE}.*)\\)\\s*$`,
+  "i",
+);
+const UNTITLED_SCHEME_URL = new RegExp(`^${PAGE_URL_SCHEME_SOURCE}`, "i");
 
 const PAGE_SECTION_HEADER = /^##\s+(Pages|Extension Pages)$/;
 const SECTION_HEADER = /^##\s/;
 const PAGE_ID_LINE = /^\d+:\s+/;
-const UNTITLED_SCHEME_URL = /^(?:https?:\/\/|about:|data:|chrome:|file:)/i;
 
 function isCompletePageRow(row: string): boolean {
   if (/(?:^|\s)\[selected\](?:\s|$)/.test(row)) return true;
