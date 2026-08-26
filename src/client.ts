@@ -64,6 +64,16 @@ export class CdpError extends AxiError {
 type FreeBridgePortResolver = (excludedPort: number) => Promise<number>;
 type BridgePortAvailabilityProbe = (port: number) => Promise<boolean>;
 
+function browserEndpointUsesBridgeInterface(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  return (
+    normalized === "0.0.0.0" ||
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    /^127(?:\.\d{1,3}){3}$/.test(normalized)
+  );
+}
+
 function canBindBridgePort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createNetServer();
@@ -101,19 +111,21 @@ export async function findFreeBridgePort(
 export async function resolveBridgePort(
   sessionName: string = resolveSessionName(),
   findFreePort: FreeBridgePortResolver = findFreeBridgePort,
-  canBindPort: BridgePortAvailabilityProbe = canBindBridgePort,
 ): Promise<number> {
   const preferredPort = resolveSessionPort(sessionName);
   const browserEndpoint = resolveBrowserEndpoint();
-  if (browserEndpoint === null || preferredPort !== browserEndpoint.port) {
+  if (
+    browserEndpoint === null ||
+    !browserEndpointUsesBridgeInterface(browserEndpoint.hostname) ||
+    preferredPort !== browserEndpoint.port
+  ) {
     return preferredPort;
   }
   const browserPort = browserEndpoint.port;
-  if (await canBindPort(preferredPort)) return preferredPort;
 
   if (resolveExplicitSessionPort() !== null) {
     throw new CdpError(
-      `CHROME_DEVTOOLS_AXI_PORT ${preferredPort} is unavailable on 127.0.0.1 while the configured browser/CDP endpoint uses the same port number`,
+      `CHROME_DEVTOOLS_AXI_PORT ${preferredPort} collides with the configured local browser/CDP endpoint`,
       "VALIDATION_ERROR",
       [
         "Choose a different CHROME_DEVTOOLS_AXI_PORT, or unset it to select a free bridge port automatically.",
