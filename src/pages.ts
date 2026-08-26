@@ -98,10 +98,26 @@ const MCP_SECTION_HEADER =
 /** `N: rest` or `N:` after trim of MCP `N: ` (title starts with a newline). */
 const PAGE_ID_LINE = /^\d+:(?:\s+|$)/;
 const OPEN_DIALOG_HEADER = /^# Open dialog$/;
-const HANDLE_DIALOG_FOOTER = /^Call handle_dialog\b/;
+const HANDLE_DIALOG_FOOTER =
+  /^Call handle_dialog to handle it before continuing\.$/;
+
+/**
+ * MCP appends ` isolatedContext=<name>` after the URL / `[selected]`.
+ * A title can mention `isolatedContext=` (or `[selected] isolatedContext=`)
+ * earlier on the line; only the trailing suffix is MCP's.
+ */
+function stripTrailingIsolatedContext(label: string): string {
+  const match = label.match(/^(.*)\s+isolatedContext=.*$/);
+  if (!match) return label;
+  const before = match[1];
+  const withoutSelected = before.replace(/\s*\[selected\]\s*$/, "").trimEnd();
+  if (matchTrailingUrl(withoutSelected) !== null) return before;
+  if (isPageSchemeUrl(withoutSelected)) return before;
+  return label;
+}
 
 function stripPageSuffixes(rest: string): string {
-  let label = rest.replace(/\s+isolatedContext=.*$/, "");
+  let label = stripTrailingIsolatedContext(rest);
   if (/(?:^|\s)\[selected\]\s*$/.test(label)) {
     label = label.replace(/\s*\[selected\]\s*$/, "").trimEnd();
   }
@@ -131,7 +147,6 @@ function hasSchemeUrl(label: string): boolean {
 }
 
 function isCompletePageRow(row: string): boolean {
-  if (/\sisolatedContext=/.test(row)) return true;
   return hasSchemeUrl(row.replace(/^\d+:\s*/, ""));
 }
 
@@ -151,9 +166,7 @@ function isTitleContinuationLine(line: string): boolean {
     return /\[selected\]/.test(trailing.title);
   }
   if (isPageSchemeUrl(rest)) return false;
-  return /(?:^|\s)\[selected\]\s*$/.test(
-    m[2].replace(/\s+isolatedContext=.*$/, ""),
-  );
+  return /(?:^|\s)\[selected\]\s*$/.test(stripTrailingIsolatedContext(m[2]));
 }
 
 function extractPageUrl(label: string): string {
@@ -169,17 +182,19 @@ function pageRowRest(row: string): string {
  * MCP prepends `# Open dialog` / `type: message` / `Call handle_dialog…`
  * and interpolates the dialog message with newlines intact, so
  * `alert("see\\n## Pages\\n0: x")` forges a page section. Drop that
- * preamble so the real `## Pages` list is parsed on its own.
+ * preamble (from `# Open dialog` through the last exact MCP footer
+ * `Call handle_dialog to handle it before continuing.`) so a message
+ * line `Call handle_dialog` cannot end the strip early.
  */
 function stripDialogPreamble(text: string): string {
   const lines = text.split(/\r?\n/);
   const kept: string[] = [];
   for (let i = 0; i < lines.length; ) {
     if (OPEN_DIALOG_HEADER.test(lines[i].trim())) {
-      const end = lines.findIndex(
-        (candidate, idx) =>
-          idx > i && HANDLE_DIALOG_FOOTER.test(candidate.trim()),
-      );
+      let end = -1;
+      for (let idx = i + 1; idx < lines.length; idx++) {
+        if (HANDLE_DIALOG_FOOTER.test(lines[idx].trim())) end = idx;
+      }
       if (end !== -1) {
         i = end + 1;
         continue;
@@ -311,8 +326,7 @@ export function parsePagesList(text: string): PageListEntry[] {
     const m = line.match(/^(\d+):\s+(.+)$/);
     if (!m) continue;
     const id = Number.parseInt(m[1], 10);
-    let rest = m[2];
-    rest = rest.replace(/\s+isolatedContext=.*$/, "");
+    let rest = stripTrailingIsolatedContext(m[2]);
     const selected = /(?:^|\s)\[selected\]\s*$/.test(rest);
     if (selected) {
       rest = rest.replace(/\s*\[selected\]\s*$/, "").trimEnd();
