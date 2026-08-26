@@ -74,26 +74,19 @@ export function needsPageId(
 }
 
 /**
- * Schemes MCP/Puppeteer emit on untitled `list_pages` rows (and in the
- * trailing ` (<url>)` title wrapper). Shared so completeness and URL
- * peeling cannot drift. Includes blob:/devtools:/view-source:/edge: so an
- * earlier unselected tab with one of those URLs is not left "incomplete"
- * (which would fold the real `[selected]` page into it).
+ * Untitled `list_pages` rows and trailing ` (<url>)` wrappers. Any
+ * `scheme://` prefix is a complete page URL (`chrome-untrusted:`,
+ * `isolated-app:`, …). Colon-only schemes stay allowlisted so a title
+ * like `Note: hello` is not treated as a URL.
  */
-const PAGE_URL_SCHEMES = [
-  "https?:\\/\\/",
-  "about:",
-  "data:",
-  "chrome-extension:",
-  "chrome:",
-  "file:",
-  "blob:",
-  "devtools:",
-  "view-source:",
-  "edge:",
-] as const;
-const PAGE_URL_SCHEME_SOURCE = `(?:${PAGE_URL_SCHEMES.join("|")})`;
-const UNTITLED_SCHEME_URL = new RegExp(`^${PAGE_URL_SCHEME_SOURCE}`, "i");
+const GENERIC_SCHEME_SLASH_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
+const COLON_ONLY_SCHEME_URL = /^(?:about:|data:|view-source:|blob:)/i;
+
+function isPageSchemeUrl(label: string): boolean {
+  return (
+    GENERIC_SCHEME_SLASH_URL.test(label) || COLON_ONLY_SCHEME_URL.test(label)
+  );
+}
 
 /**
  * MCP `list_pages` section titles. Unknown `## ` lines (for example a
@@ -126,13 +119,13 @@ function matchTrailingUrl(
   const open = trimmed.lastIndexOf(" (");
   if (open === -1) return null;
   const url = trimmed.slice(open + 2, close);
-  if (!UNTITLED_SCHEME_URL.test(url)) return null;
+  if (!isPageSchemeUrl(url)) return null;
   return { title: trimmed.slice(0, open), url };
 }
 
 function hasSchemeUrl(label: string): boolean {
   const rest = stripPageSuffixes(label);
-  return matchTrailingUrl(rest) !== null || UNTITLED_SCHEME_URL.test(rest);
+  return matchTrailingUrl(rest) !== null || isPageSchemeUrl(rest);
 }
 
 function isCompletePageRow(row: string): boolean {
@@ -155,7 +148,7 @@ function isTitleContinuationLine(line: string): boolean {
   if (trailing !== null) {
     return /\[selected\]/.test(trailing.title);
   }
-  if (UNTITLED_SCHEME_URL.test(rest)) return false;
+  if (isPageSchemeUrl(rest)) return false;
   return /(?:^|\s)\[selected\]\s*$/.test(
     m[2].replace(/\s+isolatedContext=.*$/, ""),
   );
@@ -164,6 +157,37 @@ function isTitleContinuationLine(line: string): boolean {
 function extractPageUrl(label: string): string {
   const match = matchTrailingUrl(label);
   return match ? match.url : label.trim();
+}
+
+function pageRowRest(row: string): string {
+  return stripPageSuffixes(row.replace(/^\d+:\s*/, ""));
+}
+
+/**
+ * True when lines after a `## Pages` header finish the current incomplete
+ * title with MCP's trailing ` (<url>)` wrapper. A following untitled
+ * `N: scheme://…` row is the real list, not title text.
+ */
+function followingLinesCompleteTitle(
+  rawLines: string[],
+  headerIndex: number,
+  currentRow: string,
+): boolean {
+  let acc = `${currentRow} ## Pages`;
+  for (let i = headerIndex + 1; i < rawLines.length; i++) {
+    const next = rawLines[i].trim();
+    if (next.length === 0) continue;
+    if (next.match(MCP_SECTION_HEADER) !== null) return false;
+    if (PAGE_ID_LINE.test(next)) {
+      const rest = stripPageSuffixes(next.replace(/^\d+:\s*/, ""));
+      if (isPageSchemeUrl(rest) && matchTrailingUrl(rest) === null) {
+        return false;
+      }
+    }
+    acc += ` ${next}`;
+    if (matchTrailingUrl(pageRowRest(acc)) !== null) return true;
+  }
+  return false;
 }
 
 /**
@@ -187,16 +211,19 @@ function extractPageUrl(label: string): string {
  * `## WebMCP tools`). Unknown `## ` lines stay in the current page row so
  * a title like `Intro\n## Getting started` does not drop `[selected]`. A
  * later `## Pages` after complete rows replaces earlier rows so dialog
- * text that forges `## Pages` cannot prepend a selected page; while the
- * current row is still incomplete, `## Pages` folds as title text so a
- * title like `x\n## Pages\n0: https://a.com/` cannot discard the real id.
- * `## Extension Pages` does not reset.
+ * text that forges `## Pages` cannot prepend a selected page. An
+ * incomplete current row is not enough to fold `## Pages`: only fold when
+ * the following lines complete that title with a trailing URL wrapper
+ * (so `x\n## Pages\n0: https://a.com/ (https://real/)` keeps the real id).
+ * A dialog that forges `## Pages` plus `0: x` then the real untitled list
+ * still resets. `## Extension Pages` does not reset.
  */
 function collapsePageRows(text: string): string[] {
   const rows: string[] = [];
   let inPageBlock = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
+  const rawLines = text.split(/\r?\n/);
+  for (let index = 0; index < rawLines.length; index++) {
+    const line = rawLines[index].trim();
     if (line.length === 0) continue;
     const section = line.match(MCP_SECTION_HEADER)?.[1];
     if (section !== undefined) {
@@ -205,7 +232,8 @@ function collapsePageRows(text: string): string[] {
         section === "Pages" &&
         inPageBlock &&
         prev !== undefined &&
-        !isCompletePageRow(prev)
+        !isCompletePageRow(prev) &&
+        followingLinesCompleteTitle(rawLines, index, prev)
       ) {
         rows[rows.length - 1] += ` ${line}`;
         continue;

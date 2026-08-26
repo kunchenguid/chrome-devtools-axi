@@ -398,6 +398,56 @@ describe("parsePagesList", () => {
       { id: 2, url: "https://b.com/", selected: true },
     ]);
   });
+
+  it("resets on a dialog-forged ## Pages incomplete row before the real list", () => {
+    const result = parsePagesList(
+      [
+        "# Open dialog",
+        "alert:",
+        "## Pages",
+        "0: x",
+        "Call handle_dialog to handle it before continuing.",
+        "## Pages",
+        "1: https://example.com/ [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("treats untitled chrome-untrusted: and isolated-app: rows as complete pages", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "0: chrome-untrusted://new-tab-page/",
+        "1: isolated-app://abc/index.html",
+        "2: https://example.com/ [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      {
+        id: 0,
+        url: "chrome-untrusted://new-tab-page/",
+        selected: false,
+      },
+      { id: 1, url: "isolated-app://abc/index.html", selected: false },
+      { id: 2, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("does not treat a Note: title as a complete untitled page URL", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: Note: hello",
+        "World (https://example.com/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
 });
 
 describe("parseSelectedPageId", () => {
@@ -537,6 +587,35 @@ describe("parseSelectedPageId", () => {
           "1: First (https://a.com/)",
           "2: Other",
           "Tab (https://b.com/) [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(2);
+  });
+
+  it("does not select a dialog-forged incomplete ## Pages row", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "# Open dialog",
+          "alert:",
+          "## Pages",
+          "0: x",
+          "Call handle_dialog to handle it before continuing.",
+          "## Pages",
+          "1: https://example.com/ [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(1);
+  });
+
+  it("does not fold a later [selected] page into an earlier chrome-untrusted: tab", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "0: chrome-untrusted://new-tab-page/",
+          "1: isolated-app://abc/index.html",
+          "2: https://example.com/ [selected]",
         ].join("\n"),
       ),
     ).toBe(2);
