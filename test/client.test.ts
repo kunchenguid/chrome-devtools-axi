@@ -187,6 +187,16 @@ describe("resolveBridgePort browser collision", () => {
 
     await expect(resolveBridgePort("default", findFree)).resolves.toBe(9225);
   });
+
+  it("allows a remote browser endpoint to use the same port number", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://192.0.2.10:9224";
+    process.env.CHROME_DEVTOOLS_AXI_PORT = "9224";
+    const findFree = async (): Promise<number> => {
+      throw new Error("unexpected free-port lookup");
+    };
+
+    await expect(resolveBridgePort("default", findFree)).resolves.toBe(9224);
+  });
 });
 
 interface FakeBridgeOptions {

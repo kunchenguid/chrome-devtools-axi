@@ -13,7 +13,7 @@ import {
 } from "./bridge-script.js";
 import {
   resolveSessionName,
-  resolveBrowserPort,
+  resolveBrowserEndpoint,
   resolveExplicitSessionPort,
   resolveSessionPidFile,
   resolveSessionPort,
@@ -61,6 +61,16 @@ export class CdpError extends AxiError {
 
 type FreeBridgePortResolver = (excludedPort: number) => Promise<number>;
 
+function browserEndpointUsesBridgeInterface(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  return (
+    normalized === "127.0.0.1" ||
+    normalized === "0.0.0.0" ||
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost")
+  );
+}
+
 function canBindBridgePort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createNetServer();
@@ -95,10 +105,15 @@ export async function resolveBridgePort(
   findFreePort: FreeBridgePortResolver = findFreeBridgePort,
 ): Promise<number> {
   const preferredPort = resolveSessionPort(sessionName);
-  const browserPort = resolveBrowserPort();
-  if (browserPort === null || preferredPort !== browserPort) {
+  const browserEndpoint = resolveBrowserEndpoint();
+  if (
+    browserEndpoint === null ||
+    !browserEndpointUsesBridgeInterface(browserEndpoint.hostname) ||
+    preferredPort !== browserEndpoint.port
+  ) {
     return preferredPort;
   }
+  const browserPort = browserEndpoint.port;
 
   if (resolveExplicitSessionPort() !== null) {
     throw new CdpError(

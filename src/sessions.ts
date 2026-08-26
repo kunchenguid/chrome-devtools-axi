@@ -107,15 +107,22 @@ export function resolveExplicitSessionPort(): number | null {
   return !Number.isNaN(parsed) && parsed > 0 ? parsed : null;
 }
 
-/** Resolve the TCP port from the configured browser URL, when it is parseable. */
-export function resolveBrowserPort(): number | null {
+export interface BrowserEndpoint {
+  hostname: string;
+  port: number;
+}
+
+/** Resolve the configured browser endpoint, when it is parseable. */
+export function resolveBrowserEndpoint(): BrowserEndpoint | null {
   const raw = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    if (url.port) return Number.parseInt(url.port, 10);
-    if (url.protocol === "http:" || url.protocol === "ws:") return 80;
-    if (url.protocol === "https:" || url.protocol === "wss:") return 443;
+    let port: number | null = null;
+    if (url.port) port = Number.parseInt(url.port, 10);
+    else if (url.protocol === "http:" || url.protocol === "ws:") port = 80;
+    else if (url.protocol === "https:" || url.protocol === "wss:") port = 443;
+    if (port !== null) return { hostname: url.hostname, port };
   } catch {
     // Leave malformed URLs to chrome-devtools-mcp's existing validation path.
   }
