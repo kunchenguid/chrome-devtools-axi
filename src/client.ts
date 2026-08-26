@@ -3,6 +3,7 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
 import { createServer as createNetServer } from "node:net";
@@ -64,14 +65,39 @@ export class CdpError extends AxiError {
 type FreeBridgePortResolver = (excludedPort: number) => Promise<number>;
 type BridgePortAvailabilityProbe = (port: number) => Promise<boolean>;
 
-function browserEndpointUsesBridgeInterface(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/, "");
-  return (
+function isLoopbackAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
+  if (/^127(?:\.\d{1,3}){3}$/.test(normalized)) return true;
+  if (normalized.startsWith("::ffff:")) {
+    return /^127(?:\.\d{1,3}){3}$/.test(normalized.slice("::ffff:".length));
+  }
+  return normalized === "::1" || normalized === "0:0:0:0:0:0:0:1";
+}
+
+async function browserEndpointUsesBridgeInterface(
+  hostname: string,
+): Promise<boolean> {
+  const normalized = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
+  if (
     normalized === "0.0.0.0" ||
+    normalized === "::" ||
     normalized === "localhost" ||
     normalized.endsWith(".localhost") ||
-    /^127(?:\.\d{1,3}){3}$/.test(normalized)
-  );
+    isLoopbackAddress(normalized)
+  ) {
+    return true;
+  }
+  try {
+    const addresses = await lookup(normalized, { all: true });
+    return addresses.some(({ address }) => isLoopbackAddress(address));
+  } catch {
+    // An unresolved hostname cannot be proven remote; reserve its matching
+    // port rather than allowing a later local resolution to collide.
+    return true;
+  }
 }
 
 function canBindBridgePort(port: number): Promise<boolean> {
@@ -120,7 +146,7 @@ export async function resolveBridgePort(
   }
   const browserPort = browserEndpoint.port;
   const collidesLocally =
-    browserEndpointUsesBridgeInterface(browserEndpoint.hostname) ||
+    (await browserEndpointUsesBridgeInterface(browserEndpoint.hostname)) ||
     !(await canBindPort(preferredPort));
   if (!collidesLocally) return preferredPort;
 
@@ -471,17 +497,31 @@ export async function ensureBridge(
   // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
-    if (
-      await checkBridgeHealth(pidInfo.port, {
-        deep: true,
-        expectedSession: sessionName,
-      })
-    ) {
-      return pidInfo.port;
+    const explicitPort = resolveExplicitSessionPort();
+    const browserEndpoint = resolveBrowserEndpoint();
+    const browserCollision =
+      browserEndpoint !== null &&
+      browserEndpoint.port === pidInfo.port &&
+      (await browserEndpointUsesBridgeInterface(browserEndpoint.hostname));
+    const explicitPortChanged =
+      explicitPort !== null && explicitPort !== pidInfo.port;
+    if (browserCollision || explicitPortChanged) {
+      await terminateBridgeProcess(pidInfo.pid, {
+        killProcessGroup: isBridgeProcess(pidInfo.pid),
+      });
+    } else {
+      if (
+        await checkBridgeHealth(pidInfo.port, {
+          deep: true,
+          expectedSession: sessionName,
+        })
+      ) {
+        return pidInfo.port;
+      }
+      await terminateBridgeProcess(pidInfo.pid, {
+        killProcessGroup: isBridgeProcess(pidInfo.pid),
+      });
     }
-    await terminateBridgeProcess(pidInfo.pid, {
-      killProcessGroup: isBridgeProcess(pidInfo.pid),
-    });
   }
 
   const port = await resolveBridgePort(sessionName);

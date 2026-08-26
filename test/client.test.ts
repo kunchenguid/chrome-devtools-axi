@@ -3,7 +3,13 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AxiError } from "axi-sdk-js";
@@ -161,6 +167,19 @@ describe("resolveBridgePort browser collision", () => {
 
   it("selects a distinct port when the local browser is temporarily down", async () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9224";
+    let excludedPort: number | undefined;
+
+    const resolved = await resolveBridgePort("default", async (excluded) => {
+      excludedPort = excluded;
+      return 9237;
+    });
+
+    expect(excludedPort).toBe(9224);
+    expect(resolved).toBe(9237);
+  });
+
+  it("selects a distinct port for an IPv6 loopback browser endpoint", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://[::1]:9224";
     let excludedPort: number | undefined;
 
     const resolved = await resolveBridgePort("default", async (excluded) => {
@@ -459,6 +478,7 @@ describe("ensureBridge early-exit fast-fail", () => {
   const savedHome = process.env.HOME;
   const savedTimeout = process.env.CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS;
   const savedPort = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  const savedBrowserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   let tmpHome: string;
 
   const restore = (key: string, value: string | undefined) => {
@@ -473,6 +493,7 @@ describe("ensureBridge early-exit fast-fail", () => {
     process.env.HOME = tmpHome;
     process.env.CHROME_DEVTOOLS_AXI_SESSION = "early-exit-worker";
     delete process.env.CHROME_DEVTOOLS_AXI_PORT;
+    delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     // A long deadline so the assertion proves the *early-exit* path returns
     // fast, not that it merely hit the timeout.
     process.env.CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS = "20000";
@@ -483,7 +504,58 @@ describe("ensureBridge early-exit fast-fail", () => {
     restore("HOME", savedHome);
     restore("CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS", savedTimeout);
     restore("CHROME_DEVTOOLS_AXI_PORT", savedPort);
+    restore("CHROME_DEVTOOLS_AXI_BROWSER_URL", savedBrowserUrl);
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("does not reuse a persisted bridge after its port becomes a local browser endpoint", async () => {
+    const fakeBrowser = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: "persisted-worker",
+    });
+    const oldBridge = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 10000)"],
+      {
+        stdio: "ignore",
+      },
+    );
+    const oldBridgePid = oldBridge.pid as number;
+    const stateDir = join(
+      tmpHome,
+      ".chrome-devtools-axi",
+      "sessions",
+      "persisted-worker",
+    );
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, "bridge.pid"),
+      JSON.stringify({ pid: oldBridgePid, port: fakeBrowser.port }),
+    );
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = `http://127.0.0.1:${fakeBrowser.port}`;
+    process.env.CHROME_DEVTOOLS_AXI_PORT = String(fakeBrowser.port);
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "persisted-worker";
+    let spawned = false;
+
+    try {
+      await expect(
+        ensureBridge(() => {
+          spawned = true;
+          return new EventEmitter() as unknown as SpawnedBridge;
+        }),
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("collides"),
+      });
+      expect(spawned).toBe(false);
+      expect(await waitForProcessExit(oldBridgePid, 1000)).toBe(true);
+    } finally {
+      await fakeBrowser.close();
+      if (!oldBridge.killed) {
+        oldBridge.kill("SIGTERM");
+      }
+    }
   });
 
   it("fails fast with a port-collision error when the bridge exits with the EADDRINUSE code", async () => {
