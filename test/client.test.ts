@@ -303,9 +303,12 @@ describe("callTool page identity routing", () => {
     await callTool("take_snapshot");
     await callTool("click", { uid: "1_1" });
     await callTool("fill", { uid: "1_2", value: "hello" });
+    await callTool("take_memory_snapshot", {
+      filePath: "/tmp/heap.heapsnapshot",
+    });
 
     expect(fake.calls.filter(({ name }) => name === "list_pages")).toHaveLength(
-      4,
+      5,
     );
     expect(
       fake.calls
@@ -316,6 +319,7 @@ describe("callTool page identity routing", () => {
       { name: "take_snapshot", pageId: 1 },
       { name: "click", pageId: 1 },
       { name: "fill", pageId: 1 },
+      { name: "take_memory_snapshot", pageId: 1 },
     ]);
   });
 

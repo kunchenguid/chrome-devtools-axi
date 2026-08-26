@@ -58,7 +58,7 @@ const PAGE_SCOPED_TOOLS = new Set([
   "resize_page",
   "screencast_start",
   "screencast_stop",
-  "take_heapsnapshot",
+  "take_memory_snapshot",
   "take_screenshot",
   "take_snapshot",
   "type_text",
