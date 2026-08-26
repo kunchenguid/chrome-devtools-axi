@@ -633,7 +633,7 @@ export function parsePagesList(
     const m = line.match(/^(\d+):\s+(\S+)/);
     if (m) {
       const labeledUrl = line.match(
-        /\((\S+)\)(?:\s+\[selected\])?(?:\s+isolatedContext=\S+)?\s*$/,
+        /\((\S+)\)(?:\s+\[selected\])?(?:\s+isolatedContext=.+)?\s*$/,
       );
       pages.push({
         id: parseInt(m[1], 10),

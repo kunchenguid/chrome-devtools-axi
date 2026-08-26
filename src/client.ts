@@ -211,7 +211,7 @@ async function postTool(
 function parseSelectedPageId(text: string): number | null {
   for (const line of text.split("\n")) {
     const match = line.match(
-      /^(\d+):\s+.+\s+\[selected\](?:\s+isolatedContext=\S+)?\s*$/,
+      /^(\d+):\s+.+\s+\[selected\](?:\s+isolatedContext=.+)?\s*$/,
     );
     if (match) return Number.parseInt(match[1], 10);
   }
