@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { getCommandHelp, parsePagesList, formatMcpResult } from "../src/cli.js";
+import {
+  needsPageId,
+  parseSelectedPageId,
+  PAGE_SCOPED_TOOLS,
+} from "../src/pages.js";
 
 describe("getCommandHelp", () => {
   it("returns help for pages command", () => {
@@ -87,6 +92,89 @@ describe("parsePagesList", () => {
   it("returns empty array for no pages", () => {
     const result = parsePagesList("## Pages");
     expect(result).toEqual([]);
+  });
+
+  it("extracts the parenthesized URL when MCP includes a page title", () => {
+    const result = parsePagesList(
+      "## Pages\n1: Example Domain (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("recognizes selected pages when isolatedContext contains spaces", () => {
+    const result = parsePagesList(
+      "1: Title (https://example.com/) [selected] isolatedContext=my context name",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("parses untitled pages that carry an isolatedContext label", () => {
+    const result = parsePagesList(
+      "2: https://example.com/path isolatedContext=worker ctx",
+    );
+    expect(result).toEqual([
+      { id: 2, url: "https://example.com/path", selected: false },
+    ]);
+  });
+});
+
+describe("parseSelectedPageId", () => {
+  it("returns the selected page id", () => {
+    expect(
+      parseSelectedPageId(
+        "## Pages\n0: https://a.com/\n1: https://b.com/ [selected]",
+      ),
+    ).toBe(1);
+  });
+
+  it("returns null when no page is marked selected", () => {
+    expect(parseSelectedPageId("## Pages\n0: https://a.com/")).toBeNull();
+  });
+
+  it("returns id 0 when the selected page is the first tab", () => {
+    expect(
+      parseSelectedPageId("0: about:blank [selected]\n1: https://b.com/"),
+    ).toBe(0);
+  });
+});
+
+describe("needsPageId", () => {
+  it("is true for page-scoped AXI tools that omit pageId", () => {
+    expect(needsPageId("evaluate_script", { function: "() => 1" })).toBe(true);
+    expect(needsPageId("take_snapshot")).toBe(true);
+    expect(needsPageId("click", { uid: "1" })).toBe(true);
+    expect(needsPageId("fill", { uid: "1", value: "x" })).toBe(true);
+  });
+
+  it("is false for browser-scoped tools that manage page identity themselves", () => {
+    expect(needsPageId("list_pages")).toBe(false);
+    expect(needsPageId("new_page", { url: "https://example.com" })).toBe(false);
+    expect(needsPageId("select_page", { pageId: 2 })).toBe(false);
+    expect(needsPageId("close_page", { pageId: 2 })).toBe(false);
+  });
+
+  it("is false when a numeric pageId is already present", () => {
+    expect(needsPageId("take_snapshot", { pageId: 0 })).toBe(false);
+    expect(needsPageId("click", { uid: "1", pageId: 3 })).toBe(false);
+  });
+
+  it("skips evaluate_script when targeting a service worker", () => {
+    expect(
+      needsPageId("evaluate_script", {
+        function: "() => 1",
+        serviceWorkerId: "ext:1",
+      }),
+    ).toBe(false);
+  });
+
+  it("covers every AXI-wrapped page-scoped tool name", () => {
+    expect(PAGE_SCOPED_TOOLS.has("navigate_page")).toBe(true);
+    expect(PAGE_SCOPED_TOOLS.has("take_screenshot")).toBe(true);
+    expect(PAGE_SCOPED_TOOLS.has("list_pages")).toBe(false);
   });
 });
 

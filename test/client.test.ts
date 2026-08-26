@@ -3,13 +3,20 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import { BRIDGE_PORT_IN_USE_EXIT_CODE } from "../src/bridge.js";
 import {
   buildBridgeEarlyExitError,
+  callTool,
   CdpError,
   checkBridgeHealth,
   ensureBridge,
@@ -21,6 +28,7 @@ import {
   terminateBridgeProcess,
   waitForProcessExit,
 } from "../src/client.js";
+import { resolveSessionPidFile } from "../src/sessions.js";
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {
@@ -611,5 +619,239 @@ describe("terminateBridgeProcess", () => {
       }
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+interface FakeCallBridgeOptions {
+  session: string;
+  listPages?: string;
+  result?: string;
+}
+
+function startFakeCallBridge(opts: FakeCallBridgeOptions): Promise<{
+  port: number;
+  calls: { name: string; args: Record<string, unknown> }[];
+  close: () => Promise<void>;
+}> {
+  return new Promise((resolveStart, rejectStart) => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const server = createServer((req, res) => {
+      if (req.method === "GET" && req.url?.startsWith("/health")) {
+        res.setHeader("Content-Type", "application/json");
+        res.statusCode = 200;
+        res.end(JSON.stringify({ status: "ok", session: opts.session }));
+        return;
+      }
+      if (req.method === "POST" && req.url === "/call") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          const payload = JSON.parse(body) as {
+            name: string;
+            args?: Record<string, unknown>;
+          };
+          calls.push({ name: payload.name, args: payload.args ?? {} });
+          res.setHeader("Content-Type", "application/json");
+          if (payload.name === "list_pages") {
+            res.end(
+              JSON.stringify({
+                result: opts.listPages ?? "## Pages",
+              }),
+            );
+            return;
+          }
+          res.end(JSON.stringify({ result: opts.result ?? "ok" }));
+        });
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    server.on("error", rejectStart);
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolveStart({
+        port,
+        calls,
+        close: () =>
+          new Promise<void>((closeResolve) => {
+            server.close(() => closeResolve());
+          }),
+      });
+    });
+  });
+}
+
+describe("callTool pageId routing", () => {
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  const savedHome = process.env.HOME;
+  const savedPort = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  let tmpHome = "";
+
+  const restore = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
+  async function withFakeBridge(
+    listPages: string,
+    run: (
+      fake: Awaited<ReturnType<typeof startFakeCallBridge>>,
+    ) => Promise<void>,
+  ): Promise<void> {
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-pageid-"));
+    process.env.HOME = tmpHome;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "pageid-worker";
+    const fake = await startFakeCallBridge({
+      session: "pageid-worker",
+      listPages,
+    });
+    process.env.CHROME_DEVTOOLS_AXI_PORT = String(fake.port);
+    const pidFile = resolveSessionPidFile("pageid-worker");
+    mkdirSync(dirname(pidFile), { recursive: true });
+    writeFileSync(
+      pidFile,
+      JSON.stringify({ pid: process.pid, port: fake.port }),
+    );
+    try {
+      await run(fake);
+    } finally {
+      await fake.close();
+    }
+  }
+
+  afterEach(() => {
+    restore("CHROME_DEVTOOLS_AXI_SESSION", savedSession);
+    restore("HOME", savedHome);
+    restore("CHROME_DEVTOOLS_AXI_PORT", savedPort);
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("injects the selected pageId on evaluate_script / take_snapshot / click / fill", async () => {
+    await withFakeBridge(
+      "## Pages\n1: https://example.com/ [selected]",
+      async (fake) => {
+        await callTool("evaluate_script", { function: "() => 1" });
+        await callTool("take_snapshot");
+        await callTool("click", { uid: "12" });
+        await callTool("fill", { uid: "3", value: "hello" });
+
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          {
+            name: "evaluate_script",
+            args: { function: "() => 1", pageId: 1 },
+          },
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+          { name: "list_pages", args: {} },
+          { name: "click", args: { uid: "12", pageId: 1 } },
+          { name: "list_pages", args: {} },
+          { name: "fill", args: { uid: "3", value: "hello", pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
+  it("does not inject pageId for list_pages / new_page / select_page / close_page", async () => {
+    await withFakeBridge(
+      "## Pages\n1: https://example.com/ [selected]",
+      async (fake) => {
+        await callTool("list_pages");
+        await callTool("new_page", { url: "https://example.com" });
+        await callTool("select_page", { pageId: 2 });
+        await callTool("close_page", { pageId: 2 });
+
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "new_page", args: { url: "https://example.com" } },
+          { name: "select_page", args: { pageId: 2 } },
+          { name: "close_page", args: { pageId: 2 } },
+        ]);
+      },
+    );
+  });
+
+  it("preserves a caller-supplied numeric pageId without listing pages", async () => {
+    await withFakeBridge(
+      "## Pages\n1: https://example.com/ [selected]",
+      async (fake) => {
+        await callTool("take_snapshot", { pageId: 7 });
+        expect(fake.calls).toEqual([
+          { name: "take_snapshot", args: { pageId: 7 } },
+        ]);
+      },
+    );
+  });
+
+  it("does not inject pageId when evaluate_script targets a service worker", async () => {
+    await withFakeBridge(
+      "## Pages\n1: https://example.com/ [selected]",
+      async (fake) => {
+        await callTool("evaluate_script", {
+          function: "() => 1",
+          serviceWorkerId: "ext:1",
+        });
+        expect(fake.calls).toEqual([
+          {
+            name: "evaluate_script",
+            args: { function: "() => 1", serviceWorkerId: "ext:1" },
+          },
+        ]);
+      },
+    );
+  });
+
+  it("fails loudly when no page is selected", async () => {
+    await withFakeBridge(
+      "## Pages\n0: https://a.com/\n1: https://b.com/",
+      async (fake) => {
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "No page is currently selected",
+        });
+        expect(fake.calls).toEqual([{ name: "list_pages", args: {} }]);
+      },
+    );
+  });
+
+  it("resolves pageId from MCP titled list_pages lines", async () => {
+    await withFakeBridge(
+      "1: Example Domain (https://example.com/) [selected] isolatedContext=my context",
+      async (fake) => {
+        await callTool("navigate_page", { type: "url", url: "https://x.test" });
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "https://x.test", pageId: 1 },
+          },
+        ]);
+      },
+    );
+  });
+
+  it("getSessionSnapshotIfRunning snapshots the selected pageId", async () => {
+    await withFakeBridge(
+      "## Pages\n3: https://example.com/ [selected]",
+      async (fake) => {
+        const snapshot = await getSessionSnapshotIfRunning();
+        expect(snapshot).toBe("ok");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 3 } },
+        ]);
+      },
+    );
+  });
+
+  it("getSessionSnapshotIfRunning degrades to null when no page is selected", async () => {
+    await withFakeBridge("## Pages\n0: https://a.com/", async (fake) => {
+      await expect(getSessionSnapshotIfRunning()).resolves.toBeNull();
+      expect(fake.calls).toEqual([{ name: "list_pages", args: {} }]);
+    });
   });
 });

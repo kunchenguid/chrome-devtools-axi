@@ -61,6 +61,8 @@ The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-a
 `resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through; a session isolates only the bridge, so the connection mode and profile compose unchanged.
 `/health` reports the bridge's `session`, and `checkBridgeHealth`/`ensureBridge` reject a mismatched session so two sessions forced onto one port (a globally-exported `CHROME_DEVTOOLS_AXI_PORT`) fail loudly instead of silently sharing; the bridge exits with `BRIDGE_PORT_IN_USE_EXIT_CODE` (48) on an EADDRINUSE bind so the early-exit error attributes the collision (`buildBridgeEarlyExitError`).
 
+chrome-devtools-mcp 1.8+ requires `pageId` on page-scoped tools by default. `callTool` (`src/client.ts`) resolves the selected page from `list_pages` (`src/pages.ts`) and injects it; `list_pages` / `new_page` / `select_page` / `close_page` are left alone. Missing selection fails loudly.
+
 ### Snapshot generations and STALE_REF
 
 Snapshots are accessibility trees whose interactive elements carry `uid=` refs.

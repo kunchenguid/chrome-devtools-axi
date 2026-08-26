@@ -10,6 +10,7 @@ import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   resolveBridgeScript,
 } from "./bridge-script.js";
+import { needsPageId, parseSelectedPageId } from "./pages.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -485,8 +486,58 @@ export async function ensureBridge(
   );
 }
 
+function parseCallResponse(resp: string): string {
+  const data = JSON.parse(resp);
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data.result ?? "";
+}
+
+async function postTool(
+  port: number,
+  name: string,
+  args: Record<string, unknown>,
+  timeoutMs?: number,
+): Promise<string> {
+  const resp = await httpPost(port, "/call", { name, args }, timeoutMs);
+  return parseCallResponse(resp);
+}
+
+/**
+ * Resolve the currently selected page from MCP `list_pages`. Fails loudly
+ * when no page is marked `[selected]` — AXI will not guess a pageId, and
+ * chrome-devtools-mcp 1.8+ will not either (`Required at pageId`).
+ */
+async function resolveSelectedPageId(port: number): Promise<number> {
+  const listed = await postTool(port, "list_pages", {});
+  const pageId = parseSelectedPageId(listed);
+  if (pageId === null) {
+    throw new CdpError("No page is currently selected", "BROWSER_ERROR", [
+      "Run `chrome-devtools-axi open <url>` to open a page",
+      "Run `chrome-devtools-axi pages` to list tabs",
+      "Run `chrome-devtools-axi selectpage <id>` to select a tab",
+    ]);
+  }
+  return pageId;
+}
+
+async function resolveToolArgs(
+  port: number,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!needsPageId(name, args)) return args;
+  const pageId = await resolveSelectedPageId(port);
+  return { ...args, pageId };
+}
+
 /**
  * Call an MCP tool via the bridge. Returns the text result.
+ *
+ * Page-scoped tools (eval/snapshot/click/fill and the rest of
+ * `PAGE_SCOPED_TOOLS` in `src/pages.ts`) get the selected page's `pageId`
+ * injected so they satisfy chrome-devtools-mcp 1.8+ defaults.
  */
 export async function callTool(
   name: string,
@@ -495,13 +546,10 @@ export async function callTool(
   const port = await ensureBridge();
 
   try {
-    const resp = await httpPost(port, "/call", { name, args });
-    const data = JSON.parse(resp);
-    if (data.error) {
-      throw new Error(data.error);
-    }
-    return data.result ?? "";
+    const resolved = await resolveToolArgs(port, name, args);
+    return await postTool(port, name, resolved);
   } catch (err) {
+    if (err instanceof CdpError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw mapErrorMessage(message);
   }
@@ -566,15 +614,10 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
     return null;
   }
   try {
-    const resp = await httpPost(
-      pidInfo.port,
-      "/call",
-      { name: "take_snapshot", args: {} },
-      5000,
-    );
-    const data = JSON.parse(resp);
-    if (data.error) return null;
-    return data.result ?? null;
+    const listed = await postTool(pidInfo.port, "list_pages", {}, 5000);
+    const pageId = parseSelectedPageId(listed);
+    if (pageId === null) return null;
+    return await postTool(pidInfo.port, "take_snapshot", { pageId }, 5000);
   } catch {
     return null;
   }

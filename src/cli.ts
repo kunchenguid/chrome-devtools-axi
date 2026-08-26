@@ -27,8 +27,11 @@ import {
 } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
+import { parsePagesList } from "./pages.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
+
+export { parsePagesList };
 
 export const HOME_DESCRIPTION =
   "Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.";
@@ -622,20 +625,6 @@ export function parseScreenshotArgs(args: string[]): ScreenshotArgs {
 
 export function formatScreenshotOutput(filePath: string): string {
   return encode({ screenshot: filePath });
-}
-
-/** Parse MCP list_pages markdown into structured data. */
-export function parsePagesList(
-  text: string,
-): { id: number; url: string; selected: boolean }[] {
-  const pages: { id: number; url: string; selected: boolean }[] = [];
-  for (const line of text.split("\n")) {
-    const m = line.match(/^(\d+):\s+(\S+)(\s+\[selected\])?/);
-    if (m) {
-      pages.push({ id: parseInt(m[1], 10), url: m[2], selected: !!m[3] });
-    }
-  }
-  return pages;
 }
 
 /** Format raw MCP text result as AXI output: labeled block + truncation + suggestions. */
