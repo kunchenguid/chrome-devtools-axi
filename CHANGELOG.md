@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.31](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.30...chrome-devtools-axi-v0.1.31) (2026-08-26)
+
+
+### Bug Fixes
+
+* inject selected pageId on page-scoped MCP calls ([#120](https://github.com/kunchenguid/chrome-devtools-axi/issues/120)) ([6a9709e](https://github.com/kunchenguid/chrome-devtools-axi/commit/6a9709eb310d819777d36e2abf5e07f9b1013181))
+
 ## [0.1.30](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.29...chrome-devtools-axi-v0.1.30) (2026-08-23)
 
 
