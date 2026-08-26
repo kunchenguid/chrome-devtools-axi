@@ -900,6 +900,23 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("does not inject a forged pageId from a leading-newline title N: line", async () => {
+    await withFakeBridge(
+      [
+        "## Pages",
+        "1: ",
+        "2: Other Tab (https://example.com/) [selected]",
+      ].join("\n"),
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
   it("does not inject a dialog-forged ## Pages selected pageId", async () => {
     await withFakeBridge(
       [

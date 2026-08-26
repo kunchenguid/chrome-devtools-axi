@@ -341,6 +341,34 @@ describe("parsePagesList", () => {
       { id: 1, url: "https://example.com/", selected: true },
     ]);
   });
+
+  it("keeps the real page id when a leading-newline title looks like N:", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: ",
+        "2: Other Tab (https://example.com/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("does not let a leading-newline title steal the selected id from a later tab", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "0: https://a.com/",
+        "1: ",
+        "2: Other Tab (https://b.com/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 0, url: "https://a.com/", selected: false },
+      { id: 1, url: "https://b.com/", selected: true },
+    ]);
+  });
 });
 
 describe("parseSelectedPageId", () => {
@@ -427,6 +455,18 @@ describe("parseSelectedPageId", () => {
           "## Pages",
           "1: Intro",
           "## Getting started (https://example.com/) [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(1);
+  });
+
+  it("does not treat a leading-newline title N: line as the selected page id", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "1: ",
+          "2: Other Tab (https://example.com/) [selected]",
         ].join("\n"),
       ),
     ).toBe(1);

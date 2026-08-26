@@ -102,7 +102,8 @@ const UNTITLED_SCHEME_URL = new RegExp(`^${PAGE_URL_SCHEME_SOURCE}`, "i");
  */
 const MCP_SECTION_HEADER =
   /^##\s+(Pages|Extension Pages|Extension Service Workers|Third-party developer tools|WebMCP tools)$/;
-const PAGE_ID_LINE = /^\d+:\s+/;
+/** `N: rest` or `N:` after trim of MCP `N: ` (title starts with a newline). */
+const PAGE_ID_LINE = /^\d+:(?:\s+|$)/;
 
 function stripPageSuffixes(rest: string): string {
   let label = rest.replace(/\s+isolatedContext=.*$/, "");
@@ -136,7 +137,7 @@ function hasSchemeUrl(label: string): boolean {
 
 function isCompletePageRow(row: string): boolean {
   if (/\sisolatedContext=/.test(row)) return true;
-  return hasSchemeUrl(row.replace(/^\d+:\s+/, ""));
+  return hasSchemeUrl(row.replace(/^\d+:\s*/, ""));
 }
 
 /**
@@ -170,7 +171,10 @@ function extractPageUrl(label: string): string {
  * incomplete, or when the new line is a title continuation (no scheme URL,
  * or `[selected]` in the title before the URL wrapper) — otherwise a title
  * such as `Something (https://example.com)\n2: Other Tab [selected]` would
- * steal routing. Continuation lines are kept unless they are known MCP
+ * steal routing. `raw.trim()` turns MCP `N: ` (title starts with a newline)
+ * into `N:`; that still counts as an incomplete page row so a title like
+ * `\n2: Other Tab` folds onto the real id instead of becoming page 2.
+ * Continuation lines are kept unless they are known MCP
  * section headers (`## Pages`, `## Extension Pages`, `## Extension Service
  * Workers`, `## Third-party developer tools`, `## WebMCP tools`). Unknown
  * `## ` lines stay in the current page row so a title like
