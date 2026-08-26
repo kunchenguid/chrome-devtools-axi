@@ -369,6 +369,35 @@ describe("parsePagesList", () => {
       { id: 1, url: "https://b.com/", selected: true },
     ]);
   });
+
+  it("does not reset on a title ## Pages while the current row is incomplete", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: x",
+        "## Pages",
+        "0: https://a.com/ (https://example.com/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("does not merge a later wrapped title page into a complete previous page", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: First (https://a.com/)",
+        "2: Other",
+        "Tab (https://b.com/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://a.com/", selected: false },
+      { id: 2, url: "https://b.com/", selected: true },
+    ]);
+  });
 });
 
 describe("parseSelectedPageId", () => {
@@ -485,6 +514,32 @@ describe("parseSelectedPageId", () => {
         ].join("\n"),
       ),
     ).toBe(1);
+  });
+
+  it("does not select a forged id from a title that contains ## Pages", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "1: x",
+          "## Pages",
+          "0: https://a.com/ (https://example.com/) [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(1);
+  });
+
+  it("selects a later page whose title wraps across lines", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "1: First (https://a.com/)",
+          "2: Other",
+          "Tab (https://b.com/) [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(2);
   });
 });
 

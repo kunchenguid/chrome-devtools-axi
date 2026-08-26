@@ -141,19 +141,24 @@ function isCompletePageRow(row: string): boolean {
 }
 
 /**
- * Title text split across lines can look like `N: Other Tab [selected]`.
- * A real MCP page row always has a scheme URL; `[selected]` in the title
- * (before the trailing URL wrapper) is the document.title, not a new page.
+ * A title newline can look like a new `N:` page. Fold only when the line
+ * is `[selected]` without a real page URL, or `[selected]` sits in the
+ * title before the trailing URL wrapper. A later real page whose title
+ * wraps (`2: Other\nTab (https://b.com/) [selected]`) must start a new
+ * row — any `N: <non-scheme>` text is not a continuation.
  */
 function isTitleContinuationLine(line: string): boolean {
   const m = line.match(/^(\d+):\s+(.+)$/);
   if (!m) return false;
   const rest = stripPageSuffixes(m[2]);
   const trailing = matchTrailingUrl(rest);
-  if (trailing === null) {
-    return !UNTITLED_SCHEME_URL.test(rest);
+  if (trailing !== null) {
+    return /\[selected\]/.test(trailing.title);
   }
-  return /\[selected\]/.test(trailing.title);
+  if (UNTITLED_SCHEME_URL.test(rest)) return false;
+  return /(?:^|\s)\[selected\]\s*$/.test(
+    m[2].replace(/\s+isolatedContext=.*$/, ""),
+  );
 }
 
 function extractPageUrl(label: string): string {
@@ -168,19 +173,24 @@ function extractPageUrl(label: string): string {
  * newlines intact, so a title/dialog like `Error\n404: Not Found` can look
  * like a new page id. Only `## Pages` / `## Extension Pages` blocks are
  * parsed. A `N:` line folds onto the previous row when that row is still
- * incomplete, or when the new line is a title continuation (no scheme URL,
- * or `[selected]` in the title before the URL wrapper) — otherwise a title
- * such as `Something (https://example.com)\n2: Other Tab [selected]` would
- * steal routing. `raw.trim()` turns MCP `N: ` (title starts with a newline)
- * into `N:`; that still counts as an incomplete page row so a title like
- * `\n2: Other Tab` folds onto the real id instead of becoming page 2.
- * Continuation lines are kept unless they are known MCP
- * section headers (`## Pages`, `## Extension Pages`, `## Extension Service
- * Workers`, `## Third-party developer tools`, `## WebMCP tools`). Unknown
- * `## ` lines stay in the current page row so a title like
- * `Intro\n## Getting started` does not drop `[selected]`. A later `## Pages`
- * header replaces earlier rows so dialog text that forges `## Pages` cannot
- * prepend a selected page; `## Extension Pages` does not reset.
+ * incomplete, or when the new line is a title continuation (`[selected]`
+ * without a scheme URL, or `[selected]` in the title before the URL
+ * wrapper) — otherwise a title such as
+ * `Something (https://example.com)\n2: Other Tab [selected]` would steal
+ * routing, and a later page whose title wraps (`2: Other\nTab (url)`)
+ * would be merged into the previous id. `raw.trim()` turns MCP `N: `
+ * (title starts with a newline) into `N:`; that still counts as an
+ * incomplete page row so a title like `\n2: Other Tab` folds onto the
+ * real id instead of becoming page 2. Continuation lines are kept unless
+ * they are known MCP section headers (`## Pages`, `## Extension Pages`,
+ * `## Extension Service Workers`, `## Third-party developer tools`,
+ * `## WebMCP tools`). Unknown `## ` lines stay in the current page row so
+ * a title like `Intro\n## Getting started` does not drop `[selected]`. A
+ * later `## Pages` after complete rows replaces earlier rows so dialog
+ * text that forges `## Pages` cannot prepend a selected page; while the
+ * current row is still incomplete, `## Pages` folds as title text so a
+ * title like `x\n## Pages\n0: https://a.com/` cannot discard the real id.
+ * `## Extension Pages` does not reset.
  */
 function collapsePageRows(text: string): string[] {
   const rows: string[] = [];
@@ -190,6 +200,16 @@ function collapsePageRows(text: string): string[] {
     if (line.length === 0) continue;
     const section = line.match(MCP_SECTION_HEADER)?.[1];
     if (section !== undefined) {
+      const prev = rows[rows.length - 1];
+      if (
+        section === "Pages" &&
+        inPageBlock &&
+        prev !== undefined &&
+        !isCompletePageRow(prev)
+      ) {
+        rows[rows.length - 1] += ` ${line}`;
+        continue;
+      }
       if (section === "Pages") {
         rows.length = 0;
         inPageBlock = true;

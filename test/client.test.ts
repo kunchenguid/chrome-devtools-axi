@@ -937,6 +937,42 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("does not inject a forged pageId from a title that contains ## Pages", async () => {
+    await withFakeBridge(
+      [
+        "## Pages",
+        "1: x",
+        "## Pages",
+        "0: https://a.com/ (https://example.com/) [selected]",
+      ].join("\n"),
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
+  it("injects the later pageId when that page's title wraps across lines", async () => {
+    await withFakeBridge(
+      [
+        "## Pages",
+        "1: First (https://a.com/)",
+        "2: Other",
+        "Tab (https://b.com/) [selected]",
+      ].join("\n"),
+      async (fake) => {
+        await callTool("click", { uid: "1" });
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "click", args: { uid: "1", pageId: 2 } },
+        ]);
+      },
+    );
+  });
+
   it("getSessionSnapshotIfRunning snapshots the selected pageId", async () => {
     await withFakeBridge(
       "## Pages\n3: https://example.com/ [selected]",
