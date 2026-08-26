@@ -128,10 +128,12 @@ describe("resolveBridgeTimeoutMs", () => {
 describe("resolveBridgePort browser collision", () => {
   const savedBrowserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   const savedPort = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
 
   beforeEach(() => {
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_PORT;
+    delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
   });
 
   afterEach(() => {
@@ -145,37 +147,54 @@ describe("resolveBridgePort browser collision", () => {
     } else {
       process.env.CHROME_DEVTOOLS_AXI_PORT = savedPort;
     }
+    if (savedSession === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
+    }
   });
 
   it("selects a free distinct port when the default collides with the browser", async () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9224";
     let excludedPort: number | undefined;
 
-    const resolved = await resolveBridgePort("default", async (excluded) => {
-      excludedPort = excluded;
-      return 9237;
-    });
+    const resolved = await resolveBridgePort(
+      "default",
+      async (excluded) => {
+        excludedPort = excluded;
+        return 9237;
+      },
+      async () => false,
+    );
 
     expect(excludedPort).toBe(9224);
     expect(resolved).toBe(9237);
   });
 
   it("fails before spawning when an explicit bridge port collides", async () => {
-    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL =
-      "ws://127.0.0.1:9224/devtools/browser/test";
-    process.env.CHROME_DEVTOOLS_AXI_PORT = "9224";
-    let spawned = false;
-
-    await expect(
-      ensureBridge(() => {
-        spawned = true;
-        return new EventEmitter() as unknown as SpawnedBridge;
-      }),
-    ).rejects.toMatchObject({
-      code: "VALIDATION_ERROR",
-      message: expect.stringContaining("collides"),
+    const blocker = await startFakeBridgeServer({
+      shallow: "error",
+      deep: "error",
     });
-    expect(spawned).toBe(false);
+    try {
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = `ws://chrome.test:${blocker.port}/devtools/browser/test`;
+      process.env.CHROME_DEVTOOLS_AXI_PORT = String(blocker.port);
+      process.env.CHROME_DEVTOOLS_AXI_SESSION = `collision-${process.pid}`;
+      let spawned = false;
+
+      await expect(
+        ensureBridge(() => {
+          spawned = true;
+          return new EventEmitter() as unknown as SpawnedBridge;
+        }),
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("unavailable"),
+      });
+      expect(spawned).toBe(false);
+    } finally {
+      await blocker.close();
+    }
   });
 
   it("preserves a non-colliding explicit bridge port", async () => {
@@ -195,7 +214,9 @@ describe("resolveBridgePort browser collision", () => {
       throw new Error("unexpected free-port lookup");
     };
 
-    await expect(resolveBridgePort("default", findFree)).resolves.toBe(9224);
+    await expect(
+      resolveBridgePort("default", findFree, async () => true),
+    ).resolves.toBe(9224);
   });
 });
 

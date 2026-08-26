@@ -268,13 +268,13 @@ For both commands, `all` or an omitted `--type` returns every item.
 
 ## Configuration
 
-The bridge server port defaults to `9224`. When a local loopback `CHROME_DEVTOOLS_AXI_BROWSER_URL` uses the derived bridge port, chrome-devtools-axi automatically selects a free distinct bridge port. Override it with an environment variable:
+The bridge server port defaults to `9224`. When `CHROME_DEVTOOLS_AXI_BROWSER_URL` uses the derived bridge port and that local bridge port is occupied, chrome-devtools-axi automatically selects a free distinct bridge port. Override it with an environment variable:
 
 ```sh
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
-An explicit bridge port must differ from a browser/CDP port on the same local loopback interface; a collision fails immediately without launching or replacing Chrome. A remote browser endpoint may use the same port number because it is a distinct network endpoint.
+An explicit bridge port must be available on the local loopback interface; when the browser endpoint uses the same port number, an occupied bridge port fails immediately without launching or replacing Chrome. A remote browser endpoint may use the same port number when the local bridge port is available because it is a distinct network endpoint.
 
 Connect to an existing Chrome instance instead of launching one:
 

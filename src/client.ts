@@ -60,16 +60,7 @@ export class CdpError extends AxiError {
 }
 
 type FreeBridgePortResolver = (excludedPort: number) => Promise<number>;
-
-function browserEndpointUsesBridgeInterface(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/, "");
-  return (
-    normalized === "127.0.0.1" ||
-    normalized === "0.0.0.0" ||
-    normalized === "localhost" ||
-    normalized.endsWith(".localhost")
-  );
-}
+type BridgePortAvailabilityProbe = (port: number) => Promise<boolean>;
 
 function canBindBridgePort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -99,25 +90,23 @@ async function findFreeBridgePort(excludedPort: number): Promise<number> {
   );
 }
 
-/** Resolve a bridge port that can never equal the configured browser endpoint. */
+/** Resolve the effective local bridge port. */
 export async function resolveBridgePort(
   sessionName: string = resolveSessionName(),
   findFreePort: FreeBridgePortResolver = findFreeBridgePort,
+  canBindPort: BridgePortAvailabilityProbe = canBindBridgePort,
 ): Promise<number> {
   const preferredPort = resolveSessionPort(sessionName);
   const browserEndpoint = resolveBrowserEndpoint();
-  if (
-    browserEndpoint === null ||
-    !browserEndpointUsesBridgeInterface(browserEndpoint.hostname) ||
-    preferredPort !== browserEndpoint.port
-  ) {
+  if (browserEndpoint === null || preferredPort !== browserEndpoint.port) {
     return preferredPort;
   }
   const browserPort = browserEndpoint.port;
+  if (await canBindPort(preferredPort)) return preferredPort;
 
   if (resolveExplicitSessionPort() !== null) {
     throw new CdpError(
-      `CHROME_DEVTOOLS_AXI_PORT ${preferredPort} collides with the configured browser/CDP port; the bridge and browser ports must be distinct`,
+      `CHROME_DEVTOOLS_AXI_PORT ${preferredPort} is unavailable on 127.0.0.1 while the configured browser/CDP endpoint uses the same port number`,
       "VALIDATION_ERROR",
       [
         "Choose a different CHROME_DEVTOOLS_AXI_PORT, or unset it to select a free bridge port automatically.",
@@ -456,7 +445,6 @@ export async function ensureBridge(
   ) => SpawnedBridge = spawnBridgeProcess,
 ): Promise<number> {
   const sessionName = resolveSessionName();
-  const port = await resolveBridgePort(sessionName);
   const pidFile = resolveSessionPidFile(sessionName);
 
   // Check existing bridge via PID file. Use a deep probe so a bridge whose
@@ -475,6 +463,8 @@ export async function ensureBridge(
       killProcessGroup: isBridgeProcess(pidInfo.pid),
     });
   }
+
+  const port = await resolveBridgePort(sessionName);
 
   // Start a new bridge
   const child = spawnBridge(port, sessionName);

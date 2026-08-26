@@ -75,7 +75,7 @@ environment:
                                     (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
   CHROME_DEVTOOLS_AXI_PORT          Explicit bridge server port (default: 9224; when attaching to a
-                                    local browser on the derived default, a free distinct port is selected)
+                                    browser on an occupied derived default, a free port is selected)
   CHROME_DEVTOOLS_AXI_SESSION       Named session for concurrent isolation. Each session name gets
                                     its own bridge process, port (auto-derived from the name, or set
                                     CHROME_DEVTOOLS_AXI_PORT), and on-disk state, so multiple sessions
