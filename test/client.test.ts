@@ -834,6 +834,19 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("still injects pageId when list_pages title contains a newline", async () => {
+    await withFakeBridge(
+      "1: Hello\nWorld (https://example.com/) [selected]",
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
   it("getSessionSnapshotIfRunning snapshots the selected pageId", async () => {
     await withFakeBridge(
       "## Pages\n3: https://example.com/ [selected]",

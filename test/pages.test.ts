@@ -120,6 +120,59 @@ describe("parsePagesList", () => {
       { id: 2, url: "https://example.com/path", selected: false },
     ]);
   });
+
+  it("keeps untitled URLs that contain parentheses", () => {
+    const result = parsePagesList(
+      "1: https://en.wikipedia.org/wiki/Foo_(bar) [selected]",
+    );
+    expect(result).toEqual([
+      {
+        id: 1,
+        url: "https://en.wikipedia.org/wiki/Foo_(bar)",
+        selected: true,
+      },
+    ]);
+  });
+
+  it("peels a trailing scheme URL that itself contains parentheses", () => {
+    const result = parsePagesList(
+      "1: Foo (bar) (https://en.wikipedia.org/wiki/Foo_(bar)) [selected]",
+    );
+    expect(result).toEqual([
+      {
+        id: 1,
+        url: "https://en.wikipedia.org/wiki/Foo_(bar)",
+        selected: true,
+      },
+    ]);
+  });
+
+  it("keeps untitled data: URLs that contain parentheses", () => {
+    const result = parsePagesList(
+      "0: data:text/html,<h1>Hi (there)</h1> [selected]",
+    );
+    expect(result).toEqual([
+      { id: 0, url: "data:text/html,<h1>Hi (there)</h1>", selected: true },
+    ]);
+  });
+
+  it("joins a title newline so [selected] still attaches to the page id", () => {
+    const result = parsePagesList(
+      "1: Hello\nWorld (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("joins CRLF title continuations onto the previous page row", () => {
+    const result = parsePagesList(
+      "1: Hello\r\nWorld\r\nTab (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
 });
 
 describe("parseSelectedPageId", () => {
@@ -139,6 +192,14 @@ describe("parseSelectedPageId", () => {
     expect(
       parseSelectedPageId("0: about:blank [selected]\n1: https://b.com/"),
     ).toBe(0);
+  });
+
+  it("still finds [selected] when the page title contains a newline", () => {
+    expect(
+      parseSelectedPageId(
+        "## Pages\n1: Hello\nWorld (https://example.com/) [selected]",
+      ),
+    ).toBe(1);
   });
 });
 

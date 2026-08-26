@@ -74,6 +74,43 @@ export function needsPageId(
 }
 
 /**
+ * Trailing MCP title wrapper: ` (<url>)`. Only peel when the parenthesized
+ * payload starts with a URL scheme so untitled raw URLs that happen to
+ * contain `)` (Wikipedia `Foo_(bar)`, many `data:` URLs) stay intact.
+ */
+const TRAILING_URL_WRAPPER =
+  /\s+\(((?:https?:\/\/|about:|data:|chrome:|file:).*)\)\s*$/i;
+
+/**
+ * Join `list_pages` text into one row per page id.
+ *
+ * MCP interpolates unsanitized `document.title` into the page line, so a
+ * newline in the title splits `[selected]` onto a continuation line. Rows
+ * that do not start a new `id:` are folded onto the previous page, then
+ * internal whitespace is collapsed so later matching sees a single line.
+ */
+function collapsePageRows(text: string): string[] {
+  const rows: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.length === 0) continue;
+    if (/^\d+:\s+/.test(line)) {
+      rows.push(line);
+      continue;
+    }
+    if (rows.length > 0 && !line.startsWith("#")) {
+      rows[rows.length - 1] += ` ${line}`;
+    }
+  }
+  return rows.map((row) => row.replace(/\s+/g, " "));
+}
+
+function extractPageUrl(label: string): string {
+  const match = label.match(TRAILING_URL_WRAPPER);
+  return match ? match[1] : label.trim();
+}
+
+/**
  * Parse MCP `list_pages` markdown into structured rows.
  *
  * Upstream formats each page as:
@@ -84,8 +121,7 @@ export function needsPageId(
  */
 export function parsePagesList(text: string): PageListEntry[] {
   const pages: PageListEntry[] = [];
-  for (const rawLine of text.split("\n")) {
-    const line = rawLine.trimEnd();
+  for (const line of collapsePageRows(text)) {
     const m = line.match(/^(\d+):\s+(.+)$/);
     if (!m) continue;
     const id = Number.parseInt(m[1], 10);
@@ -95,9 +131,7 @@ export function parsePagesList(text: string): PageListEntry[] {
     if (selected) {
       rest = rest.replace(/\s*\[selected\]\s*$/, "").trimEnd();
     }
-    const urlMatch = rest.match(/\(([^)]+)\)\s*$/);
-    const url = urlMatch ? urlMatch[1] : rest.trim();
-    pages.push({ id, url, selected });
+    pages.push({ id, url: extractPageUrl(rest), selected });
   }
   return pages;
 }
