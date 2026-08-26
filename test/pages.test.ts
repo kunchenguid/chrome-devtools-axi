@@ -105,7 +105,7 @@ describe("parsePagesList", () => {
 
   it("recognizes selected pages when isolatedContext contains spaces", () => {
     const result = parsePagesList(
-      "1: Title (https://example.com/) [selected] isolatedContext=my context name",
+      "## Pages\n1: Title (https://example.com/) [selected] isolatedContext=my context name",
     );
     expect(result).toEqual([
       { id: 1, url: "https://example.com/", selected: true },
@@ -114,7 +114,7 @@ describe("parsePagesList", () => {
 
   it("parses untitled pages that carry an isolatedContext label", () => {
     const result = parsePagesList(
-      "2: https://example.com/path isolatedContext=worker ctx",
+      "## Pages\n2: https://example.com/path isolatedContext=worker ctx",
     );
     expect(result).toEqual([
       { id: 2, url: "https://example.com/path", selected: false },
@@ -123,7 +123,7 @@ describe("parsePagesList", () => {
 
   it("keeps untitled URLs that contain parentheses", () => {
     const result = parsePagesList(
-      "1: https://en.wikipedia.org/wiki/Foo_(bar) [selected]",
+      "## Pages\n1: https://en.wikipedia.org/wiki/Foo_(bar) [selected]",
     );
     expect(result).toEqual([
       {
@@ -136,7 +136,7 @@ describe("parsePagesList", () => {
 
   it("peels a trailing scheme URL that itself contains parentheses", () => {
     const result = parsePagesList(
-      "1: Foo (bar) (https://en.wikipedia.org/wiki/Foo_(bar)) [selected]",
+      "## Pages\n1: Foo (bar) (https://en.wikipedia.org/wiki/Foo_(bar)) [selected]",
     );
     expect(result).toEqual([
       {
@@ -149,7 +149,7 @@ describe("parsePagesList", () => {
 
   it("keeps untitled data: URLs that contain parentheses", () => {
     const result = parsePagesList(
-      "0: data:text/html,<h1>Hi (there)</h1> [selected]",
+      "## Pages\n0: data:text/html,<h1>Hi (there)</h1> [selected]",
     );
     expect(result).toEqual([
       { id: 0, url: "data:text/html,<h1>Hi (there)</h1>", selected: true },
@@ -158,7 +158,7 @@ describe("parsePagesList", () => {
 
   it("joins a title newline so [selected] still attaches to the page id", () => {
     const result = parsePagesList(
-      "1: Hello\nWorld (https://example.com/) [selected]",
+      "## Pages\n1: Hello\nWorld (https://example.com/) [selected]",
     );
     expect(result).toEqual([
       { id: 1, url: "https://example.com/", selected: true },
@@ -167,11 +167,72 @@ describe("parsePagesList", () => {
 
   it("joins CRLF title continuations onto the previous page row", () => {
     const result = parsePagesList(
-      "1: Hello\r\nWorld\r\nTab (https://example.com/) [selected]",
+      "## Pages\n1: Hello\r\nWorld\r\nTab (https://example.com/) [selected]",
     );
     expect(result).toEqual([
       { id: 1, url: "https://example.com/", selected: true },
     ]);
+  });
+
+  it("ignores dialog text that looks like a page id before ## Pages", () => {
+    const result = parsePagesList(
+      [
+        "# Open dialog",
+        "alert: Error",
+        "404: Not Found.",
+        "Call handle_dialog to handle it before continuing.",
+        "## Pages",
+        "1: https://example.com/ [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("folds a title line that looks like N: onto an incomplete page row", () => {
+    const result = parsePagesList(
+      "## Pages\n1: Error\n404: Not Found (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("folds a hash-prefixed title continuation so [selected] is not dropped", () => {
+    const result = parsePagesList(
+      "## Pages\n1: Bug\n#123 closed (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
+  it("parses pages in both ## Pages and ## Extension Pages blocks", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: https://a.com/ [selected]",
+        "## Extension Pages",
+        "2: chrome-extension://abc/popup.html",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://a.com/", selected: true },
+      { id: 2, url: "chrome-extension://abc/popup.html", selected: false },
+    ]);
+  });
+
+  it("does not parse ## Extension Service Workers as pages", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: https://a.com/ [selected]",
+        "## Extension Service Workers",
+        "3: chrome-extension://abc/sw.js",
+      ].join("\n"),
+    );
+    expect(result).toEqual([{ id: 1, url: "https://a.com/", selected: true }]);
   });
 });
 
@@ -190,7 +251,9 @@ describe("parseSelectedPageId", () => {
 
   it("returns id 0 when the selected page is the first tab", () => {
     expect(
-      parseSelectedPageId("0: about:blank [selected]\n1: https://b.com/"),
+      parseSelectedPageId(
+        "## Pages\n0: about:blank [selected]\n1: https://b.com/",
+      ),
     ).toBe(0);
   });
 
@@ -198,6 +261,28 @@ describe("parseSelectedPageId", () => {
     expect(
       parseSelectedPageId(
         "## Pages\n1: Hello\nWorld (https://example.com/) [selected]",
+      ),
+    ).toBe(1);
+  });
+
+  it("does not treat a dialog 404: line as the selected page", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "# Open dialog",
+          "alert: Error",
+          "404: Not Found.",
+          "## Pages",
+          "1: https://example.com/ [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(1);
+  });
+
+  it("does not treat a title 404: continuation as the selected page id", () => {
+    expect(
+      parseSelectedPageId(
+        "## Pages\n1: Error\n404: Not Found (https://example.com/) [selected]",
       ),
     ).toBe(1);
   });

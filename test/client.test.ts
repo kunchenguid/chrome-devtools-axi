@@ -820,7 +820,7 @@ describe("callTool pageId routing", () => {
 
   it("resolves pageId from MCP titled list_pages lines", async () => {
     await withFakeBridge(
-      "1: Example Domain (https://example.com/) [selected] isolatedContext=my context",
+      "## Pages\n1: Example Domain (https://example.com/) [selected] isolatedContext=my context",
       async (fake) => {
         await callTool("navigate_page", { type: "url", url: "https://x.test" });
         expect(fake.calls).toEqual([
@@ -836,7 +836,26 @@ describe("callTool pageId routing", () => {
 
   it("still injects pageId when list_pages title contains a newline", async () => {
     await withFakeBridge(
-      "1: Hello\nWorld (https://example.com/) [selected]",
+      "## Pages\n1: Hello\nWorld (https://example.com/) [selected]",
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
+  it("does not inject a dialog 404: line as pageId", async () => {
+    await withFakeBridge(
+      [
+        "# Open dialog",
+        "alert: Error",
+        "404: Not Found.",
+        "## Pages",
+        "1: https://example.com/ [selected]",
+      ].join("\n"),
       async (fake) => {
         await callTool("take_snapshot");
         expect(fake.calls).toEqual([

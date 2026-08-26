@@ -81,24 +81,49 @@ export function needsPageId(
 const TRAILING_URL_WRAPPER =
   /\s+\(((?:https?:\/\/|about:|data:|chrome:|file:).*)\)\s*$/i;
 
+const PAGE_SECTION_HEADER = /^##\s+(Pages|Extension Pages)$/;
+const SECTION_HEADER = /^##\s/;
+const PAGE_ID_LINE = /^\d+:\s+/;
+const UNTITLED_SCHEME_URL = /^(?:https?:\/\/|about:|data:|chrome:|file:)/i;
+
+function isCompletePageRow(row: string): boolean {
+  if (/(?:^|\s)\[selected\](?:\s|$)/.test(row)) return true;
+  if (/\sisolatedContext=/.test(row)) return true;
+  const rest = row.replace(/^\d+:\s+/, "");
+  return TRAILING_URL_WRAPPER.test(rest) || UNTITLED_SCHEME_URL.test(rest);
+}
+
 /**
  * Join `list_pages` text into one row per page id.
  *
- * MCP interpolates unsanitized `document.title` into the page line, so a
- * newline in the title splits `[selected]` onto a continuation line. Rows
- * that do not start a new `id:` are folded onto the previous page, then
- * internal whitespace is collapsed so later matching sees a single line.
+ * MCP interpolates unsanitized `document.title` (and open-dialog text) with
+ * newlines intact, so a title/dialog like `Error\n404: Not Found` can look
+ * like a new page id. Only `## Pages` / `## Extension Pages` blocks are
+ * parsed; a `N:` line folds onto the previous row while that row is still
+ * missing a scheme URL, `[selected]`, or `isolatedContext=`. Continuation
+ * lines are kept unless they are MCP `## ` section headers.
  */
 function collapsePageRows(text: string): string[] {
   const rows: string[] = [];
+  let inPageBlock = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (line.length === 0) continue;
-    if (/^\d+:\s+/.test(line)) {
-      rows.push(line);
+    if (SECTION_HEADER.test(line)) {
+      inPageBlock = PAGE_SECTION_HEADER.test(line);
       continue;
     }
-    if (rows.length > 0 && !line.startsWith("#")) {
+    if (!inPageBlock) continue;
+    if (PAGE_ID_LINE.test(line)) {
+      const prev = rows[rows.length - 1];
+      if (prev !== undefined && !isCompletePageRow(prev)) {
+        rows[rows.length - 1] += ` ${line}`;
+      } else {
+        rows.push(line);
+      }
+      continue;
+    }
+    if (rows.length > 0) {
       rows[rows.length - 1] += ` ${line}`;
     }
   }
