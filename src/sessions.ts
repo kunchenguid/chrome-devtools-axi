@@ -29,6 +29,7 @@ export const DEFAULT_SESSION_NAME = "default";
 export const DEFAULT_BASE_PORT = 9224;
 
 const SESSION_PORT_RANGE = 1000; // 9225..10224 reserved for named sessions
+export const LAST_DERIVED_SESSION_PORT = DEFAULT_BASE_PORT + SESSION_PORT_RANGE;
 const STATE_DIR_NAME = ".chrome-devtools-axi";
 
 /**
@@ -94,12 +95,39 @@ export function defaultPortForSession(name: string): number {
 export function resolveSessionPort(
   name: string = resolveSessionName(),
 ): number {
-  const explicit = process.env.CHROME_DEVTOOLS_AXI_PORT;
-  if (explicit) {
-    const parsed = Number.parseInt(explicit, 10);
-    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
-  }
+  const explicit = resolveExplicitSessionPort();
+  if (explicit !== null) return explicit;
   return defaultPortForSession(name);
+}
+
+/** Return a valid explicit bridge-port override, or null when it is unset. */
+export function resolveExplicitSessionPort(): number | null {
+  const explicit = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  if (!explicit) return null;
+  const parsed = Number.parseInt(explicit, 10);
+  return !Number.isNaN(parsed) && parsed > 0 ? parsed : null;
+}
+
+export interface BrowserEndpoint {
+  hostname: string;
+  port: number;
+}
+
+/** Resolve the configured browser endpoint, when it is parseable. */
+export function resolveBrowserEndpoint(): BrowserEndpoint | null {
+  const raw = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    let port: number | null = null;
+    if (url.port) port = Number.parseInt(url.port, 10);
+    else if (url.protocol === "http:" || url.protocol === "ws:") port = 80;
+    else if (url.protocol === "https:" || url.protocol === "wss:") port = 443;
+    if (port !== null) return { hostname: url.hostname, port };
+  } catch {
+    // Leave malformed URLs to chrome-devtools-mcp's existing validation path.
+  }
+  return null;
 }
 
 /**
