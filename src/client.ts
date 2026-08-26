@@ -12,6 +12,8 @@ import {
   resolveBridgeScript,
 } from "./bridge-script.js";
 import {
+  DEFAULT_BASE_PORT,
+  LAST_DERIVED_SESSION_PORT,
   resolveSessionName,
   resolveBrowserEndpoint,
   resolveExplicitSessionPort,
@@ -73,19 +75,24 @@ function canBindBridgePort(port: number): Promise<boolean> {
   });
 }
 
-async function findFreeBridgePort(excludedPort: number): Promise<number> {
-  const firstPort =
-    excludedPort >= 1024 && excludedPort < 65535 ? excludedPort + 1 : 1024;
-  const candidateCount = 65535 - 1024 + 1;
+export async function findFreeBridgePort(
+  excludedPort: number,
+  canBindPort: BridgePortAvailabilityProbe = canBindBridgePort,
+): Promise<number> {
+  const candidateRanges: ReadonlyArray<readonly [number, number]> = [
+    [LAST_DERIVED_SESSION_PORT + 1, 65535],
+    [1024, DEFAULT_BASE_PORT - 1],
+  ];
 
-  for (let offset = 0; offset < candidateCount; offset++) {
-    const candidate = 1024 + ((firstPort - 1024 + offset) % candidateCount);
-    if (candidate !== excludedPort && (await canBindBridgePort(candidate))) {
-      return candidate;
+  for (const [firstPort, lastPort] of candidateRanges) {
+    for (let candidate = firstPort; candidate <= lastPort; candidate++) {
+      if (candidate !== excludedPort && (await canBindPort(candidate))) {
+        return candidate;
+      }
     }
   }
   throw new CdpError(
-    `No free bridge port is available distinct from browser/CDP port ${excludedPort}`,
+    `No free unreserved bridge port is available distinct from browser/CDP port ${excludedPort}`,
     "BRIDGE_NOT_READY",
   );
 }

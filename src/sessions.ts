@@ -29,6 +29,8 @@ export const DEFAULT_SESSION_NAME = "default";
 export const DEFAULT_BASE_PORT = 9224;
 
 const SESSION_PORT_RANGE = 1000; // 9225..10224 reserved for named sessions
+export const LAST_DERIVED_SESSION_PORT =
+  DEFAULT_BASE_PORT + SESSION_PORT_RANGE;
 const STATE_DIR_NAME = ".chrome-devtools-axi";
 
 /**

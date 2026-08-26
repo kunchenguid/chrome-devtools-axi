@@ -13,6 +13,7 @@ import {
   CdpError,
   checkBridgeHealth,
   ensureBridge,
+  findFreeBridgePort,
   getSessionSnapshotIfRunning,
   mapErrorMessage,
   resolveBridgePort,
@@ -22,6 +23,10 @@ import {
   terminateBridgeProcess,
   waitForProcessExit,
 } from "../src/client.js";
+import {
+  DEFAULT_BASE_PORT,
+  LAST_DERIVED_SESSION_PORT,
+} from "../src/sessions.js";
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {
@@ -169,6 +174,15 @@ describe("resolveBridgePort browser collision", () => {
 
     expect(excludedPort).toBe(9224);
     expect(resolved).toBe(9237);
+  });
+
+  it("allocates fallback ports outside the derived session range", async () => {
+    const resolved = await findFreeBridgePort(
+      DEFAULT_BASE_PORT,
+      async () => true,
+    );
+
+    expect(resolved).toBe(LAST_DERIVED_SESSION_PORT + 1);
   });
 
   it("fails before spawning when an explicit bridge port collides", async () => {
