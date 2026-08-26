@@ -160,20 +160,17 @@ function isCompletePageRow(row: string): boolean {
 }
 
 /**
- * A title newline can look like a new `N:` page. Fold only when the line
- * is `[selected]` without a real page URL, or `[selected]` sits in the
- * title before the trailing URL wrapper. A later real page whose title
- * wraps (`2: Other\nTab (https://b.com/) [selected]`) must start a new
- * row — any `N: <non-scheme>` text is not a continuation.
+ * A title newline can look like a new `N:` page. Fold only the
+ * `[selected]` suffix with no real page URL (`2: Other Tab [selected]`).
+ * A later real tab whose title contains `[selected]` before the URL
+ * wrapper (`2: Inbox [selected] - App (https://example.com/)`) stays its
+ * own row.
  */
 function isTitleContinuationLine(line: string): boolean {
   const m = line.match(/^(\d+):\s+(.+)$/);
   if (!m) return false;
   const rest = stripPageSuffixes(m[2]);
-  const trailing = matchTrailingUrl(rest);
-  if (trailing !== null) {
-    return /\[selected\]/.test(trailing.title);
-  }
+  if (matchTrailingUrl(rest) !== null) return false;
   if (isPageSchemeUrl(rest)) return false;
   return /(?:^|\s)\[selected\]\s*$/.test(stripTrailingIsolatedContext(m[2]));
 }
@@ -250,11 +247,12 @@ function followingLinesCompleteTitle(
  * like a new page id. Only `## Pages` / `## Extension Pages` blocks are
  * parsed. A `N:` line folds onto the previous row when that row is still
  * incomplete, or when the new line is a title continuation (`[selected]`
- * without a scheme URL, or `[selected]` in the title before the URL
- * wrapper) — otherwise a title such as
+ * suffix with no scheme URL) — otherwise a title such as
  * `Something (https://example.com)\n2: Other Tab [selected]` would steal
  * routing, and a later page whose title wraps (`2: Other\nTab (url)`)
- * would be merged into the previous id. `raw.trim()` turns MCP `N: `
+ * would be merged into the previous id. A real tab titled
+ * `Inbox [selected] - App (https://example.com/)` is not a continuation.
+ * `raw.trim()` turns MCP `N: `
  * (title starts with a newline) into `N:`; that still counts as an
  * incomplete page row so a title like `\n2: Other Tab` folds onto the
  * real id instead of becoming page 2. Continuation lines are kept unless

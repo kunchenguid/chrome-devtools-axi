@@ -883,6 +883,23 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("injects a later pageId when that tab's title contains [selected] before the URL", async () => {
+    await withFakeBridge(
+      [
+        "## Pages",
+        "1: First (https://a.com/)",
+        "2: Inbox [selected] - App (https://example.com/) [selected]",
+      ].join("\n"),
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 2 } },
+        ]);
+      },
+    );
+  });
+
   it("still injects pageId when a title line looks like a markdown heading", async () => {
     await withFakeBridge(
       [

@@ -329,16 +329,17 @@ describe("parsePagesList", () => {
     ]);
   });
 
-  it("folds an MCP titled continuation that still carries the page URL wrapper", () => {
+  it("does not fold a later tab whose title contains [selected] before the URL", () => {
     const result = parsePagesList(
       [
         "## Pages",
-        "1: Something (https://example.com)",
-        "2: Other Tab [selected] (https://actual.example/) [selected]",
+        "1: First (https://a.com/)",
+        "2: Inbox [selected] - App (https://example.com/) [selected]",
       ].join("\n"),
     );
     expect(result).toEqual([
-      { id: 1, url: "https://actual.example/", selected: true },
+      { id: 1, url: "https://a.com/", selected: false },
+      { id: 2, url: "https://example.com/", selected: true },
     ]);
   });
 
@@ -615,6 +616,18 @@ describe("parseSelectedPageId", () => {
         ].join("\n"),
       ),
     ).toBe(1);
+  });
+
+  it("selects a later tab whose title contains [selected] before the URL", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "1: First (https://a.com/)",
+          "2: Inbox [selected] - App (https://example.com/) [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(2);
   });
 
   it("still finds [selected] when the title continues with a ## heading", () => {
