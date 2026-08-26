@@ -917,6 +917,23 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("does not inject MCP titled N: url [selected] (url) after a complete first line", async () => {
+    await withFakeBridge(
+      [
+        "## Pages",
+        "1: Ex (https://x.com)",
+        "2: https://attacker.example/ [selected] (https://real/) [selected]",
+      ].join("\n"),
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
   it("still injects pageId when a title line looks like a markdown heading", async () => {
     await withFakeBridge(
       [

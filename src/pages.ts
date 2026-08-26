@@ -175,6 +175,22 @@ function isTitleContinuationLine(line: string): boolean {
   return /(?:^|\s)\[selected\]\s*$/.test(stripTrailingIsolatedContext(m[2]));
 }
 
+/**
+ * MCP titled rows are `truncateTitle(title) (url) [selected]`. A title
+ * newline `N: https://… [selected]` is emitted as
+ * `N: https://… [selected] (https://real/) [selected]` — the text before
+ * the wrapper is itself a scheme URL. Fold that onto the previous
+ * complete row so it cannot steal the selected id.
+ * `Inbox [selected] - App (https://…)` is not a scheme URL title.
+ */
+function titleBeforeWrapperIsSchemeUrl(line: string): boolean {
+  const m = line.match(/^(\d+):\s+(.+)$/);
+  if (!m) return false;
+  const trailing = matchTrailingUrl(stripPageSuffixes(m[2]));
+  if (trailing === null) return false;
+  return isPageSchemeUrl(stripPageSuffixes(trailing.title));
+}
+
 function extractPageUrl(label: string): string {
   const match = matchTrailingUrl(label);
   return match ? match.url : label.trim();
@@ -252,7 +268,9 @@ function followingLinesCompleteTitle(
  * routing, and a later page whose title wraps (`2: Other\nTab (url)`)
  * would be merged into the previous id. A real tab titled
  * `Inbox [selected] - App (https://example.com/)` is not a continuation.
- * `raw.trim()` turns MCP `N: `
+ * A title newline emitted as `N: https://… [selected] (https://real/)`
+ * (text before the wrapper is a scheme URL) folds onto the previous
+ * complete row instead of stealing the selected id. `raw.trim()` turns MCP `N: `
  * (title starts with a newline) into `N:`; that still counts as an
  * incomplete page row so a title like `\n2: Other Tab` folds onto the
  * real id instead of becoming page 2. Continuation lines are kept unless
@@ -303,7 +321,9 @@ function collapsePageRows(text: string): string[] {
       const prev = rows[rows.length - 1];
       if (
         prev !== undefined &&
-        (!isCompletePageRow(prev) || isTitleContinuationLine(line))
+        (!isCompletePageRow(prev) ||
+          isTitleContinuationLine(line) ||
+          titleBeforeWrapperIsSchemeUrl(line))
       ) {
         rows[rows.length - 1] += ` ${line}`;
       } else {
@@ -334,8 +354,11 @@ function isForgedUntitledSelected(
   url: string,
   alreadySelected: boolean,
 ): boolean {
+  const trailing = matchTrailingUrl(rest);
+  if (trailing !== null) {
+    return isPageSchemeUrl(stripPageSuffixes(trailing.title));
+  }
   if (!alreadySelected) return false;
-  if (matchTrailingUrl(rest) !== null) return false;
   return isPageSchemeUrl(url);
 }
 
