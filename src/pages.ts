@@ -326,9 +326,22 @@ function collapsePageRows(text: string): string[] {
  *   `<id>: <title> (<url>)`
  * optionally followed by ` [selected]` and ` isolatedContext=<name>`
  * (`isolatedContext` is a free-form zod string and may contain spaces).
+ * Untitled `N: <url> [selected]` after an already-selected page is a
+ * title/dialog newline, not a second MCP tab.
  */
+function isForgedUntitledSelected(
+  rest: string,
+  url: string,
+  alreadySelected: boolean,
+): boolean {
+  if (!alreadySelected) return false;
+  if (matchTrailingUrl(rest) !== null) return false;
+  return isPageSchemeUrl(url);
+}
+
 export function parsePagesList(text: string): PageListEntry[] {
   const pages: PageListEntry[] = [];
+  let haveSelected = false;
   for (const line of collapsePageRows(text)) {
     const m = line.match(/^(\d+):\s+(.+)$/);
     if (!m) continue;
@@ -338,7 +351,12 @@ export function parsePagesList(text: string): PageListEntry[] {
     if (selected) {
       rest = rest.replace(/\s*\[selected\]\s*$/, "").trimEnd();
     }
-    pages.push({ id, url: extractPageUrl(rest), selected });
+    const url = extractPageUrl(rest);
+    if (selected && isForgedUntitledSelected(rest, url, haveSelected)) {
+      continue;
+    }
+    if (selected) haveSelected = true;
+    pages.push({ id, url, selected });
   }
   return pages;
 }
