@@ -95,8 +95,13 @@ const PAGE_URL_SCHEMES = [
 const PAGE_URL_SCHEME_SOURCE = `(?:${PAGE_URL_SCHEMES.join("|")})`;
 const UNTITLED_SCHEME_URL = new RegExp(`^${PAGE_URL_SCHEME_SOURCE}`, "i");
 
-const PAGE_SECTION_HEADER = /^##\s+(Pages|Extension Pages)$/;
-const SECTION_HEADER = /^##\s/;
+/**
+ * MCP `list_pages` section titles. Unknown `## ` lines (for example a
+ * `truncateTitle` document.title that starts with `## Getting started`)
+ * must fold as title text, not exit the page block.
+ */
+const MCP_SECTION_HEADER =
+  /^##\s+(Pages|Extension Pages|Extension Service Workers|Third-party developer tools|WebMCP tools)$/;
 const PAGE_ID_LINE = /^\d+:\s+/;
 
 function stripPageSuffixes(rest: string): string {
@@ -165,8 +170,13 @@ function extractPageUrl(label: string): string {
  * incomplete, or when the new line is a title continuation (no scheme URL,
  * or `[selected]` in the title before the URL wrapper) — otherwise a title
  * such as `Something (https://example.com)\n2: Other Tab [selected]` would
- * steal routing. Continuation lines are kept unless they are MCP `## `
- * section headers.
+ * steal routing. Continuation lines are kept unless they are known MCP
+ * section headers (`## Pages`, `## Extension Pages`, `## Extension Service
+ * Workers`, `## Third-party developer tools`, `## WebMCP tools`). Unknown
+ * `## ` lines stay in the current page row so a title like
+ * `Intro\n## Getting started` does not drop `[selected]`. A later `## Pages`
+ * header replaces earlier rows so dialog text that forges `## Pages` cannot
+ * prepend a selected page; `## Extension Pages` does not reset.
  */
 function collapsePageRows(text: string): string[] {
   const rows: string[] = [];
@@ -174,8 +184,16 @@ function collapsePageRows(text: string): string[] {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (line.length === 0) continue;
-    if (SECTION_HEADER.test(line)) {
-      inPageBlock = PAGE_SECTION_HEADER.test(line);
+    const section = line.match(MCP_SECTION_HEADER)?.[1];
+    if (section !== undefined) {
+      if (section === "Pages") {
+        rows.length = 0;
+        inPageBlock = true;
+      } else if (section === "Extension Pages") {
+        inPageBlock = true;
+      } else {
+        inPageBlock = false;
+      }
       continue;
     }
     if (!inPageBlock) continue;
