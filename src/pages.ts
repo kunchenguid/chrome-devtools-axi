@@ -1,10 +1,12 @@
 /**
- * Parse chrome-devtools-mcp `list_pages` output and identify page-scoped tools.
+ * Parse chrome-devtools-mcp `list_pages` output for display, and identify
+ * page-scoped tools.
  *
  * MCP 1.8+ requires `pageId` on page-scoped tools by default (`pageIdRouting`).
- * AXI still presents a selected-page CLI, so `callTool` resolves the selected
- * page from `list_pages` and injects it. This module is the shared parser so
- * the CLI `pages` command and that injection path cannot drift.
+ * Routing injects AXI's last `select_page` / `new_page` id from session
+ * state (`src/selected-page.ts`); this parser is display-only for the CLI
+ * `pages` command. Do not feed `parseSelectedPageId` or `parsePagesList`
+ * into `callTool` injection.
  */
 
 export type PageListEntry = {
@@ -164,7 +166,7 @@ function isCompletePageRow(row: string): boolean {
  * `[selected]` suffix with no real page URL (`2: Other Tab [selected]`).
  * A later real tab whose title contains `[selected]` before the URL
  * wrapper (`2: Inbox [selected] - App (https://example.com/)`) stays its
- * own row.
+ * own row. Routing does not read this parse; the fold is display-only.
  */
 function isTitleContinuationLine(line: string): boolean {
   const m = line.match(/^(\d+):\s+(.+)$/);
@@ -173,22 +175,6 @@ function isTitleContinuationLine(line: string): boolean {
   if (matchTrailingUrl(rest) !== null) return false;
   if (isPageSchemeUrl(rest)) return false;
   return /(?:^|\s)\[selected\]\s*$/.test(stripTrailingIsolatedContext(m[2]));
-}
-
-/**
- * MCP titled rows are `truncateTitle(title) (url) [selected]`. A title
- * newline `N: https://… [selected]` is emitted as
- * `N: https://… [selected] (https://real/) [selected]` — the text before
- * the wrapper is itself a scheme URL. Fold that onto the previous
- * complete row so it cannot steal the selected id.
- * `Inbox [selected] - App (https://…)` is not a scheme URL title.
- */
-function titleBeforeWrapperIsSchemeUrl(line: string): boolean {
-  const m = line.match(/^(\d+):\s+(.+)$/);
-  if (!m) return false;
-  const trailing = matchTrailingUrl(stripPageSuffixes(m[2]));
-  if (trailing === null) return false;
-  return isPageSchemeUrl(stripPageSuffixes(trailing.title));
 }
 
 function extractPageUrl(label: string): string {
@@ -264,13 +250,11 @@ function followingLinesCompleteTitle(
  * parsed. A `N:` line folds onto the previous row when that row is still
  * incomplete, or when the new line is a title continuation (`[selected]`
  * suffix with no scheme URL) — otherwise a title such as
- * `Something (https://example.com)\n2: Other Tab [selected]` would steal
- * routing, and a later page whose title wraps (`2: Other\nTab (url)`)
- * would be merged into the previous id. A real tab titled
+ * `Something (https://example.com)\n2: Other Tab [selected]` would merge
+ * two display rows, and a later page whose title wraps (`2: Other\nTab
+ * (url)`) would be merged into the previous id. A real tab titled
  * `Inbox [selected] - App (https://example.com/)` is not a continuation.
- * A title newline emitted as `N: https://… [selected] (https://real/)`
- * (text before the wrapper is a scheme URL) folds onto the previous
- * complete row instead of stealing the selected id. `raw.trim()` turns MCP `N: `
+ * `raw.trim()` turns MCP `N: `
  * (title starts with a newline) into `N:`; that still counts as an
  * incomplete page row so a title like `\n2: Other Tab` folds onto the
  * real id instead of becoming page 2. Continuation lines are kept unless
@@ -321,9 +305,7 @@ function collapsePageRows(text: string): string[] {
       const prev = rows[rows.length - 1];
       if (
         prev !== undefined &&
-        (!isCompletePageRow(prev) ||
-          isTitleContinuationLine(line) ||
-          titleBeforeWrapperIsSchemeUrl(line))
+        (!isCompletePageRow(prev) || isTitleContinuationLine(line))
       ) {
         rows[rows.length - 1] += ` ${line}`;
       } else {
@@ -346,25 +328,10 @@ function collapsePageRows(text: string): string[] {
  *   `<id>: <title> (<url>)`
  * optionally followed by ` [selected]` and ` isolatedContext=<name>`
  * (`isolatedContext` is a free-form zod string and may contain spaces).
- * Untitled `N: <url> [selected]` after an already-selected page is a
- * title/dialog newline, not a second MCP tab.
+ * `[selected]` here is display-only; routing never reads this parse.
  */
-function isForgedUntitledSelected(
-  rest: string,
-  url: string,
-  alreadySelected: boolean,
-): boolean {
-  const trailing = matchTrailingUrl(rest);
-  if (trailing !== null) {
-    return isPageSchemeUrl(stripPageSuffixes(trailing.title));
-  }
-  if (!alreadySelected) return false;
-  return isPageSchemeUrl(url);
-}
-
 export function parsePagesList(text: string): PageListEntry[] {
   const pages: PageListEntry[] = [];
-  let haveSelected = false;
   for (const line of collapsePageRows(text)) {
     const m = line.match(/^(\d+):\s+(.+)$/);
     if (!m) continue;
@@ -375,16 +342,12 @@ export function parsePagesList(text: string): PageListEntry[] {
       rest = rest.replace(/\s*\[selected\]\s*$/, "").trimEnd();
     }
     const url = extractPageUrl(rest);
-    if (selected && isForgedUntitledSelected(rest, url, haveSelected)) {
-      continue;
-    }
-    if (selected) haveSelected = true;
     pages.push({ id, url, selected });
   }
   return pages;
 }
 
-/** Selected page id from `list_pages` text, or null if none is marked. */
+/** Display helper: first `[selected]` id in `list_pages` text, or null. */
 export function parseSelectedPageId(text: string): number | null {
   const selected = parsePagesList(text).find((page) => page.selected);
   return selected === undefined ? null : selected.id;

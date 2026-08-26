@@ -61,7 +61,7 @@ The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-a
 `resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through; a session isolates only the bridge, so the connection mode and profile compose unchanged.
 `/health` reports the bridge's `session`, and `checkBridgeHealth`/`ensureBridge` reject a mismatched session so two sessions forced onto one port (a globally-exported `CHROME_DEVTOOLS_AXI_PORT`) fail loudly instead of silently sharing; the bridge exits with `BRIDGE_PORT_IN_USE_EXIT_CODE` (48) on an EADDRINUSE bind so the early-exit error attributes the collision (`buildBridgeEarlyExitError`).
 
-chrome-devtools-mcp 1.8+ requires `pageId` on page-scoped tools by default. `callTool` (`src/client.ts`) resolves the selected page from `list_pages` (`src/pages.ts`) and injects it; `list_pages` / `new_page` / `select_page` / `close_page` are left alone. Missing selection fails loudly.
+chrome-devtools-mcp 1.8+ requires `pageId` on page-scoped tools by default. `callTool` (`src/client.ts`) injects the session's last AXI `select_page` / `new_page` id (`src/selected-page.ts`); `list_pages` is display-only and never sets routing. Missing selection fails loudly with "No page is currently selected". `close_page` of the selected id clears it.
 
 ### Snapshot generations and STALE_REF
 
@@ -96,7 +96,7 @@ Only the script's own `console.log` output reaches stdout: handlers return text 
 - `resolveOutputPath` (`src/paths.ts`) is the chokepoint for local output artifacts sent to the bridge.
   Use it for any new command or flag that asks the bridge/MCP to write a caller-supplied output file or directory, so relative paths resolve against the invoking CLI's `process.cwd()` and output can report the absolute path.
 - `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists; it also degrades an invalid `CHROME_DEVTOOLS_AXI_SESSION` to null here, while action commands (`ensureBridge`/`stopBridge`) still fail loudly.
-- Generation-counter writes are best-effort; a failed write degrades to one missed stale-ref detection, never a hang (`src/generation.ts`).
+- Generation-counter writes are best-effort; a failed write degrades to one missed stale-ref detection, never a hang (`src/generation.ts`). Selected-page-id writes are the same (`src/selected-page.ts`): a failed write means the next page-scoped call fails loud instead of guessing from `list_pages`.
 - Some `test/client.test.ts` cases exercise real SIGTERM/SIGKILL escalation timing and take a couple of seconds each; that is expected, not flakiness.
 
 ## Maintaining this file
