@@ -84,6 +84,7 @@ const PAGE_URL_SCHEMES = [
   "https?:\\/\\/",
   "about:",
   "data:",
+  "chrome-extension:",
   "chrome:",
   "file:",
   "blob:",
@@ -92,22 +93,66 @@ const PAGE_URL_SCHEMES = [
   "edge:",
 ] as const;
 const PAGE_URL_SCHEME_SOURCE = `(?:${PAGE_URL_SCHEMES.join("|")})`;
-
-const TRAILING_URL_WRAPPER = new RegExp(
-  `\\s+\\((${PAGE_URL_SCHEME_SOURCE}.*)\\)\\s*$`,
-  "i",
-);
 const UNTITLED_SCHEME_URL = new RegExp(`^${PAGE_URL_SCHEME_SOURCE}`, "i");
 
 const PAGE_SECTION_HEADER = /^##\s+(Pages|Extension Pages)$/;
 const SECTION_HEADER = /^##\s/;
 const PAGE_ID_LINE = /^\d+:\s+/;
 
+function stripPageSuffixes(rest: string): string {
+  let label = rest.replace(/\s+isolatedContext=.*$/, "");
+  if (/(?:^|\s)\[selected\]\s*$/.test(label)) {
+    label = label.replace(/\s*\[selected\]\s*$/, "").trimEnd();
+  }
+  return label;
+}
+
+/**
+ * Last MCP ` (<url>)` wrapper on a titled row. Walks from the final `)` so a
+ * title that itself contains `(https://…)` is not mistaken for the page URL.
+ */
+function matchTrailingUrl(
+  label: string,
+): { title: string; url: string } | null {
+  const trimmed = label.trimEnd();
+  if (!trimmed.endsWith(")")) return null;
+  const close = trimmed.length - 1;
+  const open = trimmed.lastIndexOf(" (");
+  if (open === -1) return null;
+  const url = trimmed.slice(open + 2, close);
+  if (!UNTITLED_SCHEME_URL.test(url)) return null;
+  return { title: trimmed.slice(0, open), url };
+}
+
+function hasSchemeUrl(label: string): boolean {
+  const rest = stripPageSuffixes(label);
+  return matchTrailingUrl(rest) !== null || UNTITLED_SCHEME_URL.test(rest);
+}
+
 function isCompletePageRow(row: string): boolean {
-  if (/(?:^|\s)\[selected\](?:\s|$)/.test(row)) return true;
   if (/\sisolatedContext=/.test(row)) return true;
-  const rest = row.replace(/^\d+:\s+/, "");
-  return TRAILING_URL_WRAPPER.test(rest) || UNTITLED_SCHEME_URL.test(rest);
+  return hasSchemeUrl(row.replace(/^\d+:\s+/, ""));
+}
+
+/**
+ * Title text split across lines can look like `N: Other Tab [selected]`.
+ * A real MCP page row always has a scheme URL; `[selected]` in the title
+ * (before the trailing URL wrapper) is the document.title, not a new page.
+ */
+function isTitleContinuationLine(line: string): boolean {
+  const m = line.match(/^(\d+):\s+(.+)$/);
+  if (!m) return false;
+  const rest = stripPageSuffixes(m[2]);
+  const trailing = matchTrailingUrl(rest);
+  if (trailing === null) {
+    return !UNTITLED_SCHEME_URL.test(rest);
+  }
+  return /\[selected\]/.test(trailing.title);
+}
+
+function extractPageUrl(label: string): string {
+  const match = matchTrailingUrl(label);
+  return match ? match.url : label.trim();
 }
 
 /**
@@ -116,9 +161,12 @@ function isCompletePageRow(row: string): boolean {
  * MCP interpolates unsanitized `document.title` (and open-dialog text) with
  * newlines intact, so a title/dialog like `Error\n404: Not Found` can look
  * like a new page id. Only `## Pages` / `## Extension Pages` blocks are
- * parsed; a `N:` line folds onto the previous row while that row is still
- * missing a scheme URL, `[selected]`, or `isolatedContext=`. Continuation
- * lines are kept unless they are MCP `## ` section headers.
+ * parsed. A `N:` line folds onto the previous row when that row is still
+ * incomplete, or when the new line is a title continuation (no scheme URL,
+ * or `[selected]` in the title before the URL wrapper) — otherwise a title
+ * such as `Something (https://example.com)\n2: Other Tab [selected]` would
+ * steal routing. Continuation lines are kept unless they are MCP `## `
+ * section headers.
  */
 function collapsePageRows(text: string): string[] {
   const rows: string[] = [];
@@ -133,7 +181,10 @@ function collapsePageRows(text: string): string[] {
     if (!inPageBlock) continue;
     if (PAGE_ID_LINE.test(line)) {
       const prev = rows[rows.length - 1];
-      if (prev !== undefined && !isCompletePageRow(prev)) {
+      if (
+        prev !== undefined &&
+        (!isCompletePageRow(prev) || isTitleContinuationLine(line))
+      ) {
         rows[rows.length - 1] += ` ${line}`;
       } else {
         rows.push(line);
@@ -145,11 +196,6 @@ function collapsePageRows(text: string): string[] {
     }
   }
   return rows.map((row) => row.replace(/\s+/g, " "));
-}
-
-function extractPageUrl(label: string): string {
-  const match = label.match(TRAILING_URL_WRAPPER);
-  return match ? match[1] : label.trim();
 }
 
 /**

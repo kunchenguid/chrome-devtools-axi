@@ -268,6 +268,36 @@ describe("parsePagesList", () => {
       { id: 1, url: "https://example.com/", selected: true },
     ]);
   });
+
+  it("does not treat a title continuation that looks like N: [selected] as a new page", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: Something (https://example.com)",
+        "2: Other Tab [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      {
+        id: 1,
+        url: "Something (https://example.com) 2: Other Tab",
+        selected: true,
+      },
+    ]);
+  });
+
+  it("folds an MCP titled continuation that still carries the page URL wrapper", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "1: Something (https://example.com)",
+        "2: Other Tab [selected] (https://actual.example/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://actual.example/", selected: true },
+    ]);
+  });
 });
 
 describe("parseSelectedPageId", () => {
@@ -330,6 +360,18 @@ describe("parseSelectedPageId", () => {
           "## Pages",
           "0: blob:https://example.com/abc",
           "1: https://example.com/ [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(1);
+  });
+
+  it("does not steal [selected] from a multiline title that looks like another page", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "1: Something (https://example.com)",
+          "2: Other Tab [selected]",
         ].join("\n"),
       ),
     ).toBe(1);
