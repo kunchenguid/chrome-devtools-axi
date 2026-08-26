@@ -22,6 +22,51 @@ const HEALTH_TIMEOUT_MS = 2_000;
 const DEEP_HEALTH_TIMEOUT_MS = 5_000;
 
 /**
+ * Tools that target a page in the current chrome-devtools-mcp contract.
+ *
+ * chrome-devtools-mcp 1.8 made page-id routing the default. The CLI keeps
+ * page selection as ambient state for its short-lived processes, so resolve
+ * the selected page before forwarding one of these calls. Browser-scoped
+ * tools such as list_pages, new_page, select_page, and close_page are
+ * intentionally absent: they establish or manage that ambient state.
+ */
+const PAGE_SCOPED_TOOLS = new Set([
+  "click",
+  "click_at",
+  "drag",
+  "emulate",
+  "evaluate_script",
+  "execute_3p_developer_tool",
+  "execute_webmcp_tool",
+  "fill",
+  "fill_form",
+  "get_console_message",
+  "get_network_request",
+  "get_tab_id",
+  "handle_dialog",
+  "hover",
+  "lighthouse_audit",
+  "list_3p_developer_tools",
+  "list_console_messages",
+  "list_network_requests",
+  "list_webmcp_tools",
+  "navigate_page",
+  "performance_analyze_insight",
+  "performance_start_trace",
+  "performance_stop_trace",
+  "press_key",
+  "resize_page",
+  "screencast_start",
+  "screencast_stop",
+  "take_heapsnapshot",
+  "take_screenshot",
+  "take_snapshot",
+  "type_text",
+  "upload_file",
+  "wait_for",
+]);
+
+/**
  * Resolve the bridge readiness deadline in milliseconds.
  *
  * Honors `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` for systems where npx
@@ -148,6 +193,49 @@ function httpPost(
     req.write(payload);
     req.end();
   });
+}
+
+async function postTool(
+  port: number,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const resp = await httpPost(port, "/call", { name, args });
+  const data = JSON.parse(resp) as { error?: unknown; result?: unknown };
+  if (data.error) {
+    throw new Error(String(data.error));
+  }
+  return typeof data.result === "string" ? data.result : "";
+}
+
+function parseSelectedPageId(text: string): number | null {
+  for (const line of text.split("\n")) {
+    const match = line.match(
+      /^(\d+):\s+.+\s+\[selected\](?:\s+isolatedContext=\S+)?\s*$/,
+    );
+    if (match) return Number.parseInt(match[1], 10);
+  }
+  return null;
+}
+
+async function resolveSelectedPageId(port: number): Promise<number> {
+  const pages = await postTool(port, "list_pages", {});
+  const pageId = parseSelectedPageId(pages);
+  if (pageId === null) {
+    throw new CdpError("No page is currently selected", "BROWSER_ERROR", [
+      "Run `chrome-devtools-axi pages` to see open pages",
+      "Run `chrome-devtools-axi open <url>` to open or select a page",
+    ]);
+  }
+  return pageId;
+}
+
+function needsPageId(name: string, args: Record<string, unknown>): boolean {
+  if (!PAGE_SCOPED_TOOLS.has(name) || Object.hasOwn(args, "pageId")) {
+    return false;
+  }
+  // evaluate_script can target an extension service worker instead of a page.
+  return name !== "evaluate_script" || !Object.hasOwn(args, "serviceWorkerId");
 }
 
 /**
@@ -487,6 +575,12 @@ export async function ensureBridge(
 
 /**
  * Call an MCP tool via the bridge. Returns the text result.
+ *
+ * The bridge keeps the selected page in its persistent MCP session, while
+ * each CLI invocation is short-lived. Resolve that selection immediately
+ * before page-scoped calls and pass the id explicitly. Besides satisfying
+ * chrome-devtools-mcp's page-id schema, this makes the operation independent
+ * of a concurrent selection change in the same session.
  */
 export async function callTool(
   name: string,
@@ -495,13 +589,12 @@ export async function callTool(
   const port = await ensureBridge();
 
   try {
-    const resp = await httpPost(port, "/call", { name, args });
-    const data = JSON.parse(resp);
-    if (data.error) {
-      throw new Error(data.error);
-    }
-    return data.result ?? "";
+    const routedArgs = needsPageId(name, args)
+      ? { ...args, pageId: await resolveSelectedPageId(port) }
+      : args;
+    return await postTool(port, name, routedArgs);
   } catch (err) {
+    if (err instanceof CdpError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     throw mapErrorMessage(message);
   }

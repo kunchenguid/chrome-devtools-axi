@@ -630,9 +630,16 @@ export function parsePagesList(
 ): { id: number; url: string; selected: boolean }[] {
   const pages: { id: number; url: string; selected: boolean }[] = [];
   for (const line of text.split("\n")) {
-    const m = line.match(/^(\d+):\s+(\S+)(\s+\[selected\])?/);
+    const m = line.match(/^(\d+):\s+(\S+)/);
     if (m) {
-      pages.push({ id: parseInt(m[1], 10), url: m[2], selected: !!m[3] });
+      const labeledUrl = line.match(
+        /\((\S+)\)(?:\s+\[selected\])?(?:\s+isolatedContext=\S+)?\s*$/,
+      );
+      pages.push({
+        id: parseInt(m[1], 10),
+        url: labeledUrl?.[1] ?? m[2],
+        selected: /\s\[selected\](?:\s|$)/.test(line),
+      });
     }
   }
   return pages;

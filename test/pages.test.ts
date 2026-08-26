@@ -74,6 +74,15 @@ describe("parsePagesList", () => {
     ]);
   });
 
+  it("recognizes selected pages when the title contains spaces", () => {
+    const result = parsePagesList(
+      "## Pages\n1: Issue 115 fixed (https://example.com/) [selected]",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
   it("parses multiple pages", () => {
     const result = parsePagesList(
       "## Pages\n0: https://a.com/\n1: https://b.com/ [selected]",

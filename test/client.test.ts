@@ -3,7 +3,13 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AxiError } from "axi-sdk-js";
@@ -11,6 +17,7 @@ import { BRIDGE_PORT_IN_USE_EXIT_CODE } from "../src/bridge.js";
 import {
   buildBridgeEarlyExitError,
   CdpError,
+  callTool,
   checkBridgeHealth,
   ensureBridge,
   getSessionSnapshotIfRunning,
@@ -175,6 +182,167 @@ function startFakeBridgeServer(opts: FakeBridgeOptions): Promise<{
     });
   });
 }
+
+function startFakeToolBridgeServer(): Promise<{
+  port: number;
+  server: Server;
+  calls: { name: string; args: Record<string, unknown> }[];
+  close: () => Promise<void>;
+}> {
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  let selectedPageId = 1;
+
+  return new Promise((resolveStart, rejectStart) => {
+    const server = createServer(async (req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      if (req.method === "GET" && req.url?.startsWith("/health")) {
+        res.statusCode = 200;
+        res.end(JSON.stringify({ status: "ok", session: "call-tool-worker" }));
+        return;
+      }
+      if (req.method !== "POST" || req.url !== "/call") {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "not found" }));
+        return;
+      }
+
+      let body = "";
+      for await (const chunk of req) {
+        body += typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+      }
+      const payload = JSON.parse(body) as {
+        name: string;
+        args: Record<string, unknown>;
+      };
+      calls.push(payload);
+
+      let result = "ok";
+      if (payload.name === "list_pages") {
+        result = [
+          `1: First page (https://first.example.test)${selectedPageId === 1 ? " [selected]" : ""}`,
+          `2: Second page (https://second.example.test)${selectedPageId === 2 ? " [selected]" : ""}`,
+        ].join("\n");
+      } else if (payload.name === "new_page") {
+        selectedPageId = 2;
+      } else if (payload.name === "select_page") {
+        selectedPageId = Number(payload.args.pageId);
+      } else if (payload.name === "close_page") {
+        selectedPageId = 1;
+      } else if (payload.name === "take_snapshot") {
+        result = `snapshot for page ${String(payload.args.pageId)}`;
+      } else if (payload.name === "evaluate_script") {
+        result = `evaluation for page ${String(payload.args.pageId)}`;
+      }
+      res.statusCode = 200;
+      res.end(JSON.stringify({ result }));
+    });
+    server.on("error", rejectStart);
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      resolveStart({
+        port,
+        server,
+        calls,
+        close: () =>
+          new Promise<void>((closeResolve) => {
+            server.close(() => closeResolve());
+          }),
+      });
+    });
+  });
+}
+
+describe("callTool page identity routing", () => {
+  const savedHome = process.env.HOME;
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  const savedPort = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  let tmpHome: string;
+  let fake: Awaited<ReturnType<typeof startFakeToolBridgeServer>>;
+
+  beforeEach(async () => {
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-call-tool-"));
+    process.env.HOME = tmpHome;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "call-tool-worker";
+    delete process.env.CHROME_DEVTOOLS_AXI_PORT;
+    fake = await startFakeToolBridgeServer();
+    const pidFile = join(
+      tmpHome,
+      ".chrome-devtools-axi",
+      "sessions",
+      "call-tool-worker",
+      "bridge.pid",
+    );
+    mkdirSync(
+      join(tmpHome, ".chrome-devtools-axi", "sessions", "call-tool-worker"),
+      {
+        recursive: true,
+      },
+    );
+    writeFileSync(
+      pidFile,
+      JSON.stringify({ pid: process.pid, port: fake.port }),
+    );
+  });
+
+  afterEach(async () => {
+    await fake.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    if (savedSession === undefined)
+      delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    else process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
+    if (savedPort === undefined) delete process.env.CHROME_DEVTOOLS_AXI_PORT;
+    else process.env.CHROME_DEVTOOLS_AXI_PORT = savedPort;
+  });
+
+  it("passes the selected page ID to page-scoped calls", async () => {
+    await expect(
+      callTool("evaluate_script", { function: "() => document.title" }),
+    ).resolves.toBe("evaluation for page 1");
+    await callTool("take_snapshot");
+    await callTool("click", { uid: "1_1" });
+    await callTool("fill", { uid: "1_2", value: "hello" });
+
+    expect(fake.calls.filter(({ name }) => name === "list_pages")).toHaveLength(
+      4,
+    );
+    expect(
+      fake.calls
+        .filter(({ name }) => name !== "list_pages")
+        .map(({ name, args }) => ({ name, pageId: args.pageId })),
+    ).toEqual([
+      { name: "evaluate_script", pageId: 1 },
+      { name: "take_snapshot", pageId: 1 },
+      { name: "click", pageId: 1 },
+      { name: "fill", pageId: 1 },
+    ]);
+  });
+
+  it("refreshes the current page ID across new, select, and close transitions", async () => {
+    await callTool("new_page", { url: "https://second.example.test" });
+    await callTool("take_snapshot");
+    await callTool("select_page", { pageId: 1 });
+    await callTool("evaluate_script", { function: "() => location.href" });
+    await callTool("close_page", { pageId: 2 });
+    await callTool("take_snapshot");
+
+    expect(fake.calls).toEqual([
+      { name: "new_page", args: { url: "https://second.example.test" } },
+      { name: "list_pages", args: {} },
+      { name: "take_snapshot", args: { pageId: 2 } },
+      { name: "select_page", args: { pageId: 1 } },
+      { name: "list_pages", args: {} },
+      {
+        name: "evaluate_script",
+        args: { function: "() => location.href", pageId: 1 },
+      },
+      { name: "close_page", args: { pageId: 2 } },
+      { name: "list_pages", args: {} },
+      { name: "take_snapshot", args: { pageId: 1 } },
+    ]);
+  });
+});
 
 describe("checkBridgeHealth (deep probe)", () => {
   it("returns true on a shallow probe when /health responds 200 ok", async () => {
