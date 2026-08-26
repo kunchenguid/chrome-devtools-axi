@@ -5,6 +5,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { request } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { AxiError } from "axi-sdk-js";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
@@ -12,6 +13,8 @@ import {
 } from "./bridge-script.js";
 import {
   resolveSessionName,
+  resolveBrowserPort,
+  resolveExplicitSessionPort,
   resolveSessionPidFile,
   resolveSessionPort,
 } from "./sessions.js";
@@ -54,6 +57,67 @@ export class CdpError extends AxiError {
     super(message, code, suggestions);
     this.name = "CdpError";
   }
+}
+
+type FreeBridgePortResolver = (excludedPort: number) => Promise<number>;
+
+function canBindBridgePort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createNetServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => {
+      server.close((error) => resolve(error === undefined));
+    });
+  });
+}
+
+async function findFreeBridgePort(excludedPort: number): Promise<number> {
+  const firstPort =
+    excludedPort >= 1024 && excludedPort < 65535 ? excludedPort + 1 : 1024;
+  const candidateCount = 65535 - 1024 + 1;
+
+  for (let offset = 0; offset < candidateCount; offset++) {
+    const candidate = 1024 + ((firstPort - 1024 + offset) % candidateCount);
+    if (candidate !== excludedPort && (await canBindBridgePort(candidate))) {
+      return candidate;
+    }
+  }
+  throw new CdpError(
+    `No free bridge port is available distinct from browser/CDP port ${excludedPort}`,
+    "BRIDGE_NOT_READY",
+  );
+}
+
+/** Resolve a bridge port that can never equal the configured browser endpoint. */
+export async function resolveBridgePort(
+  sessionName: string = resolveSessionName(),
+  findFreePort: FreeBridgePortResolver = findFreeBridgePort,
+): Promise<number> {
+  const preferredPort = resolveSessionPort(sessionName);
+  const browserPort = resolveBrowserPort();
+  if (browserPort === null || preferredPort !== browserPort) {
+    return preferredPort;
+  }
+
+  if (resolveExplicitSessionPort() !== null) {
+    throw new CdpError(
+      `CHROME_DEVTOOLS_AXI_PORT ${preferredPort} collides with the configured browser/CDP port; the bridge and browser ports must be distinct`,
+      "VALIDATION_ERROR",
+      [
+        "Choose a different CHROME_DEVTOOLS_AXI_PORT, or unset it to select a free bridge port automatically.",
+      ],
+    );
+  }
+
+  const resolvedPort = await findFreePort(browserPort);
+  if (resolvedPort === browserPort) {
+    throw new CdpError(
+      `Resolved bridge port ${resolvedPort} still collides with the configured browser/CDP port`,
+      "BRIDGE_NOT_READY",
+    );
+  }
+  return resolvedPort;
 }
 
 interface PidInfo {
@@ -377,7 +441,7 @@ export async function ensureBridge(
   ) => SpawnedBridge = spawnBridgeProcess,
 ): Promise<number> {
   const sessionName = resolveSessionName();
-  const port = resolveSessionPort(sessionName);
+  const port = await resolveBridgePort(sessionName);
   const pidFile = resolveSessionPidFile(sessionName);
 
   // Check existing bridge via PID file. Use a deep probe so a bridge whose

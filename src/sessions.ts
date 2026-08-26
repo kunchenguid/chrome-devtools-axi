@@ -94,12 +94,32 @@ export function defaultPortForSession(name: string): number {
 export function resolveSessionPort(
   name: string = resolveSessionName(),
 ): number {
-  const explicit = process.env.CHROME_DEVTOOLS_AXI_PORT;
-  if (explicit) {
-    const parsed = Number.parseInt(explicit, 10);
-    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
-  }
+  const explicit = resolveExplicitSessionPort();
+  if (explicit !== null) return explicit;
   return defaultPortForSession(name);
+}
+
+/** Return a valid explicit bridge-port override, or null when it is unset. */
+export function resolveExplicitSessionPort(): number | null {
+  const explicit = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  if (!explicit) return null;
+  const parsed = Number.parseInt(explicit, 10);
+  return !Number.isNaN(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** Resolve the TCP port from the configured browser URL, when it is parseable. */
+export function resolveBrowserPort(): number | null {
+  const raw = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.port) return Number.parseInt(url.port, 10);
+    if (url.protocol === "http:" || url.protocol === "ws:") return 80;
+    if (url.protocol === "https:" || url.protocol === "wss:") return 443;
+  } catch {
+    // Leave malformed URLs to chrome-devtools-mcp's existing validation path.
+  }
+  return null;
 }
 
 /**

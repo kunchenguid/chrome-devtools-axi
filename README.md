@@ -268,11 +268,13 @@ For both commands, `all` or an omitted `--type` returns every item.
 
 ## Configuration
 
-The bridge server port defaults to `9224`. Override it with an environment variable:
+The bridge server port defaults to `9224`. When `CHROME_DEVTOOLS_AXI_BROWSER_URL` uses the derived bridge port, chrome-devtools-axi automatically selects a free distinct bridge port. Override it with an environment variable:
 
 ```sh
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
+
+An explicit bridge port must differ from the configured browser/CDP port; a collision fails immediately without launching or replacing Chrome.
 
 Connect to an existing Chrome instance instead of launching one:
 
@@ -323,7 +325,7 @@ Each session name gets its own bridge process, port (auto-derived from the name,
 In the default `--isolated` and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` launch modes each bridge also launches its own Chrome, so concurrent sessions share neither browser state nor each other's stale-ref tracking.
 Sessions that attach to the same external browser - multiple `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1` sessions on one running Chrome, or the same `CHROME_DEVTOOLS_AXI_BROWSER_URL`/`wsEndpoint` - drive that shared browser and are isolated only at the bridge level, where the per-session generation counter does not prevent cross-talk.
 A session only isolates the bridge - the connection mode and profile are unchanged; combine with `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` for a persistent per-session profile.
-The default (unset) session keeps port 9224 and the legacy state paths below.
+The default (unset) session derives port 9224 and keeps the legacy state paths below; an attached browser already using 9224 causes only the bridge port to move automatically.
 
 Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.
 Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT` only inline per command.
