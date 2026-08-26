@@ -111,17 +111,18 @@ export async function findFreeBridgePort(
 export async function resolveBridgePort(
   sessionName: string = resolveSessionName(),
   findFreePort: FreeBridgePortResolver = findFreeBridgePort,
+  canBindPort: BridgePortAvailabilityProbe = canBindBridgePort,
 ): Promise<number> {
   const preferredPort = resolveSessionPort(sessionName);
   const browserEndpoint = resolveBrowserEndpoint();
-  if (
-    browserEndpoint === null ||
-    !browserEndpointUsesBridgeInterface(browserEndpoint.hostname) ||
-    preferredPort !== browserEndpoint.port
-  ) {
+  if (browserEndpoint === null || preferredPort !== browserEndpoint.port) {
     return preferredPort;
   }
   const browserPort = browserEndpoint.port;
+  const collidesLocally =
+    browserEndpointUsesBridgeInterface(browserEndpoint.hostname) ||
+    !(await canBindPort(preferredPort));
+  if (!collidesLocally) return preferredPort;
 
   if (resolveExplicitSessionPort() !== null) {
     throw new CdpError(
