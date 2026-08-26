@@ -7,11 +7,13 @@
  * Survives across short-lived CLI processes the same way the snapshot
  * generation counter does: a file in the active session's state dir.
  * `select_page` writes the caller-supplied id. `new_page` (open / newpage)
- * records the created tab only when that tool's own dump is unambiguous —
- * not a `list_pages` call, not `[selected]`, and not every `N:` line after
- * `## Pages`. An ambiguous dump clears the session id so the next
- * page-scoped call fails loud until an explicit `select_page`. `close_page`
- * of the selected id also clears it.
+ * records the created tab when exactly one complete row in that tool's own
+ * dump has a URL matching `args.url` — not a `list_pages` call, not
+ * `[selected]`, and not every `N:` line after `## Pages`. Title
+ * continuations, zero matches, and two matching URLs clear the session id
+ * so the next page-scoped call fails loud until an explicit `select_page`.
+ * Extra complete rows that do not match (for example `about:blank`) are
+ * ignored. `close_page` of the selected id also clears it.
  */
 
 import {
@@ -78,7 +80,7 @@ export function overlaySessionSelected<
  * Record routing after a successful browser-scoped tool. Never reads
  * `[selected]` — that marker is display-only on `list_pages`.
  *
- * `new_page` records only an unambiguous created id from its own dump.
+ * `new_page` records the unique complete row whose URL matches `args.url`.
  * Otherwise the session id is cleared (do not keep a prior dump guess).
  */
 export function rememberToolRouting(
@@ -91,7 +93,8 @@ export function rememberToolRouting(
     return;
   }
   if (name === "new_page") {
-    const created = createdPageIdFromNewPageDump(result);
+    const requested = typeof args.url === "string" ? args.url : "";
+    const created = createdPageIdFromNewPageDump(result, requested);
     if (created !== null) setSelectedPageId(created);
     else clearSelectedPageId();
     return;
@@ -145,23 +148,36 @@ function pageUrlFromLabel(rest: string): string {
   return body;
 }
 
+function urlsMatch(pageUrl: string, requested: string): boolean {
+  if (!requested) return false;
+  if (pageUrl === requested) return true;
+  const trimSlash = (url: string) =>
+    url.length > 1 && url.endsWith("/") ? url.slice(0, -1) : url;
+  return trimSlash(pageUrl) === trimSlash(requested);
+}
+
 /**
  * Created page id from a `new_page` dump, or null when the dump is
- * ambiguous. Only a single complete page row in the last `## Pages`
- * block (and no other `N:` lines) is unambiguous. Title continuations
- * such as `404: Not Found` are not page ids. Extra complete `N:` rows
- * (real extra tabs or a forged untitled URL) are also ambiguous — do
- * not take max-id. Extension pages are never routing targets.
+ * ambiguous. The created id is the unique complete row in the last
+ * `## Pages` block whose URL matches `requestedUrl`. Title continuations
+ * such as `404: Not Found` are not page ids and fail the dump. Extra
+ * complete rows that do not match (`about:blank`, another tab) are
+ * ignored. Two matching URLs, or none, leave the id unset. Extension
+ * pages are never routing targets. Does not read `[selected]` or walk
+ * `collapsePageRows`.
  */
-export function createdPageIdFromNewPageDump(text: string): number | null {
+export function createdPageIdFromNewPageDump(
+  text: string,
+  requestedUrl: string,
+): number | null {
   let inPages = false;
-  let completeIds: number[] = [];
+  let matchedIds: number[] = [];
   let incomplete = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (MCP_PAGES_HEADER.test(line)) {
       inPages = true;
-      completeIds = [];
+      matchedIds = [];
       incomplete = false;
       continue;
     }
@@ -178,10 +194,11 @@ export function createdPageIdFromNewPageDump(text: string): number | null {
       incomplete = true;
       continue;
     }
-    if (pageUrlFromLabel(rest).startsWith("chrome-extension:")) continue;
-    completeIds.push(id);
+    const pageUrl = pageUrlFromLabel(rest);
+    if (pageUrl.startsWith("chrome-extension:")) continue;
+    if (urlsMatch(pageUrl, requestedUrl)) matchedIds.push(id);
   }
   if (incomplete) return null;
-  if (completeIds.length !== 1) return null;
-  return completeIds[0];
+  if (matchedIds.length !== 1) return null;
+  return matchedIds[0];
 }

@@ -31,18 +31,35 @@ describe("selected page session-name validation", () => {
 });
 
 describe("createdPageIdFromNewPageDump", () => {
-  it("records a single complete untitled page row", () => {
+  it("records a single complete untitled page row matching args.url", () => {
     expect(
-      createdPageIdFromNewPageDump("## Pages\n1: https://new.example/"),
+      createdPageIdFromNewPageDump(
+        "## Pages\n1: https://new.example/",
+        "https://new.example/",
+      ),
     ).toBe(1);
   });
 
-  it("records a single complete titled page row from the N: prefix, not the title", () => {
+  it("records a single complete titled page row whose wrapper URL matches", () => {
     expect(
       createdPageIdFromNewPageDump(
         "## Pages\n1: Example Domain (https://new.example/) [selected]",
+        "https://new.example/",
       ),
     ).toBe(1);
+  });
+
+  it("records the matching URL when the dump also lists about:blank", () => {
+    expect(
+      createdPageIdFromNewPageDump(
+        [
+          "## Pages",
+          "1: about:blank",
+          "2: https://example.com/ [selected]",
+        ].join("\n"),
+        "https://example.com/",
+      ),
+    ).toBe(2);
   });
 
   it("does not treat a title continuation N: rest line as the created page id", () => {
@@ -51,11 +68,12 @@ describe("createdPageIdFromNewPageDump", () => {
         ["## Pages", "1: Error", "404: Not Found (https://example.com/)"].join(
           "\n",
         ),
+        "https://example.com/",
       ),
     ).toBeNull();
   });
 
-  it("leaves the id unset when extra complete N: rows make the dump ambiguous", () => {
+  it("leaves the id unset when no complete row URL matches args.url", () => {
     expect(
       createdPageIdFromNewPageDump(
         [
@@ -63,11 +81,25 @@ describe("createdPageIdFromNewPageDump", () => {
           "1: https://example.com/",
           "9: https://attacker.example/ [selected]",
         ].join("\n"),
+        "https://new.example/",
       ),
     ).toBeNull();
   });
 
-  it("does not take max-id from a titled new_page dump with an older tab", () => {
+  it("leaves the id unset when two complete rows both match args.url", () => {
+    expect(
+      createdPageIdFromNewPageDump(
+        [
+          "## Pages",
+          "1: https://example.com/",
+          "2: https://example.com/ [selected]",
+        ].join("\n"),
+        "https://example.com/",
+      ),
+    ).toBeNull();
+  });
+
+  it("records the unique matching URL even when an older tab is listed", () => {
     expect(
       createdPageIdFromNewPageDump(
         [
@@ -75,8 +107,9 @@ describe("createdPageIdFromNewPageDump", () => {
           "1: https://example.com/",
           "2: New (https://new.example/) [selected]",
         ].join("\n"),
+        "https://new.example/",
       ),
-    ).toBeNull();
+    ).toBe(2);
   });
 
   it("ignores chrome-extension: rows so they cannot become the created id", () => {
@@ -88,6 +121,7 @@ describe("createdPageIdFromNewPageDump", () => {
           "## Extension Pages",
           "9: chrome-extension://abc/popup.html [selected]",
         ].join("\n"),
+        "https://example.com/",
       ),
     ).toBe(1);
   });
@@ -163,6 +197,18 @@ describe("selected page persistence", () => {
       "## Pages\n1: https://new.example/",
     );
     expect(getSelectedPageId()).toBe(1);
+  });
+
+  it("rememberToolRouting records the matching URL from a two-row about:blank dump", () => {
+    withTmpSession();
+    rememberToolRouting(
+      "new_page",
+      { url: "https://example.com/" },
+      ["## Pages", "1: about:blank", "2: https://example.com/ [selected]"].join(
+        "\n",
+      ),
+    );
+    expect(getSelectedPageId()).toBe(2);
   });
 
   it("rememberToolRouting clears a prior id when the new_page dump is ambiguous", () => {

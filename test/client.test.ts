@@ -838,6 +838,38 @@ describe("callTool pageId routing", () => {
     });
   });
 
+  it("records a two-row about:blank plus args.url dump so later snapshot works", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("new_page", { url: "https://example.com/" });
+        await callTool("take_snapshot");
+        await callTool("evaluate_script", { function: "() => 1" });
+        await callTool("click", { uid: "12" });
+        await callTool("fill", { uid: "3", value: "hello" });
+        expect(fake.calls).toEqual([
+          { name: "new_page", args: { url: "https://example.com/" } },
+          { name: "take_snapshot", args: { pageId: 2 } },
+          {
+            name: "evaluate_script",
+            args: { function: "() => 1", pageId: 2 },
+          },
+          { name: "click", args: { uid: "12", pageId: 2 } },
+          { name: "fill", args: { uid: "3", value: "hello", pageId: 2 } },
+        ]);
+      },
+      {
+        listPages: "## Pages\n1: about:blank [selected]",
+        toolResults: {
+          new_page: [
+            "## Pages",
+            "1: about:blank",
+            "2: https://example.com/ [selected]",
+          ].join("\n"),
+        },
+      },
+    );
+  });
+
   it("records a single-row new_page dump so a later snapshot does not read list_pages", async () => {
     await withFakeBridge(
       async (fake) => {
@@ -884,7 +916,30 @@ describe("callTool pageId routing", () => {
     );
   });
 
-  it("leaves routing unset when extra complete N: rows make the new_page dump ambiguous", async () => {
+  it("leaves routing unset when two complete rows both match args.url", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("new_page", { url: "https://example.com/" });
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          message: "No page is currently selected",
+        });
+        expect(fake.calls).toEqual([
+          { name: "new_page", args: { url: "https://example.com/" } },
+        ]);
+      },
+      {
+        toolResults: {
+          new_page: [
+            "## Pages",
+            "1: https://example.com/",
+            "2: https://example.com/ [selected]",
+          ].join("\n"),
+        },
+      },
+    );
+  });
+
+  it("leaves routing unset when no complete row URL matches args.url", async () => {
     await withFakeBridge(
       async (fake) => {
         await callTool("new_page", { url: "https://new.example/" });
