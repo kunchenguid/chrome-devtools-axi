@@ -1072,6 +1072,23 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("does not inject an earlier titled data: URL with ` (` as pageId", async () => {
+    await withFakeBridge(
+      [
+        "## Pages",
+        "0: Preview (data:text/html,<h1>Hi (there)</h1>)",
+        "1: Example (https://example.com/) [selected]",
+      ].join("\n"),
+      async (fake) => {
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "list_pages", args: {} },
+          { name: "take_snapshot", args: { pageId: 1 } },
+        ]);
+      },
+    );
+  });
+
   it("getSessionSnapshotIfRunning snapshots the selected pageId", async () => {
     await withFakeBridge(
       "## Pages\n3: https://example.com/ [selected]",

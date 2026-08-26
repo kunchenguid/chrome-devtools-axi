@@ -125,8 +125,11 @@ function stripPageSuffixes(rest: string): string {
 }
 
 /**
- * Last MCP ` (<url>)` wrapper on a titled row. Walks from the final `)` so a
- * title that itself contains `(https://…)` is not mistaken for the page URL.
+ * Last MCP ` (<url>)` wrapper on a titled row. Walks ` (` candidates
+ * backward from the final `)` so a URL that itself contains ` (` (data:
+ * HTML like `Hi (there)`, or `file://…/My Folder (work)`) is not peeled
+ * as a non-scheme slice. A title that contains `(https://…)` still loses
+ * to the later scheme wrapper; `Foo_(bar)` wins on the first try.
  */
 function matchTrailingUrl(
   label: string,
@@ -134,11 +137,17 @@ function matchTrailingUrl(
   const trimmed = label.trimEnd();
   if (!trimmed.endsWith(")")) return null;
   const close = trimmed.length - 1;
-  const open = trimmed.lastIndexOf(" (");
-  if (open === -1) return null;
-  const url = trimmed.slice(open + 2, close);
-  if (!isPageSchemeUrl(url)) return null;
-  return { title: trimmed.slice(0, open), url };
+  let from = close;
+  while (from > 0) {
+    const open = trimmed.lastIndexOf(" (", from - 1);
+    if (open === -1) return null;
+    const url = trimmed.slice(open + 2, close);
+    if (isPageSchemeUrl(url)) {
+      return { title: trimmed.slice(0, open), url };
+    }
+    from = open;
+  }
+  return null;
 }
 
 function hasSchemeUrl(label: string): boolean {

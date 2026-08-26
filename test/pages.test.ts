@@ -179,6 +179,26 @@ describe("parsePagesList", () => {
     ]);
   });
 
+  it("peels a titled data: or file:// URL that contains ` (` in the path", () => {
+    const result = parsePagesList(
+      [
+        "## Pages",
+        "0: Preview (data:text/html,<h1>Hi (there)</h1>)",
+        "1: Notes (file:///tmp/My Folder (work)/index.html)",
+        "2: Example (https://example.com/) [selected]",
+      ].join("\n"),
+    );
+    expect(result).toEqual([
+      { id: 0, url: "data:text/html,<h1>Hi (there)</h1>", selected: false },
+      {
+        id: 1,
+        url: "file:///tmp/My Folder (work)/index.html",
+        selected: false,
+      },
+      { id: 2, url: "https://example.com/", selected: true },
+    ]);
+  });
+
   it("joins a title newline so [selected] still attaches to the page id", () => {
     const result = parsePagesList(
       "## Pages\n1: Hello\nWorld (https://example.com/) [selected]",
@@ -568,6 +588,18 @@ describe("parseSelectedPageId", () => {
           "## Pages",
           "0: blob:https://example.com/abc",
           "1: https://example.com/ [selected]",
+        ].join("\n"),
+      ),
+    ).toBe(1);
+  });
+
+  it("does not fold a later [selected] page into a titled data: URL with ` (`", () => {
+    expect(
+      parseSelectedPageId(
+        [
+          "## Pages",
+          "0: Preview (data:text/html,<h1>Hi (there)</h1>)",
+          "1: Example (https://example.com/) [selected]",
         ].join("\n"),
       ),
     ).toBe(1);
