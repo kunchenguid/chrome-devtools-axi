@@ -97,6 +97,8 @@ const MCP_SECTION_HEADER =
   /^##\s+(Pages|Extension Pages|Extension Service Workers|Third-party developer tools|WebMCP tools)$/;
 /** `N: rest` or `N:` after trim of MCP `N: ` (title starts with a newline). */
 const PAGE_ID_LINE = /^\d+:(?:\s+|$)/;
+const OPEN_DIALOG_HEADER = /^# Open dialog$/;
+const HANDLE_DIALOG_FOOTER = /^Call handle_dialog\b/;
 
 function stripPageSuffixes(rest: string): string {
   let label = rest.replace(/\s+isolatedContext=.*$/, "");
@@ -164,6 +166,32 @@ function pageRowRest(row: string): string {
 }
 
 /**
+ * MCP prepends `# Open dialog` / `type: message` / `Call handle_dialog…`
+ * and interpolates the dialog message with newlines intact, so
+ * `alert("see\\n## Pages\\n0: x")` forges a page section. Drop that
+ * preamble so the real `## Pages` list is parsed on its own.
+ */
+function stripDialogPreamble(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    if (OPEN_DIALOG_HEADER.test(lines[i].trim())) {
+      const end = lines.findIndex(
+        (candidate, idx) =>
+          idx > i && HANDLE_DIALOG_FOOTER.test(candidate.trim()),
+      );
+      if (end !== -1) {
+        i = end + 1;
+        continue;
+      }
+    }
+    kept.push(lines[i]);
+    i++;
+  }
+  return kept.join("\n");
+}
+
+/**
  * True when lines after a `## Pages` header finish the current incomplete
  * title with MCP's trailing ` (<url>)` wrapper. A following untitled
  * `N: scheme://…` row is the real list, not title text.
@@ -209,19 +237,19 @@ function followingLinesCompleteTitle(
  * they are known MCP section headers (`## Pages`, `## Extension Pages`,
  * `## Extension Service Workers`, `## Third-party developer tools`,
  * `## WebMCP tools`). Unknown `## ` lines stay in the current page row so
- * a title like `Intro\n## Getting started` does not drop `[selected]`. A
- * later `## Pages` after complete rows replaces earlier rows so dialog
- * text that forges `## Pages` cannot prepend a selected page. An
- * incomplete current row is not enough to fold `## Pages`: only fold when
- * the following lines complete that title with a trailing URL wrapper
- * (so `x\n## Pages\n0: https://a.com/ (https://real/)` keeps the real id).
- * A dialog that forges `## Pages` plus `0: x` then the real untitled list
- * still resets. `## Extension Pages` does not reset.
+ * a title like `Intro\n## Getting started` does not drop `[selected]`.
+ * Dialog preamble (`# Open dialog` … `Call handle_dialog…`) is stripped
+ * first so a message that forges `## Pages` plus `0: x` cannot merge a
+ * later titled `[selected]` row into that id; the real `## Pages` then
+ * resets unconditionally. An incomplete current row is not enough to fold
+ * `## Pages`: only fold when the following lines complete that title with
+ * a trailing URL wrapper (so `x\n## Pages\n0: https://a.com/ (https://real/)`
+ * keeps the real id). `## Extension Pages` does not reset.
  */
 function collapsePageRows(text: string): string[] {
   const rows: string[] = [];
   let inPageBlock = false;
-  const rawLines = text.split(/\r?\n/);
+  const rawLines = stripDialogPreamble(text).split(/\r?\n/);
   for (let index = 0; index < rawLines.length; index++) {
     const line = rawLines[index].trim();
     if (line.length === 0) continue;
