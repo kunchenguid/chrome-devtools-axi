@@ -219,7 +219,7 @@ function startFakeToolBridgeServer(): Promise<{
       let result = "ok";
       if (payload.name === "list_pages") {
         result = [
-          `1: First page (https://first.example.test)${selectedPageId === 1 ? " [selected]" : ""}`,
+          `1: First page (https://first.example.test)${selectedPageId === 1 ? " [selected] isolatedContext=my context name" : ""}`,
           `2: Second page (https://second.example.test)${selectedPageId === 2 ? " [selected]" : ""}`,
         ].join("\n");
       } else if (payload.name === "new_page") {

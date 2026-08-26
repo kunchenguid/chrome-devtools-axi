@@ -83,6 +83,15 @@ describe("parsePagesList", () => {
     ]);
   });
 
+  it("recognizes selected pages when isolatedContext contains spaces", () => {
+    const result = parsePagesList(
+      "## Pages\n1: Title (https://example.com/) [selected] isolatedContext=my context name",
+    );
+    expect(result).toEqual([
+      { id: 1, url: "https://example.com/", selected: true },
+    ]);
+  });
+
   it("parses multiple pages", () => {
     const result = parsePagesList(
       "## Pages\n0: https://a.com/\n1: https://b.com/ [selected]",
