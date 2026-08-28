@@ -13,7 +13,9 @@
  * continuations, zero matches, and two matching URLs clear the session id
  * so the next page-scoped call fails loud until an explicit `select_page`.
  * Extra complete rows that do not match (for example `about:blank`) are
- * ignored. `close_page` of the selected id also clears it.
+ * ignored. `close_page` of the selected id also clears it, and so does the
+ * bridge when chrome-devtools-mcp reports a browser reconnect that reissues
+ * every page id (`didMcpPageIdentityChange` in `src/bridge.ts`).
  */
 
 import {
