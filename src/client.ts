@@ -169,6 +169,9 @@ function httpPost(
  * `CHROME_DEVTOOLS_AXI_PORT`). A bridge that omits the field (older version) is
  * accepted, since there is no mismatch to detect.
  *
+ * A healthy deep probe also records the bridge's `pageIdentityChanged` flag for
+ * this process (see {@link takePageIdentityChangeNotice}).
+ *
  * Exported for tests; production code uses it via `ensureBridge`.
  */
 export async function checkBridgeHealth(
@@ -188,10 +191,40 @@ export async function checkBridgeHealth(
     ) {
       return false;
     }
+    if (opts.deep) {
+      recordPageIdentityChangeNotice(data.pageIdentityChanged === true);
+    }
     return true;
   } catch {
     return false;
   }
+}
+
+let pageIdentityChangeNotice = false;
+
+function recordPageIdentityChangeNotice(changed: boolean): void {
+  pageIdentityChangeNotice = changed;
+}
+
+/**
+ * Consume this invocation's reconnect notice: whether the deep probe that ran
+ * for this command reported that chrome-devtools-mcp had reissued every page
+ * id.
+ *
+ * `ensureBridge` deep-probes before every command, and that probe's
+ * `list_pages` is what consumes chrome-devtools-mcp's one-shot reconnect
+ * marker and clears the persisted selection - so without this relay the
+ * command that follows finds no selection and blames the caller for never
+ * selecting a page. The signal stays one-shot in the same spirit as the marker
+ * it relays: every deep probe overwrites it (a later probe that sees no
+ * reconnect resets it to false) and reading it consumes it, so it explains
+ * only the failure immediately after the reconnect instead of relabelling
+ * every no-selection error for the rest of the process.
+ */
+function takePageIdentityChangeNotice(): boolean {
+  const changed = pageIdentityChangeNotice;
+  pageIdentityChangeNotice = false;
+  return changed;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -408,6 +441,9 @@ export async function ensureBridge(
   // MCP page ids reset with a new process; a leftover session id would
   // target the wrong tab (or none). Keep the file when reusing a live bridge.
   clearSelectedPageId();
+  // This selection is dropped by the respawn, not by a browser reconnect, so
+  // the next page-scoped call must report the plain no-selection error.
+  recordPageIdentityChangeNotice(false);
 
   // Start a new bridge
   const child = spawnBridge(port, sessionName);
@@ -577,10 +613,17 @@ export function collectRootDirs(
  * nothing has been selected — AXI will not guess a pageId from
  * `list_pages` `[selected]` (titles/dialogs can forge that marker), and
  * chrome-devtools-mcp 1.8+ will not either (`Required at pageId`).
+ *
+ * When this invocation's deep probe reported a browser reconnect, the missing
+ * selection is that reconnect's doing rather than the caller's, so the error
+ * names it. The two cases stay distinct: a session that never selected a page,
+ * or whose bridge was just respawned, still gets the plain message.
  */
 function resolveSelectedPageId(): number {
+  const reconnected = takePageIdentityChangeNotice();
   const pageId = getSelectedPageId();
   if (pageId === null) {
+    if (reconnected) throw pageIdentityClearedError();
     throw new CdpError("No page is currently selected", "BROWSER_ERROR", [
       "Run `chrome-devtools-axi open <url>` to open a page",
       "Run `chrome-devtools-axi pages` to list tabs",
@@ -703,11 +746,33 @@ function missingPageError(pageId: number | null): CdpError {
   );
 }
 
+const PAGE_IDENTITY_SUGGESTIONS = [
+  "Run `chrome-devtools-axi pages` to list the current tabs and their new ids",
+  "Run `chrome-devtools-axi selectpage <id>` to re-select a tab after the reconnect, then retry",
+];
+
 function pageIdentityChangedError(): CdpError {
-  return new CdpError(PAGE_IDENTITY_CHANGED_ERROR, "BROWSER_ERROR", [
-    "Run `chrome-devtools-axi pages` to list the current tabs and their new ids",
-    "Run `chrome-devtools-axi selectpage <id>` to select a tab, then retry",
-  ]);
+  return new CdpError(
+    PAGE_IDENTITY_CHANGED_ERROR,
+    "BROWSER_ERROR",
+    PAGE_IDENTITY_SUGGESTIONS,
+  );
+}
+
+/**
+ * The reconnect already happened before this command ran: the deep probe
+ * consumed the marker and dropped the routing it invalidated, so nothing was
+ * sent to a wrong tab and there is nothing to retarget — the caller just has
+ * to re-select. Keeps the `BROWSER_ERROR` code and the "no page" clause of the
+ * plain no-selection message so `open`'s existing recovery still applies (it
+ * creates a new tab; see AGENTS.md).
+ */
+function pageIdentityClearedError(): CdpError {
+  return new CdpError(
+    "The browser reconnected and every page id changed, so no page is currently selected",
+    "BROWSER_ERROR",
+    PAGE_IDENTITY_SUGGESTIONS,
+  );
 }
 
 export function mapErrorMessage(message: string): CdpError {

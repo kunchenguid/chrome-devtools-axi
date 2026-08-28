@@ -897,6 +897,13 @@ describe("handleBridgeRequest /health", () => {
 
       expect(captured.statusCode).toBe(200);
       expect(getSelectedPageId()).toBeNull();
+      // The probe consumed the marker, so the response is the only way the
+      // CLI can tell this cleared selection from one never made.
+      expect(JSON.parse(captured.body)).toEqual({
+        status: "ok",
+        session: "reconnect-worker",
+        pageIdentityChanged: true,
+      });
     } finally {
       if (savedHome === undefined) delete process.env.HOME;
       else process.env.HOME = savedHome;

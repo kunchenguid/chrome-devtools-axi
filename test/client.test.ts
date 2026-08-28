@@ -15,8 +15,11 @@ import { dirname, join } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  createBridgeServer,
   PAGE_IDENTITY_CHANGED_ERROR,
+  type BridgeClient,
 } from "../src/bridge.js";
+import { setSelectedPageId } from "../src/selected-page.js";
 import {
   buildBridgeEarlyExitError,
   callTool,
@@ -1252,6 +1255,140 @@ describe("callTool pageId routing", () => {
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("reconnect reporting through the deep health probe", () => {
+  const RECONNECT_NOTICE =
+    "Note: the browser was restarted or reconnected since the last call. Page ids have changed. Call list_pages to see open pages.";
+  const RECONNECT_MESSAGE =
+    "The browser reconnected and every page id changed, so no page is currently selected";
+
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  const savedHome = process.env.HOME;
+  const savedPort = process.env.CHROME_DEVTOOLS_AXI_PORT;
+  let tmpHome = "";
+
+  const restore = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
+  /**
+   * Drive `callTool` against the real bridge server, so the reconnect signal
+   * travels the whole production path: the deep probe's `list_pages` sees
+   * chrome-devtools-mcp's one-shot marker, the bridge clears the persisted
+   * selection and reports it on `/health?deep=1`, and the CLI decides which
+   * error to raise from that response alone.
+   *
+   * `reconnectOnCall` picks which MCP round-trips carry the marker (1-based,
+   * counting every tool call the bridge makes, deep probes included).
+   */
+  async function withRealBridge(
+    reconnectOnCall: (call: number) => boolean,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-reconnect-cli-"));
+    process.env.HOME = tmpHome;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "reconnect-cli";
+    let mcpCalls = 0;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        mcpCalls += 1;
+        const pages = "## Pages\n0: about:blank";
+        return {
+          content: [
+            {
+              type: "text",
+              text: reconnectOnCall(mcpCalls)
+                ? `${RECONNECT_NOTICE}\n${pages}`
+                : pages,
+            },
+          ],
+        };
+      },
+      close: async () => {},
+    };
+    const server = createBridgeServer(client, "reconnect-cli");
+    try {
+      await new Promise<void>((ready) => {
+        server.listen(0, "127.0.0.1", ready);
+      });
+      const { port } = server.address() as AddressInfo;
+      process.env.CHROME_DEVTOOLS_AXI_PORT = String(port);
+      const pidFile = resolveSessionPidFile("reconnect-cli");
+      mkdirSync(dirname(pidFile), { recursive: true });
+      writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port }));
+      await run();
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
+  }
+
+  afterEach(() => {
+    restore("CHROME_DEVTOOLS_AXI_SESSION", savedSession);
+    restore("HOME", savedHome);
+    restore("CHROME_DEVTOOLS_AXI_PORT", savedPort);
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("names the reconnect on the page-scoped call whose selection the deep probe just dropped", async () => {
+    // Only the first MCP round-trip - this command's deep probe - reconnects.
+    await withRealBridge(
+      (call) => call === 1,
+      async () => {
+        setSelectedPageId(4);
+
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: RECONNECT_MESSAGE,
+          suggestions: expect.arrayContaining([
+            "Run `chrome-devtools-axi selectpage <id>` to re-select a tab after the reconnect, then retry",
+          ]),
+        });
+
+        // One-shot: the next command's deep probe sees no reconnect, so the
+        // still-unselected session falls back to the plain message rather
+        // than blaming a reconnect that is now history.
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          code: "BROWSER_ERROR",
+          message: "No page is currently selected",
+        });
+      },
+    );
+  });
+
+  it("keeps the plain no-selection message for a session that never selected a page", async () => {
+    await withRealBridge(
+      () => false,
+      async () => {
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "No page is currently selected",
+          suggestions: expect.arrayContaining([
+            "Run `chrome-devtools-axi open <url>` to open a page",
+          ]),
+        });
+      },
+    );
+  });
+
+  it("routes normally once a page is selected after the reconnect", async () => {
+    await withRealBridge(
+      (call) => call === 1,
+      async () => {
+        setSelectedPageId(4);
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          message: RECONNECT_MESSAGE,
+        });
+
+        await callTool("select_page", { pageId: 11 });
+        expect(await callTool("take_snapshot")).toContain("## Pages");
+      },
+    );
   });
 });
 

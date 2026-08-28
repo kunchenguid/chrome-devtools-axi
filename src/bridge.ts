@@ -6,7 +6,9 @@
  *   POST /call  { name, args }  → { result }
  *   GET  /tools                 → [{ name, description }]
  *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
- *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason
+ *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason,
+ *                                 200 adds pageIdentityChanged when the probe consumed
+ *                                 chrome-devtools-mcp's one-shot reconnect marker
  *
  * Writes a PID file to the active session's state dir on startup
  * (~/.chrome-devtools-axi/bridge.pid for the default session; named sessions
@@ -121,7 +123,10 @@ export async function isBridgeClientConnected(
  * {@link didMcpPageIdentityChange}) rather than only its own reachability:
  * `ensureBridge` deep-probes before every command, so after an in-process
  * browser reconnect this `list_pages` is the first call to see the marker and
- * consumes it, leaving none for the `/call` that follows.
+ * consumes it, leaving none for the `/call` that follows. `/health?deep=1`
+ * therefore relays the marker to the CLI as `pageIdentityChanged`, which is
+ * the only way the invoking process can tell a selection the reconnect just
+ * dropped apart from one that was never made.
  */
 export async function isBridgeTargetReachable(
   client: BridgeClient,
@@ -521,6 +526,7 @@ export async function handleBridgeRequest(
         return;
       }
       const deep = req.url.includes("deep=1");
+      let pageIdentityChanged = false;
       if (deep) {
         const probe = await isBridgeTargetReachable(client);
         if (!probe.ok) {
@@ -531,9 +537,17 @@ export async function handleBridgeRequest(
           });
           return;
         }
-        if (probe.pageIdentityChanged) onPageIdentityChanged?.();
+        pageIdentityChanged = probe.pageIdentityChanged;
+        if (pageIdentityChanged) onPageIdentityChanged?.();
       }
-      writeJson(res, 200, { status: "ok", session: sessionName });
+      // Reported only when the probe actually consumed the marker, so a
+      // shallow probe's body is unchanged and the CLI reads its absence as
+      // "no reconnect" rather than "old bridge".
+      writeJson(res, 200, {
+        status: "ok",
+        session: sessionName,
+        ...(pageIdentityChanged ? { pageIdentityChanged: true } : {}),
+      });
       return;
     }
 
