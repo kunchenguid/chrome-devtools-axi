@@ -1094,6 +1094,31 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("keeps a live tab's routing when a different pageId is the one MCP cannot resolve", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("select_page", { pageId: 3 });
+        await expect(
+          callTool("close_page", { pageId: 9 }),
+        ).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "Page 9 is no longer available",
+        });
+        // Page 3 is still open, so its routing must survive page 9's failure.
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "select_page", args: { pageId: 3 } },
+          { name: "close_page", args: { pageId: 9 } },
+          { name: "take_snapshot", args: { pageId: 3 } },
+        ]);
+      },
+      {
+        toolErrors: { close_page: "Error: No page found" },
+      },
+    );
+  });
+
   it("clears the selection when MCP reports the selected page was closed", async () => {
     await withFakeBridge(
       async (fake) => {
