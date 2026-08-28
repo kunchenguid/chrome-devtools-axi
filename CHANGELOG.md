@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.33](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.32...chrome-devtools-axi-v0.1.33) (2026-08-28)
+
+
+### Bug Fixes
+
+* **bridge:** invalidate page routing after a browser reconnect ([#124](https://github.com/kunchenguid/chrome-devtools-axi/issues/124)) ([be54e07](https://github.com/kunchenguid/chrome-devtools-axi/commit/be54e07fafa198e8a90719a1bb381f9e9f23c17f))
+* **bridge:** name the browser reconnect on the next page-scoped call ([#126](https://github.com/kunchenguid/chrome-devtools-axi/issues/126)) ([52e5b31](https://github.com/kunchenguid/chrome-devtools-axi/commit/52e5b311a610e154651fa657ee8308fe7877f6e6))
+
 ## [0.1.32](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.31...chrome-devtools-axi-v0.1.32) (2026-08-28)
 
 
