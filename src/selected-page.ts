@@ -61,6 +61,17 @@ export function setSelectedPageId(pageId: number): void {
  * dropped, so a caller reacting to a browser reconnect can tell a session
  * that lost its page from one that never had one. A missing or malformed
  * file counts as no routing.
+ *
+ * The answer is the read-back post-condition, never the pre-delete state: an
+ * unlink that fails (a read-only state dir) leaves an id `getSelectedPageId`
+ * still returns, so the next page-scoped call injects it. Reporting a drop
+ * there would tell the bridge - and through `/health` the CLI - that routing
+ * is gone while it is still resolvable, and the reconnect marker that would
+ * have re-detected it is one-shot and already consumed. Reporting no drop
+ * instead keeps the surviving id and the reported state in agreement: the
+ * stale id fails loud on its next use (upstream issues page ids from a
+ * monotonic counter, so it resolves to nothing) rather than being explained
+ * away as a reconnect that dropped it.
  */
 export function clearSelectedPageId(): boolean {
   const hadSelection = getSelectedPageId() !== null;
@@ -68,9 +79,9 @@ export function clearSelectedPageId(): boolean {
   try {
     if (existsSync(file)) unlinkSync(file);
   } catch {
-    // ignore
+    // Fall through to the read-back: it, not this catch, decides the answer.
   }
-  return hadSelection;
+  return hadSelection && getSelectedPageId() === null;
 }
 
 /**

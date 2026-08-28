@@ -1360,6 +1360,28 @@ describe("reconnect reporting through the deep health probe", () => {
     );
   });
 
+  it("does not relabel a later call when the notice's own call never resolved routing", async () => {
+    // The deep probe for `pages` drops the selection and reports it, but
+    // `list_pages` needs no pageId, so that command never uses the notice.
+    // Ownership is per call: the *next* command's probe sees no reconnect, so
+    // it must say the session has nothing selected rather than inherit an
+    // attribution that was collected for a different operation.
+    await withRealBridge(
+      (call) => call === 1,
+      async () => {
+        setSelectedPageId(4);
+
+        expect(await callTool("list_pages")).toContain("## Pages");
+
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "No page is currently selected",
+        });
+      },
+    );
+  });
+
   it("keeps the plain no-selection message for a session that never selected a page", async () => {
     await withRealBridge(
       () => false,
