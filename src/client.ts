@@ -172,7 +172,7 @@ function httpPost(
  * A healthy deep probe also records the bridge's `pageIdentityChanged` flag for
  * this process (see {@link takePageIdentityChangeNotice}).
  *
- * Exported for tests; production code uses it via `ensureBridge`.
+ * Exported for tests; production code uses it via {@link ensureBridge}.
  */
 export async function checkBridgeHealth(
   port: number,
@@ -209,7 +209,9 @@ function recordPageIdentityChangeNotice(changed: boolean): void {
 /**
  * Consume this invocation's reconnect notice: whether the deep probe that ran
  * for this command reported that chrome-devtools-mcp had reissued every page
- * id.
+ * id *and* that this took a selection with it. The bridge gates the flag on
+ * the clear having removed an id, so a session that never selected a page is
+ * never told it lost one.
  *
  * `ensureBridge` deep-probes before every command, and that probe's
  * `list_pages` is what consumes chrome-devtools-mcp's one-shot reconnect
@@ -219,7 +221,8 @@ function recordPageIdentityChangeNotice(changed: boolean): void {
  * it relays: every deep probe overwrites it (a later probe that sees no
  * reconnect resets it to false) and reading it consumes it, so it explains
  * only the failure immediately after the reconnect instead of relabelling
- * every no-selection error for the rest of the process.
+ * every no-selection error for the rest of the process. A process that never
+ * makes a page-scoped call (`pages`, the home view probe) simply drops it.
  */
 function takePageIdentityChangeNotice(): boolean {
   const changed = pageIdentityChangeNotice;
@@ -440,10 +443,10 @@ export async function ensureBridge(
 
   // MCP page ids reset with a new process; a leftover session id would
   // target the wrong tab (or none). Keep the file when reusing a live bridge.
+  // Clearing here is also why a respawn never reports a reconnect: the new
+  // bridge's first deep probe finds no selection left to drop, so its 200
+  // omits `pageIdentityChanged` and the poll loop below records no notice.
   clearSelectedPageId();
-  // This selection is dropped by the respawn, not by a browser reconnect, so
-  // the next page-scoped call must report the plain no-selection error.
-  recordPageIdentityChangeNotice(false);
 
   // Start a new bridge
   const child = spawnBridge(port, sessionName);
@@ -766,8 +769,12 @@ function pageIdentityChangedError(): CdpError {
  * to re-select. Keeps the `BROWSER_ERROR` code and the "no page" clause of the
  * plain no-selection message so `open`'s existing recovery still applies (it
  * creates a new tab; see AGENTS.md).
+ *
+ * Exported so the `open` / `page.open` recovery tests build their rejection
+ * from the message this ships rather than a copy of it, which is what makes
+ * them fail if a reword breaks that match.
  */
-function pageIdentityClearedError(): CdpError {
+export function pageIdentityClearedError(): CdpError {
   return new CdpError(
     "The browser reconnected and every page id changed, so no page is currently selected",
     "BROWSER_ERROR",

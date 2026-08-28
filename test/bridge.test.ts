@@ -904,6 +904,24 @@ describe("handleBridgeRequest /health", () => {
         session: "reconnect-worker",
         pageIdentityChanged: true,
       });
+
+      // Same reconnect, but this session had no routing to lose: reporting it
+      // would invent a loss the caller never suffered.
+      const second = makeResponse();
+      await handleBridgeRequest(
+        client,
+        makeRequest("GET", "/health?deep=1"),
+        second.res,
+        "reconnect-worker",
+        undefined,
+        clearSelectedPageId,
+      );
+
+      expect(second.captured.statusCode).toBe(200);
+      expect(JSON.parse(second.captured.body)).toEqual({
+        status: "ok",
+        session: "reconnect-worker",
+      });
     } finally {
       if (savedHome === undefined) delete process.env.HOME;
       else process.env.HOME = savedHome;

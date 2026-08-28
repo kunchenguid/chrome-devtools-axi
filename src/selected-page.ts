@@ -56,13 +56,21 @@ export function setSelectedPageId(pageId: number): void {
   }
 }
 
-export function clearSelectedPageId(): void {
+/**
+ * Drop this session's routing. Returns whether a usable id was actually
+ * dropped, so a caller reacting to a browser reconnect can tell a session
+ * that lost its page from one that never had one. A missing or malformed
+ * file counts as no routing.
+ */
+export function clearSelectedPageId(): boolean {
+  const hadSelection = getSelectedPageId() !== null;
   const file = selectedPageFile();
   try {
     if (existsSync(file)) unlinkSync(file);
   } catch {
     // ignore
   }
+  return hadSelection;
 }
 
 /**

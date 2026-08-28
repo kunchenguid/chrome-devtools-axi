@@ -28,6 +28,21 @@ import { main } from "../src/cli.js";
 import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
 import { setSelectedPageId } from "../src/selected-page.js";
 
+/**
+ * The reconnect-cleared error exactly as `src/client.ts` ships it, rebuilt on
+ * the mocked `CdpError` so `isRecoverableOpenError`'s `instanceof` still holds.
+ * Taking the message from production rather than copying it is the point: it
+ * is what `open`'s documented post-reconnect recovery is pinned on.
+ */
+async function reconnectClearedError(): Promise<CdpError> {
+  const actual =
+    await vi.importActual<typeof import("../src/client.js")>(
+      "../src/client.js",
+    );
+  const shipped = actual.pageIdentityClearedError();
+  return new CdpError(shipped.message, shipped.code, shipped.suggestions);
+}
+
 describe("main", () => {
   afterEach(() => {
     callTool.mockReset();
@@ -121,6 +136,35 @@ describe("main", () => {
     expect(String(write.mock.calls[0]?.[0])).toContain(
       'url: "https://airlockhq.com"',
     );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("recovers open by creating a page when a browser reconnect dropped the selection", async () => {
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    callTool
+      .mockRejectedValueOnce(await reconnectClearedError())
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
+
+    await main(["open", "https://airlockhq.com"]);
+
+    expect(callTool.mock.calls).toEqual([
+      ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
+      ["new_page", { url: "https://airlockhq.com" }],
+      ["take_snapshot"],
+      [
+        "evaluate_script",
+        {
+          function: expect.stringContaining(
+            "__chromeDevtoolsAxiSnapshotGeneration",
+          ),
+        },
+      ],
+    ]);
+    expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
     expect(process.exitCode).toBeUndefined();
   });
 

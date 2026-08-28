@@ -1376,6 +1376,21 @@ describe("reconnect reporting through the deep health probe", () => {
     );
   });
 
+  it("keeps the plain no-selection message when a reconnect finds no routing to drop", async () => {
+    // The browser really did reconnect, but this session never selected a
+    // page, so there is no loss to report - only the plain message is true.
+    await withRealBridge(
+      (call) => call === 1,
+      async () => {
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "No page is currently selected",
+        });
+      },
+    );
+  });
+
   it("routes normally once a page is selected after the reconnect", async () => {
     await withRealBridge(
       (call) => call === 1,

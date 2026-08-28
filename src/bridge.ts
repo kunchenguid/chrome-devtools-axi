@@ -8,7 +8,8 @@
  *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
  *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason,
  *                                 200 adds pageIdentityChanged when the probe consumed
- *                                 chrome-devtools-mcp's one-shot reconnect marker
+ *                                 chrome-devtools-mcp's one-shot reconnect marker *and*
+ *                                 that dropped a persisted page selection
  *
  * Writes a PID file to the active session's state dir on startup
  * (~/.chrome-devtools-axi/bridge.pid for the default session; named sessions
@@ -123,10 +124,9 @@ export async function isBridgeClientConnected(
  * {@link didMcpPageIdentityChange}) rather than only its own reachability:
  * `ensureBridge` deep-probes before every command, so after an in-process
  * browser reconnect this `list_pages` is the first call to see the marker and
- * consumes it, leaving none for the `/call` that follows. `/health?deep=1`
- * therefore relays the marker to the CLI as `pageIdentityChanged`, which is
- * the only way the invoking process can tell a selection the reconnect just
- * dropped apart from one that was never made.
+ * consumes it, leaving none for the `/call` that follows. `handleBridgeRequest`
+ * relays that to the CLI, which otherwise has no way to tell a selection the
+ * reconnect just dropped from one that was never made.
  */
 export async function isBridgeTargetReachable(
   client: BridgeClient,
@@ -450,7 +450,7 @@ async function handleCallRequest(
   client: BridgeClient,
   req: IncomingMessage,
   res: ServerResponse,
-  onPageIdentityChanged?: () => void,
+  onPageIdentityChanged?: () => boolean | void,
 ): Promise<void> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
@@ -496,7 +496,7 @@ export async function handleBridgeRequest(
   res: ServerResponse,
   sessionName?: string,
   logForbidden?: (message: string) => void,
-  onPageIdentityChanged?: () => void,
+  onPageIdentityChanged?: () => boolean | void,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -526,7 +526,7 @@ export async function handleBridgeRequest(
         return;
       }
       const deep = req.url.includes("deep=1");
-      let pageIdentityChanged = false;
+      let droppedSelection = false;
       if (deep) {
         const probe = await isBridgeTargetReachable(client);
         if (!probe.ok) {
@@ -537,16 +537,20 @@ export async function handleBridgeRequest(
           });
           return;
         }
-        pageIdentityChanged = probe.pageIdentityChanged;
-        if (pageIdentityChanged) onPageIdentityChanged?.();
+        // The marker alone only says the browser reconnected. Reporting that
+        // to a session with no routing would invent a loss, so the flag rides
+        // on the clear having actually removed an id.
+        if (probe.pageIdentityChanged) {
+          droppedSelection = onPageIdentityChanged?.() === true;
+        }
       }
-      // Reported only when the probe actually consumed the marker, so a
-      // shallow probe's body is unchanged and the CLI reads its absence as
-      // "no reconnect" rather than "old bridge".
+      // Absent on a shallow probe and on a reconnect that dropped nothing, so
+      // the CLI reads its absence as "no routing was lost" rather than "old
+      // bridge".
       writeJson(res, 200, {
         status: "ok",
         session: sessionName,
-        ...(pageIdentityChanged ? { pageIdentityChanged: true } : {}),
+        ...(droppedSelection ? { pageIdentityChanged: true } : {}),
       });
       return;
     }

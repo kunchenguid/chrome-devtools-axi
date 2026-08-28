@@ -36,6 +36,21 @@ import {
 const OPEN_INFO_RESPONSE =
   'Script ran on page and returned:\n```json\n{"url":"https://example.com","status":200}\n```';
 
+/**
+ * The reconnect-cleared error exactly as `src/client.ts` ships it, rebuilt on
+ * the mocked `CdpError` so `isRecoverableOpenError`'s `instanceof` still holds.
+ * Taking the message from production rather than copying it is the point: it
+ * is what `page.open`'s documented post-reconnect recovery is pinned on.
+ */
+async function reconnectClearedError(): Promise<CdpError> {
+  const actual =
+    await vi.importActual<typeof import("../src/client.js")>(
+      "../src/client.js",
+    );
+  const shipped = actual.pageIdentityClearedError();
+  return new CdpError(shipped.message, shipped.code, shipped.suggestions);
+}
+
 afterEach(() => {
   callTool.mockReset();
   process.exitCode = undefined;
@@ -128,6 +143,21 @@ describe("createPageHelper", () => {
       type: "url",
       url: "https://example.com",
     });
+    expect(callTool).toHaveBeenCalledWith("new_page", {
+      url: "https://example.com",
+    });
+    expect(result).toEqual({ url: "https://example.com", status: 200 });
+  });
+
+  it("page.open falls back to new_page when a browser reconnect dropped the selection", async () => {
+    callTool
+      .mockRejectedValueOnce(await reconnectClearedError())
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce(OPEN_INFO_RESPONSE);
+
+    const page = createPageHelper(callTool);
+    const result = await page.open("https://example.com");
+
     expect(callTool).toHaveBeenCalledWith("new_page", {
       url: "https://example.com",
     });
