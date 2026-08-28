@@ -1259,13 +1259,14 @@ describe("handleBridgeRequest /call error + roots", () => {
     const callWith = async (
       text: string,
       args: Record<string, unknown>,
-      extra: { isError?: boolean } = {},
+      extra: { isError?: boolean; name?: string } = {},
     ) => {
+      const { name = "take_snapshot", ...resultShape } = extra;
       const client: BridgeClient = {
         listTools: async () => ({ tools: [] }),
         callTool: async () => ({
           content: [{ type: "text", text }],
-          ...extra,
+          ...resultShape,
         }),
         close: async () => {},
       };
@@ -1276,7 +1277,7 @@ describe("handleBridgeRequest /call error + roots", () => {
           "POST",
           "/call",
           { host: "127.0.0.1:9224" },
-          JSON.stringify({ name: "take_snapshot", args }),
+          JSON.stringify({ name, args }),
         ),
         res,
         "reconnect-call",
@@ -1311,12 +1312,15 @@ describe("handleBridgeRequest /call error + roots", () => {
       expect(JSON.parse(genuine.body).result).toBeUndefined();
       expect(getSelectedPageId()).toBeNull();
 
-      // A call that named no page targeted no particular tab, so the home-view
-      // probe keeps rendering; only the routing is dropped.
+      // `list_pages` names no page, so it targeted no particular tab and still
+      // renders; only the routing is dropped. (The home view probe always
+      // sends its persisted pageId, so it takes the failing branch above and
+      // degrades to no page rather than rendering another tab.)
       setSelectedPageId(7);
       const unrouted = await callWith(
         `${reconnectNote}\n## Pages\n0: about:blank`,
         {},
+        { name: "list_pages" },
       );
       expect(unrouted.statusCode).toBe(200);
       expect(JSON.parse(unrouted.body).result).toContain("## Pages");

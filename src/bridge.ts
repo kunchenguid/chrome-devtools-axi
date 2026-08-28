@@ -459,8 +459,13 @@ async function handleCallRequest(
   // ("No page found", because page ids come from a monotonic counter) names a
   // missing page instead of the reconnect that caused it. Report the identity
   // boundary either way, ahead of the tool-error branch, so the caller
-  // re-selects rather than hunting for a closed tab. A call without a pageId
-  // (the home view probe) targeted no particular tab and is left alone.
+  // re-selects rather than hunting for a closed tab. Only a call that named no
+  // page - `list_pages`, `new_page` - targeted no particular tab and is left
+  // alone. The home view probe is NOT one of those: it always sends the
+  // persisted `pageId`, so after a reconnect it takes this branch, `postTool`
+  // throws, and `getSessionSnapshotIfRunning` degrades to no page. That
+  // degradation is intentional - rendering a snapshot resolved in a reissued
+  // id space is exactly the silent retarget this branch exists to prevent.
   if (pageIdentityChanged && typeof payload.args.pageId === "number") {
     writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
     return;
