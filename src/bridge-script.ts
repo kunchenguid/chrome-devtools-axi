@@ -2,10 +2,11 @@
  * Dependency-free bridge facts shared by the CLI and the bridge process.
  *
  * This module deliberately imports nothing but node builtins. `src/client.ts`
- * needs only these two symbols from the bridge, and `src/bridge.ts` statically
+ * needs only these few symbols from the bridge, and `src/bridge.ts` statically
  * imports the MCP SDK (~45ms). Keeping them here means every CLI invocation -
- * `--version`, `--help`, every command - resolves the bridge script and the
- * port-collision exit code without loading an MCP client it never constructs.
+ * `--version`, `--help`, every command - resolves the bridge script, the
+ * port-collision exit code and the page-identity error text without loading an
+ * MCP client it never constructs.
  * `test/version-path.test.ts` guards that property.
  */
 

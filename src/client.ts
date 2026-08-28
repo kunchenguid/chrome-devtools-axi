@@ -221,8 +221,11 @@ function recordPageIdentityChangeNotice(changed: boolean): void {
  * it relays: every deep probe overwrites it (a later probe that sees no
  * reconnect resets it to false) and reading it consumes it, so it explains
  * only the failure immediately after the reconnect instead of relabelling
- * every no-selection error for the rest of the process. A process that never
- * makes a page-scoped call (`pages`, the home view probe) simply drops it.
+ * every no-selection error for the rest of the process. A process that
+ * resolves no selection simply drops it: `pages` only calls `list_pages`, and
+ * the home view probe records no notice at all, since its own health check is
+ * shallow and its `take_snapshot` carries the persisted id without coming
+ * through here.
  */
 function takePageIdentityChangeNotice(): boolean {
   const changed = pageIdentityChangeNotice;
