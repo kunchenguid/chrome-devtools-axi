@@ -907,6 +907,33 @@ describe("handleBridgeRequest /health", () => {
     }
   });
 
+  it("answers 500 instead of rejecting when the identity callback throws on a deep probe", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({
+        content: [{ type: "text", text: reconnectResponseBody() }],
+      }),
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await expect(
+      handleBridgeRequest(
+        client,
+        makeRequest("GET", "/health?deep=1"),
+        res,
+        "reconnect-throws",
+        undefined,
+        () => {
+          throw new Error("state dir is gone");
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(captured.statusCode).toBe(500);
+    expect(JSON.parse(captured.body).error).toContain("state dir is gone");
+  });
+
   it("returns 200 from /health?deep=1 when both MCP and CDP target are healthy", async () => {
     let listPagesCalls = 0;
     const client: BridgeClient = {

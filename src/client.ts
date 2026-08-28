@@ -650,8 +650,17 @@ const MCP_CLOSED_PAGE_LINE_PREFIX = "The selected page has been closed.";
  * not resolve. The body is the *whole* flattened MCP response, and page-owned
  * strings upstream interpolates verbatim (a dialog message, a title) may carry
  * raw newlines, so any line in the middle of the body can be page-controlled.
- * Only the final non-empty line is consulted, so a live page cannot forge the
- * loss of its own routing.
+ * Only the final non-empty line is consulted, which rules those out.
+ *
+ * It does NOT make the marker unforgeable. Upstream's last element is
+ * `Error: <errorMessage>` with the raw exception message interpolated, and
+ * that message can itself contain a raw newline, so a page that throws
+ * "\nNo page found" ends the body with a line that is exactly the sentence.
+ * No purely text-based matcher can separate page bytes inside `errorMessage`
+ * from upstream's own sentence. The consequence is fail-closed - a spurious
+ * loud error plus dropped routing, never a silent retarget - and the sibling
+ * reconnect matcher in `src/bridge.ts` is unaffected, because a forged first
+ * line still carries upstream's literal `Error: ` prefix.
  *
  * UNVERIFIED DEPENDENCY CONTRACT: this assumes chrome-devtools-mcp appends
  * `Error: <message>` LAST, after every page-derived block (and, for the

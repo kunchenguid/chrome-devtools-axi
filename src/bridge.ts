@@ -500,32 +500,32 @@ export async function handleBridgeRequest(
     return;
   }
 
-  if (
-    req.method === "GET" &&
-    (req.url === "/health" || req.url?.startsWith("/health?"))
-  ) {
-    if (!(await isBridgeClientConnected(client))) {
-      writeJson(res, 503, { status: "error", error: "Not connected" });
-      return;
-    }
-    const deep = req.url.includes("deep=1");
-    if (deep) {
-      const probe = await isBridgeTargetReachable(client);
-      if (!probe.ok) {
-        writeJson(res, 503, {
-          status: "error",
-          error: "CDP target unreachable",
-          reason: probe.reason,
-        });
+  try {
+    if (
+      req.method === "GET" &&
+      (req.url === "/health" || req.url?.startsWith("/health?"))
+    ) {
+      if (!(await isBridgeClientConnected(client))) {
+        writeJson(res, 503, { status: "error", error: "Not connected" });
         return;
       }
-      if (probe.pageIdentityChanged) onPageIdentityChanged?.();
+      const deep = req.url.includes("deep=1");
+      if (deep) {
+        const probe = await isBridgeTargetReachable(client);
+        if (!probe.ok) {
+          writeJson(res, 503, {
+            status: "error",
+            error: "CDP target unreachable",
+            reason: probe.reason,
+          });
+          return;
+        }
+        if (probe.pageIdentityChanged) onPageIdentityChanged?.();
+      }
+      writeJson(res, 200, { status: "ok", session: sessionName });
+      return;
     }
-    writeJson(res, 200, { status: "ok", session: sessionName });
-    return;
-  }
 
-  try {
     if (req.method === "GET" && req.url === "/tools") {
       await handleToolsRequest(client, res);
       return;
