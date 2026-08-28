@@ -680,22 +680,11 @@ describe("isBridgeTargetReachable", () => {
     ).toBe(false);
   });
 
-  it("anchors the marker to the first line of a realistic reconnect response body", async () => {
-    const body = reconnectResponseBody();
-
-    // The positional assumption both markers depend on: chrome-devtools-mcp
-    // pushes the notice ahead of every page-derived block and appends
-    // `Error: <message>` last. If a future dependency emits anything before
-    // the notice this fails here rather than silently un-detecting reconnects.
-    expect(body.split("\n")[0]).toBe(RECONNECT_NOTICE_LINE);
+  it("detects the marker in a realistic reconnect response body", async () => {
     expect(
-      body
-        .split("\n")
-        .filter((line) => line.trim())
-        .pop(),
-    ).toBe("Error: No page found");
-    expect(
-      didMcpPageIdentityChange({ content: [{ type: "text", text: body }] }),
+      didMcpPageIdentityChange({
+        content: [{ type: "text", text: reconnectResponseBody() }],
+      }),
     ).toBe(true);
   });
 

@@ -312,32 +312,46 @@ const MCP_RECONNECT_NOTICE_PREFIX =
  * response is flattened or a persisted AXI selection can outlive the ids it
  * belongs to.
  */
-export function didMcpPageIdentityChange(result: unknown): boolean {
-  if (!result || typeof result !== "object") return false;
-  if ("structuredContent" in result) {
-    const structured = (result as { structuredContent?: unknown })
-      .structuredContent;
-    if (
-      !!structured &&
-      typeof structured === "object" &&
-      "reconnected" in structured &&
-      (structured as { reconnected?: unknown }).reconnected === true
-    ) {
-      return true;
-    }
-  }
+export function didMcpPageIdentityChange(
+  result: unknown,
+  flattenedText?: string,
+): boolean {
+  if (hasStructuredReconnectMarker(result)) return true;
 
   // Upstream only includes structuredContent behind its experimental flag; its
-  // default protocol response carries the same one-shot marker as text. The
-  // notice is the FIRST element upstream pushes into that response, ahead of
-  // every page-derived block, so only the first line is consulted: page-owned
-  // strings that upstream interpolates verbatim (a dialog message, a title)
-  // may contain raw newlines and would otherwise open a line of their own that
-  // starts with this clause. Within that first line the match stays a prefix,
-  // so a reworded tail or a renamed `list_pages` still registers.
-  const text = extractToolText(getToolContent(result));
+  // default protocol response carries the same one-shot marker as text. Only
+  // the first line is consulted: page-owned strings that upstream interpolates
+  // verbatim (a dialog message, a title) may contain raw newlines and would
+  // otherwise open a line of their own that starts with this clause. Within
+  // that first line the match stays a prefix, so a reworded tail or a renamed
+  // `list_pages` still registers.
+  //
+  // UNVERIFIED DEPENDENCY CONTRACT: this assumes chrome-devtools-mcp emits the
+  // reconnect notice as the FIRST line of the flattened body (and, for the
+  // sibling matcher in `src/client.ts`, appends `Error: <message>` LAST).
+  // Nothing in the test suite pins that order - chrome-devtools-mcp is spawned
+  // via npx, not installed as a devDependency, so there is no build to assert
+  // against. If upstream reorders, the consequence is a less accurate message,
+  // not a silent retarget: `isMissingPageError` is an independent net on the
+  // last non-empty line, and upstream hands out page ids from a process-wide
+  // monotonic counter, so a stale id fails to resolve rather than landing on
+  // an unrelated page.
+  const text = flattenedText ?? extractToolText(getToolContent(result));
   const [firstLine = ""] = text.split(/\r?\n/, 1);
   return firstLine.trim().startsWith(MCP_RECONNECT_NOTICE_PREFIX);
+}
+
+function hasStructuredReconnectMarker(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  if (!("structuredContent" in result)) return false;
+  const structured = (result as { structuredContent?: unknown })
+    .structuredContent;
+  return (
+    !!structured &&
+    typeof structured === "object" &&
+    "reconnected" in structured &&
+    (structured as { reconnected?: unknown }).reconnected === true
+  );
 }
 
 export function parseBridgeCallPayload(body: string): BridgeCallPayload {
@@ -436,7 +450,8 @@ async function handleCallRequest(
     },
     payload.roots,
   );
-  const pageIdentityChanged = didMcpPageIdentityChange(result);
+  const text = extractToolText(getToolContent(result));
+  const pageIdentityChanged = didMcpPageIdentityChange(result, text);
   if (pageIdentityChanged) onPageIdentityChanged?.();
   // The reconnect that reissued every page id happened *during* this call, so
   // an explicit `pageId` in the request was resolved against the new id space:
@@ -450,7 +465,6 @@ async function handleCallRequest(
     writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
     return;
   }
-  const text = extractToolText(getToolContent(result));
   if (isToolResultError(result)) {
     // Surface the tool's own failure text as an error so the CLI throws and
     // exits non-zero instead of printing success (issue #96).
