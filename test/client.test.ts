@@ -1063,6 +1063,37 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("keeps routing when a dialog message opens a forged missing-page line mid-body", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("select_page", { pageId: 2 });
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          message: expect.stringContaining("handle_dialog"),
+        });
+        await callTool("click", { uid: "4" });
+        expect(fake.calls).toEqual([
+          { name: "select_page", args: { pageId: 2 } },
+          { name: "take_snapshot", args: { pageId: 2 } },
+          { name: "click", args: { uid: "4", pageId: 2 } },
+        ]);
+      },
+      {
+        toolErrors: {
+          // alert("x\nNo page found") - chrome-devtools-mcp interpolates the
+          // dialog message verbatim, so the page owns a whole line here.
+          take_snapshot: [
+            "# Open dialog",
+            "alert: x",
+            "No page found",
+            "Call handle_dialog to handle it before continuing.",
+            "Error: A dialog is open, call handle_dialog first",
+          ].join("\n"),
+        },
+      },
+    );
+  });
+
   it("clears the selection when MCP reports the selected page was closed", async () => {
     await withFakeBridge(
       async (fake) => {

@@ -328,15 +328,16 @@ export function didMcpPageIdentityChange(result: unknown): boolean {
   }
 
   // Upstream only includes structuredContent behind its experimental flag; its
-  // default protocol response carries the same one-shot marker as a text line
-  // that starts with this clause and ends by interpolating the `list_pages`
-  // tool name. Anchor on the stable leading clause at the start of a trimmed
-  // line: a rename or reworded tail still matches, while a generic
-  // "reconnected" substring anywhere in page content still cannot forge one.
+  // default protocol response carries the same one-shot marker as text. The
+  // notice is the FIRST element upstream pushes into that response, ahead of
+  // every page-derived block, so only the first line is consulted: page-owned
+  // strings that upstream interpolates verbatim (a dialog message, a title)
+  // may contain raw newlines and would otherwise open a line of their own that
+  // starts with this clause. Within that first line the match stays a prefix,
+  // so a reworded tail or a renamed `list_pages` still registers.
   const text = extractToolText(getToolContent(result));
-  return text
-    .split(/\r?\n/)
-    .some((line) => line.trim().startsWith(MCP_RECONNECT_NOTICE_PREFIX));
+  const [firstLine = ""] = text.split(/\r?\n/, 1);
+  return firstLine.trim().startsWith(MCP_RECONNECT_NOTICE_PREFIX);
 }
 
 export function parseBridgeCallPayload(body: string): BridgeCallPayload {
@@ -437,20 +438,23 @@ async function handleCallRequest(
   );
   const pageIdentityChanged = didMcpPageIdentityChange(result);
   if (pageIdentityChanged) onPageIdentityChanged?.();
+  // The reconnect that reissued every page id happened *during* this call, so
+  // an explicit `pageId` in the request was resolved against the new id space:
+  // the content may belong to another tab, and upstream's own failure text
+  // ("No page found", because page ids come from a monotonic counter) names a
+  // missing page instead of the reconnect that caused it. Report the identity
+  // boundary either way, ahead of the tool-error branch, so the caller
+  // re-selects rather than hunting for a closed tab. A call without a pageId
+  // (the home view probe) targeted no particular tab and is left alone.
+  if (pageIdentityChanged && typeof payload.args.pageId === "number") {
+    writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
+    return;
+  }
   const text = extractToolText(getToolContent(result));
   if (isToolResultError(result)) {
     // Surface the tool's own failure text as an error so the CLI throws and
     // exits non-zero instead of printing success (issue #96).
     writeJson(res, 200, { error: text || `Tool "${payload.name}" failed` });
-    return;
-  }
-  // The reconnect that reissued every page id happened *during* this call, so
-  // an explicit `pageId` in the request was resolved against the new id space
-  // and this content may belong to another tab. Fail loudly rather than pass
-  // it off as the caller's page; a call without a pageId (the home view probe)
-  // targeted no particular tab and still returns its result.
-  if (pageIdentityChanged && typeof payload.args.pageId === "number") {
-    writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
     return;
   }
   writeJson(res, 200, { result: text });
