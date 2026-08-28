@@ -116,6 +116,12 @@ export async function isBridgeClientConnected(
  * not that the attached browser is still alive. Used by `/health?deep=1` so
  * `ensureBridge` can detect a stale bridge after the user kills + restarts
  * the underlying Chrome/Electron target.
+ *
+ * It also reports chrome-devtools-mcp's one-shot reconnect marker (see
+ * {@link didMcpPageIdentityChange}) rather than only its own reachability:
+ * `ensureBridge` deep-probes before every command, so after an in-process
+ * browser reconnect this `list_pages` is the first call to see the marker and
+ * consumes it, leaving none for the `/call` that follows.
  */
 export async function isBridgeTargetReachable(
   client: BridgeClient,
