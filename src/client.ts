@@ -9,6 +9,7 @@ import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
 } from "./bridge-script.js";
 import { needsPageId } from "./pages.js";
@@ -634,11 +635,31 @@ export async function callTool(
   }
 }
 
+/**
+ * chrome-devtools-mcp text the bridge flattens into a `/call` error body: a
+ * bare line when the tool handler rethrows, or an `Error: `-prefixed line when
+ * the response builder appends it. `The selected page has been closed.` leads a
+ * sentence that interpolates the `list_pages` tool name, so only its stable
+ * clause is anchored.
+ */
+const MCP_MISSING_PAGE_LINE = "No page found";
+const MCP_CLOSED_PAGE_LINE_PREFIX = "The selected page has been closed.";
+
+/**
+ * Whether the bridge error body names a page chrome-devtools-mcp itself could
+ * not resolve. The body is the *whole* flattened MCP response, so page-owned
+ * text (a thrown script message, a tab title, a console line) shares it with
+ * the dependency's own message; matching must stay anchored to a complete line
+ * or a live page could forge the loss of its own routing.
+ */
 function isMissingPageError(message: string): boolean {
-  return (
-    /\bNo page found\b/i.test(message) ||
-    /\bselected page has been closed\b/i.test(message)
-  );
+  return message.split(/\r?\n/).some((raw) => {
+    const line = raw.trim().replace(/^Error:\s*/, "");
+    return (
+      line === MCP_MISSING_PAGE_LINE ||
+      line.startsWith(MCP_CLOSED_PAGE_LINE_PREFIX)
+    );
+  });
 }
 
 function missingPageError(pageId: number | null): CdpError {
@@ -654,7 +675,17 @@ function missingPageError(pageId: number | null): CdpError {
   );
 }
 
+function pageIdentityChangedError(): CdpError {
+  return new CdpError(PAGE_IDENTITY_CHANGED_ERROR, "BROWSER_ERROR", [
+    "Run `chrome-devtools-axi pages` to list the current tabs and their new ids",
+    "Run `chrome-devtools-axi selectpage <id>` to select a tab, then retry",
+  ]);
+}
+
 export function mapErrorMessage(message: string): CdpError {
+  if (message === PAGE_IDENTITY_CHANGED_ERROR) {
+    return pageIdentityChangedError();
+  }
   if (isMissingPageError(message)) return missingPageError(null);
   if (message.includes("ECONNREFUSED") || message.includes("ECONNRESET")) {
     return new CdpError("Bridge is not running", "BRIDGE_NOT_READY", [

@@ -28,3 +28,13 @@ export function resolveBridgeScript(importMetaDir: string): string {
  * port collision versus a startup failure and tailor its error accordingly.
  */
 export const BRIDGE_PORT_IN_USE_EXIT_CODE = 48;
+
+/**
+ * Bridge-owned error text for a call that ran against a page id space
+ * chrome-devtools-mcp had just reissued. The bridge writes it verbatim as the
+ * `/call` `{ error }` body and `src/client.ts` maps that exact string back to a
+ * `BROWSER_ERROR` with next-step suggestions, so the two processes agree on the
+ * boundary without either one parsing dependency-owned text twice.
+ */
+export const PAGE_IDENTITY_CHANGED_ERROR =
+  "The browser reconnected and every page id changed, so this call did not target the page you selected";

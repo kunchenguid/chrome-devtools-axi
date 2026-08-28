@@ -34,6 +34,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
 } from "./bridge-script.js";
 import { clearSelectedPageId } from "./selected-page.js";
@@ -45,7 +46,11 @@ import {
 
 // Re-exported so existing bridge consumers keep a single import surface; the
 // definitions live in the MCP-free ./bridge-script.js (see its header).
-export { BRIDGE_PORT_IN_USE_EXIT_CODE, resolveBridgeScript };
+export {
+  BRIDGE_PORT_IN_USE_EXIT_CODE,
+  PAGE_IDENTITY_CHANGED_ERROR,
+  resolveBridgeScript,
+};
 
 export interface BridgeContentBlock {
   type: string;
@@ -297,6 +302,9 @@ export function isToolResultError(result: unknown): boolean {
   );
 }
 
+const MCP_RECONNECT_NOTICE_PREFIX =
+  "Note: the browser was restarted or reconnected since the last call.";
+
 /**
  * chrome-devtools-mcp keeps its stdio process alive when Chrome reconnects,
  * but deliberately reissues every page id. Its one-shot reconnect marker is
@@ -319,18 +327,16 @@ export function didMcpPageIdentityChange(result: unknown): boolean {
     }
   }
 
-  // Upstream only includes structuredContent behind its experimental flag;
-  // its default protocol response carries the same one-shot marker as an exact
-  // text line. Match the complete dependency-owned sentence rather than a
-  // generic "reconnected" substring that page content could accidentally hit.
+  // Upstream only includes structuredContent behind its experimental flag; its
+  // default protocol response carries the same one-shot marker as a text line
+  // that starts with this clause and ends by interpolating the `list_pages`
+  // tool name. Anchor on the stable leading clause at the start of a trimmed
+  // line: a rename or reworded tail still matches, while a generic
+  // "reconnected" substring anywhere in page content still cannot forge one.
   const text = extractToolText(getToolContent(result));
   return text
     .split(/\r?\n/)
-    .some(
-      (line) =>
-        line.trim() ===
-        "Note: the browser was restarted or reconnected since the last call. Page ids have changed. Call list_pages to see open pages.",
-    );
+    .some((line) => line.trim().startsWith(MCP_RECONNECT_NOTICE_PREFIX));
 }
 
 export function parseBridgeCallPayload(body: string): BridgeCallPayload {
@@ -429,12 +435,22 @@ async function handleCallRequest(
     },
     payload.roots,
   );
-  if (didMcpPageIdentityChange(result)) onPageIdentityChanged?.();
+  const pageIdentityChanged = didMcpPageIdentityChange(result);
+  if (pageIdentityChanged) onPageIdentityChanged?.();
   const text = extractToolText(getToolContent(result));
   if (isToolResultError(result)) {
     // Surface the tool's own failure text as an error so the CLI throws and
     // exits non-zero instead of printing success (issue #96).
     writeJson(res, 200, { error: text || `Tool "${payload.name}" failed` });
+    return;
+  }
+  // The reconnect that reissued every page id happened *during* this call, so
+  // an explicit `pageId` in the request was resolved against the new id space
+  // and this content may belong to another tab. Fail loudly rather than pass
+  // it off as the caller's page; a call without a pageId (the home view probe)
+  // targeted no particular tab and still returns its result.
+  if (pageIdentityChanged && typeof payload.args.pageId === "number") {
+    writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
     return;
   }
   writeJson(res, 200, { result: text });
