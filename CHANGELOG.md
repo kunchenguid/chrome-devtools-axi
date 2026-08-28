@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.32](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.31...chrome-devtools-axi-v0.1.32) (2026-08-28)
+
+
+### Bug Fixes
+
+* negotiate roots and surface file-writing errors ([#122](https://github.com/kunchenguid/chrome-devtools-axi/issues/122)) ([0bb0473](https://github.com/kunchenguid/chrome-devtools-axi/commit/0bb0473da50e17d4d4c866afd85010a4817508da))
+
 ## [0.1.31](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.30...chrome-devtools-axi-v0.1.31) (2026-08-26)
 
 
