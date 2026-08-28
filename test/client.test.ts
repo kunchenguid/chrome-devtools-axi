@@ -516,7 +516,7 @@ describe("ensureBridge early-exit fast-fail", () => {
     });
     const oldBridge = spawn(
       process.execPath,
-      ["-e", "setTimeout(() => {}, 10000)"],
+      ["-e", "setTimeout(() => {}, 10000)", "chrome-devtools-axi-bridge"],
       {
         stdio: "ignore",
       },
@@ -554,6 +554,54 @@ describe("ensureBridge early-exit fast-fail", () => {
       await fakeBrowser.close();
       if (!oldBridge.killed) {
         oldBridge.kill("SIGTERM");
+      }
+    }
+  });
+
+  it("does not terminate an unrelated process after stale PID reuse", async () => {
+    const fakeBrowser = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      session: "reused-pid-worker",
+    });
+    const unrelated = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 10000)"],
+      { stdio: "ignore" },
+    );
+    const unrelatedPid = unrelated.pid as number;
+    const stateDir = join(
+      tmpHome,
+      ".chrome-devtools-axi",
+      "sessions",
+      "reused-pid-worker",
+    );
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, "bridge.pid"),
+      JSON.stringify({ pid: unrelatedPid, port: fakeBrowser.port }),
+    );
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = `http://127.0.0.1:${fakeBrowser.port}`;
+    process.env.CHROME_DEVTOOLS_AXI_PORT = String(fakeBrowser.port);
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "reused-pid-worker";
+    let spawned = false;
+
+    try {
+      await expect(
+        ensureBridge(() => {
+          spawned = true;
+          return new EventEmitter() as unknown as SpawnedBridge;
+        }),
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("collides"),
+      });
+      expect(spawned).toBe(false);
+      expect(() => process.kill(unrelatedPid, 0)).not.toThrow();
+    } finally {
+      await fakeBrowser.close();
+      if (!unrelated.killed) {
+        unrelated.kill("SIGTERM");
       }
     }
   });

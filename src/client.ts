@@ -497,30 +497,33 @@ export async function ensureBridge(
   // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
-    const explicitPort = resolveExplicitSessionPort();
-    const browserEndpoint = resolveBrowserEndpoint();
-    const browserCollision =
-      browserEndpoint !== null &&
-      browserEndpoint.port === pidInfo.port &&
-      (await browserEndpointUsesBridgeInterface(browserEndpoint.hostname));
-    const explicitPortChanged =
-      explicitPort !== null && explicitPort !== pidInfo.port;
-    if (browserCollision || explicitPortChanged) {
-      await terminateBridgeProcess(pidInfo.pid, {
-        killProcessGroup: isBridgeProcess(pidInfo.pid),
-      });
-    } else {
-      if (
-        await checkBridgeHealth(pidInfo.port, {
-          deep: true,
-          expectedSession: sessionName,
-        })
-      ) {
-        return pidInfo.port;
+    const recordedBridge = isBridgeProcess(pidInfo.pid);
+    if (recordedBridge) {
+      const explicitPort = resolveExplicitSessionPort();
+      const browserEndpoint = resolveBrowserEndpoint();
+      const browserCollision =
+        browserEndpoint !== null &&
+        browserEndpoint.port === pidInfo.port &&
+        (await browserEndpointUsesBridgeInterface(browserEndpoint.hostname));
+      const explicitPortChanged =
+        explicitPort !== null && explicitPort !== pidInfo.port;
+      if (browserCollision || explicitPortChanged) {
+        await terminateBridgeProcess(pidInfo.pid, {
+          killProcessGroup: true,
+        });
+      } else {
+        if (
+          await checkBridgeHealth(pidInfo.port, {
+            deep: true,
+            expectedSession: sessionName,
+          })
+        ) {
+          return pidInfo.port;
+        }
+        await terminateBridgeProcess(pidInfo.pid, {
+          killProcessGroup: true,
+        });
       }
-      await terminateBridgeProcess(pidInfo.pid, {
-        killProcessGroup: isBridgeProcess(pidInfo.pid),
-      });
     }
   }
 
