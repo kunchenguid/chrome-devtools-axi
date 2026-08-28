@@ -9,6 +9,7 @@ import {
   buildTransportArgs,
   createRootsAwareBridgeClient,
   detectGlobalMcpPath,
+  didMcpPageIdentityChange,
   extractHostHeaderHostname,
   extractToolText,
   getErrorMessage,
@@ -27,6 +28,11 @@ import {
   type BridgeClient,
 } from "../src/bridge.js";
 import { pathToFileURL } from "node:url";
+import {
+  clearSelectedPageId,
+  getSelectedPageId,
+  setSelectedPageId,
+} from "../src/selected-page.js";
 
 describe("extractToolText", () => {
   it("joins text blocks and ignores non-text content", () => {
@@ -585,7 +591,32 @@ describe("bridge health", () => {
 });
 
 describe("isBridgeTargetReachable", () => {
-  it("returns ok when list_pages succeeds", async () => {
+  it("recognizes chrome-devtools-mcp's reconnect boundary in structured and default output", async () => {
+    const result = {
+      content: [{ type: "text", text: "Page ids have changed" }],
+      structuredContent: { reconnected: true },
+    };
+
+    expect(didMcpPageIdentityChange(result)).toBe(true);
+    expect(
+      didMcpPageIdentityChange({
+        content: [
+          {
+            type: "text",
+            text: "Note: the browser was restarted or reconnected since the last call. Page ids have changed. Call list_pages to see open pages.",
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      didMcpPageIdentityChange({
+        ...result,
+        structuredContent: { reconnected: false },
+      }),
+    ).toBe(false);
+  });
+
+  it("returns the page identity status when list_pages succeeds", async () => {
     const client: BridgeClient = {
       listTools: async () => ({ tools: [] }),
       callTool: async ({ name }) => {
@@ -596,7 +627,7 @@ describe("isBridgeTargetReachable", () => {
     };
 
     const result = await isBridgeTargetReachable(client);
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: true, pageIdentityChanged: false });
   });
 
   it("returns ok=false with reason when the CDP target is gone", async () => {
@@ -741,6 +772,49 @@ describe("handleBridgeRequest /health", () => {
     expect(body.status).toBe("error");
     expect(body.error).toContain("CDP target unreachable");
     expect(body.reason).toContain("Target closed");
+  });
+
+  it("invalidates a named session's persisted routing when a deep probe reconnects the browser", async () => {
+    const savedHome = process.env.HOME;
+    const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    const home = mkdtempSync(join(tmpdir(), "axi-reconnect-health-"));
+    process.env.HOME = home;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "reconnect-worker";
+    try {
+      setSelectedPageId(42);
+      const client: BridgeClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({
+          content: [
+            {
+              type: "text",
+              text: "Note: the browser was restarted or reconnected since the last call. Page ids have changed. Call list_pages to see open pages.",
+            },
+          ],
+        }),
+        close: async () => {},
+      };
+      const { res, captured } = makeResponse();
+
+      await handleBridgeRequest(
+        client,
+        makeRequest("GET", "/health?deep=1"),
+        res,
+        "reconnect-worker",
+        undefined,
+        clearSelectedPageId,
+      );
+
+      expect(captured.statusCode).toBe(200);
+      expect(getSelectedPageId()).toBeNull();
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedSession === undefined)
+        delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+      else process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("returns 200 from /health?deep=1 when both MCP and CDP target are healthy", async () => {

@@ -610,9 +610,10 @@ export async function callTool(
   args: Record<string, unknown> = {},
 ): Promise<string> {
   const port = await ensureBridge();
+  let resolved = args;
 
   try {
-    const resolved = resolveToolArgs(name, args);
+    resolved = resolveToolArgs(name, args);
     const result = await postTool(port, name, resolved, {
       roots: collectRootDirs(name, resolved),
     });
@@ -621,11 +622,40 @@ export async function callTool(
   } catch (err) {
     if (err instanceof CdpError) throw err;
     const message = err instanceof Error ? err.message : String(err);
+    if (isMissingPageError(message)) {
+      const pageId =
+        typeof resolved.pageId === "number" ? resolved.pageId : null;
+      if (pageId !== null && getSelectedPageId() === pageId) {
+        clearSelectedPageId();
+      }
+      throw missingPageError(pageId);
+    }
     throw mapErrorMessage(message);
   }
 }
 
+function isMissingPageError(message: string): boolean {
+  return (
+    /\bNo page found\b/i.test(message) ||
+    /\bselected page has been closed\b/i.test(message)
+  );
+}
+
+function missingPageError(pageId: number | null): CdpError {
+  return new CdpError(
+    pageId === null
+      ? "The selected page is no longer available"
+      : `Page ${pageId} is no longer available`,
+    "BROWSER_ERROR",
+    [
+      "Run `chrome-devtools-axi pages` to list the remaining tabs",
+      "Run `chrome-devtools-axi selectpage <id>` to select a tab, or `chrome-devtools-axi open <url>` to open one",
+    ],
+  );
+}
+
 export function mapErrorMessage(message: string): CdpError {
+  if (isMissingPageError(message)) return missingPageError(null);
   if (message.includes("ECONNREFUSED") || message.includes("ECONNRESET")) {
     return new CdpError("Bridge is not running", "BRIDGE_NOT_READY", [
       "Run `chrome-devtools-axi open <url>` — the bridge starts automatically",

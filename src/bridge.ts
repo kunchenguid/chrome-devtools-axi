@@ -36,6 +36,7 @@ import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   resolveBridgeScript,
 } from "./bridge-script.js";
+import { clearSelectedPageId } from "./selected-page.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -113,10 +114,18 @@ export async function isBridgeClientConnected(
  */
 export async function isBridgeTargetReachable(
   client: BridgeClient,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; pageIdentityChanged: boolean } | { ok: false; reason: string }
+> {
   try {
-    await client.callTool({ name: "list_pages", arguments: {} });
-    return { ok: true };
+    const result = await client.callTool({
+      name: "list_pages",
+      arguments: {},
+    });
+    return {
+      ok: true,
+      pageIdentityChanged: didMcpPageIdentityChange(result),
+    };
   } catch (error) {
     return { ok: false, reason: getErrorMessage(error) };
   }
@@ -288,6 +297,42 @@ export function isToolResultError(result: unknown): boolean {
   );
 }
 
+/**
+ * chrome-devtools-mcp keeps its stdio process alive when Chrome reconnects,
+ * but deliberately reissues every page id. Its one-shot reconnect marker is
+ * the authoritative identity boundary; the bridge must observe it before the
+ * response is flattened or a persisted AXI selection can outlive the ids it
+ * belongs to.
+ */
+export function didMcpPageIdentityChange(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  if ("structuredContent" in result) {
+    const structured = (result as { structuredContent?: unknown })
+      .structuredContent;
+    if (
+      !!structured &&
+      typeof structured === "object" &&
+      "reconnected" in structured &&
+      (structured as { reconnected?: unknown }).reconnected === true
+    ) {
+      return true;
+    }
+  }
+
+  // Upstream only includes structuredContent behind its experimental flag;
+  // its default protocol response carries the same one-shot marker as an exact
+  // text line. Match the complete dependency-owned sentence rather than a
+  // generic "reconnected" substring that page content could accidentally hit.
+  const text = extractToolText(getToolContent(result));
+  return text
+    .split(/\r?\n/)
+    .some(
+      (line) =>
+        line.trim() ===
+        "Note: the browser was restarted or reconnected since the last call. Page ids have changed. Call list_pages to see open pages.",
+    );
+}
+
 export function parseBridgeCallPayload(body: string): BridgeCallPayload {
   let payload: { name?: unknown; args?: unknown; roots?: unknown };
   try {
@@ -373,6 +418,7 @@ async function handleCallRequest(
   client: BridgeClient,
   req: IncomingMessage,
   res: ServerResponse,
+  onPageIdentityChanged?: () => void,
 ): Promise<void> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
@@ -383,6 +429,7 @@ async function handleCallRequest(
     },
     payload.roots,
   );
+  if (didMcpPageIdentityChange(result)) onPageIdentityChanged?.();
   const text = extractToolText(getToolContent(result));
   if (isToolResultError(result)) {
     // Surface the tool's own failure text as an error so the CLI throws and
@@ -399,6 +446,7 @@ export async function handleBridgeRequest(
   res: ServerResponse,
   sessionName?: string,
   logForbidden?: (message: string) => void,
+  onPageIdentityChanged?: () => void,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -437,6 +485,7 @@ export async function handleBridgeRequest(
         });
         return;
       }
+      if (probe.pageIdentityChanged) onPageIdentityChanged?.();
     }
     writeJson(res, 200, { status: "ok", session: sessionName });
     return;
@@ -449,7 +498,7 @@ export async function handleBridgeRequest(
     }
 
     if (req.method === "POST" && req.url === "/call") {
-      await handleCallRequest(client, req, res);
+      await handleCallRequest(client, req, res, onPageIdentityChanged);
       return;
     }
   } catch (error) {
@@ -465,7 +514,14 @@ export function createBridgeServer(
   sessionName?: string,
 ): Server {
   return createServer((req, res) => {
-    void handleBridgeRequest(client, req, res, sessionName, logBridgeMessage);
+    void handleBridgeRequest(
+      client,
+      req,
+      res,
+      sessionName,
+      logBridgeMessage,
+      clearSelectedPageId,
+    );
   });
 }
 

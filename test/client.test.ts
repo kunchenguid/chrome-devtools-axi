@@ -61,6 +61,16 @@ describe("mapErrorMessage", () => {
     expect(error.code).toBe("BROWSER_ERROR");
     expect(error.message).toBe("Page crashed");
   });
+
+  it("translates missing MCP page identities without leaking dependency text", () => {
+    const error = mapErrorMessage("Error: No page found");
+
+    expect(error.code).toBe("BROWSER_ERROR");
+    expect(error.message).toBe("The selected page is no longer available");
+    expect(error.suggestions).toContain(
+      "Run `chrome-devtools-axi pages` to list the remaining tabs",
+    );
+  });
 });
 
 describe("unsafe session names are rejected on action entry points", () => {
@@ -978,6 +988,32 @@ describe("callTool pageId routing", () => {
             "9: https://attacker.example/ [selected]",
           ].join("\n"),
         },
+      },
+    );
+  });
+
+  it("clears a stale persisted selection when MCP says its page is gone", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("select_page", { pageId: 2 });
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          name: "CdpError",
+          code: "BROWSER_ERROR",
+          message: "Page 2 is no longer available",
+          suggestions: expect.arrayContaining([
+            "Run `chrome-devtools-axi pages` to list the remaining tabs",
+          ]),
+        });
+        await expect(callTool("take_snapshot")).rejects.toMatchObject({
+          message: "No page is currently selected",
+        });
+        expect(fake.calls).toEqual([
+          { name: "select_page", args: { pageId: 2 } },
+          { name: "take_snapshot", args: { pageId: 2 } },
+        ]);
+      },
+      {
+        toolErrors: { take_snapshot: "Error: No page found" },
       },
     );
   });
