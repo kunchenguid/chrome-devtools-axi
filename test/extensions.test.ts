@@ -240,22 +240,18 @@ describe("extension lifecycle commands", () => {
       ].join("\n"),
     );
 
-    await expect(handleExtensionInspect([EXTENSION_ID])).rejects.toMatchObject(
-      {
-        code: "VALIDATION_ERROR",
-        message: expect.stringContaining("not found"),
-      },
-    );
+    await expect(handleExtensionInspect([EXTENSION_ID])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("not found"),
+    });
   });
 
   it("handles unparseable extension list on inspect", async () => {
     callTool.mockResolvedValueOnce("future format");
 
-    await expect(handleExtensionInspect([EXTENSION_ID])).rejects.toMatchObject(
-      {
-        code: "BROWSER_ERROR",
-        message: expect.stringContaining("Unable to parse"),
-      },
-    );
+    await expect(handleExtensionInspect([EXTENSION_ID])).rejects.toMatchObject({
+      code: "BROWSER_ERROR",
+      message: expect.stringContaining("Unable to parse"),
+    });
   });
 });

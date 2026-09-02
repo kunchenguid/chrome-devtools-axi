@@ -221,6 +221,7 @@ id, name, version, and enabled state; all mutating commands require an exact
 Chrome extension id and never perform ambiguous name matching.
 
 Extension inspection commands:
+
 - `extension-inspect <id>` - Show extension metadata (name, version, enabled state)
 - `extension-targets` - List all extension-related targets (service workers and extension pages)
   that can be debugged with the ordinary `pages`, `selectpage`, and `eval` commands

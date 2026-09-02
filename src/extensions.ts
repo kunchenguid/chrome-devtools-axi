@@ -329,25 +329,17 @@ export async function handleExtensionInspect(args: string[]): Promise<string> {
   const extensions = parseExtensionList(listResult);
 
   if (!extensions) {
-    throw new CdpError(
-      "Unable to parse extension list",
-      "BROWSER_ERROR",
-      [
-        "Run `chrome-devtools-axi extensions` to see the current extension list format",
-      ],
-    );
+    throw new CdpError("Unable to parse extension list", "BROWSER_ERROR", [
+      "Run `chrome-devtools-axi extensions` to see the current extension list format",
+    ]);
   }
 
   const extension = extensions.find((ext) => ext.id === id);
   if (!extension) {
-    throw new CdpError(
-      `Extension ${id} not found`,
-      "VALIDATION_ERROR",
-      [
-        "Run `chrome-devtools-axi extensions` to list all extension IDs",
-        "Copy the exact 32-character id from the list",
-      ],
-    );
+    throw new CdpError(`Extension ${id} not found`, "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi extensions` to list all extension IDs",
+      "Copy the exact 32-character id from the list",
+    ]);
   }
 
   const metadata = encode({
