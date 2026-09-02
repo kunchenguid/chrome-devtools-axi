@@ -31,6 +31,13 @@ import { parsePagesList } from "./pages.js";
 import { overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
+import {
+  handleExtensionAction,
+  handleExtensionInstall,
+  handleExtensionList,
+  handleExtensionReload,
+  handleExtensionUninstall,
+} from "./extensions.js";
 
 export { parsePagesList };
 
@@ -53,12 +60,14 @@ export type MainOptions = {
 };
 
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
-commands[35]:
+commands[40]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
   run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
+  extension-install <absolute-path>, extensions, extension-reload <id>,
+  extension-action <id>, extension-uninstall <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
   perf-insight <set> <name>, heap <path>, start, stop, setup hooks
@@ -75,6 +84,11 @@ environment:
                                     attaches to, and which one is launched in the default and
                                     USER_DATA_DIR modes. Ignored with CHROME_DEVTOOLS_AXI_BROWSER_URL.
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE
+                                    Set to 1 for extension lifecycle commands. This is an explicit,
+                                    pipe-only mode: launches a temporary isolated profile and enables
+                                    the upstream Extensions category. Incompatible with AUTO_CONNECT,
+                                    BROWSER_URL, and USER_DATA_DIR. Use a dedicated SESSION.
   CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
                                     (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
@@ -111,6 +125,7 @@ gpu:
     CHROME_DEVTOOLS_AXI_CHROME_ARGS="--enable-gpu --ignore-gpu-blocklist --enable-unsafe-webgpu --enable-features=Vulkan"
 
 tips:
+  Extension commands require CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 and never accept names in place of ids.
   Pipe output through grep/head to extract specific data from large pages.
 `;
 
@@ -362,6 +377,74 @@ args:
 examples:
   chrome-devtools-axi closepage 2`,
 
+  "extension-install": `usage: chrome-devtools-axi extension-install <absolute-path>
+Install an unpacked Chrome extension in the isolated extension session.
+
+args:
+  <absolute-path>  Existing absolute path to the unpacked extension folder (required)
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1
+  Use a dedicated CHROME_DEVTOOLS_AXI_SESSION. This is pipe-only and always uses
+  a temporary isolated profile; browserUrl, autoConnect, and USER_DATA_DIR are rejected.
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 CHROME_DEVTOOLS_AXI_SESSION=extension-test \\
+    chrome-devtools-axi extension-install /tmp/my-extension`,
+
+  extensions: `usage: chrome-devtools-axi extensions
+List installed extensions in the isolated extension session.
+
+output:
+  Each extension includes its exact id, name, version, and enabled state.
+  Use the id for reload/action/uninstall; names are never matched.
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 CHROME_DEVTOOLS_AXI_SESSION=extension-test \\
+    chrome-devtools-axi extensions`,
+
+  "extension-reload": `usage: chrome-devtools-axi extension-reload <id>
+Reload one unpacked extension by its exact Chrome extension ID.
+
+args:
+  <id>  32 lowercase a-p extension ID from \`chrome-devtools-axi extensions\` (required)
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 and a pipe-launched isolated profile
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 chrome-devtools-axi extension-reload \\
+    abcdefghijklmnopabcdefghijklmnop`,
+
+  "extension-action": `usage: chrome-devtools-axi extension-action <id>
+Trigger one extension's default toolbar action by its exact ID.
+
+args:
+  <id>  32 lowercase a-p extension ID from \`chrome-devtools-axi extensions\` (required)
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 and a pipe-launched isolated profile
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 chrome-devtools-axi extension-action \\
+    abcdefghijklmnopabcdefghijklmnop`,
+
+  "extension-uninstall": `usage: chrome-devtools-axi extension-uninstall <id>
+Uninstall one extension by its exact Chrome extension ID.
+
+args:
+  <id>  32 lowercase a-p extension ID from \`chrome-devtools-axi extensions\` (required)
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 and a pipe-launched isolated profile
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 chrome-devtools-axi extension-uninstall \\
+    abcdefghijklmnopabcdefghijklmnop`,
+
   resize: `usage: chrome-devtools-axi resize <width> <height>
 Resize the browser viewport.
 
@@ -591,7 +674,13 @@ examples:
 };
 
 export function getCommandHelp(command: string): string | null {
-  return COMMAND_HELP[command] ?? null;
+  const canonical =
+    command === "extension-list"
+      ? "extensions"
+      : command === "extension-trigger-action"
+        ? "extension-action"
+        : command;
+  return COMMAND_HELP[canonical] ?? null;
 }
 
 export interface ScreenshotArgs {
@@ -1732,6 +1821,13 @@ const COMMANDS: Record<string, CommandFn> = {
   newpage: withFullFlag(handleNewPage),
   selectpage: withFullFlag(handleSelectPage),
   closepage: withoutFullFlag(handleClosePage),
+  "extension-install": withoutFullFlag(handleExtensionInstall),
+  extensions: withoutFullFlag(handleExtensionList),
+  "extension-list": withoutFullFlag(handleExtensionList),
+  "extension-reload": withoutFullFlag(handleExtensionReload),
+  "extension-action": withoutFullFlag(handleExtensionAction),
+  "extension-trigger-action": withoutFullFlag(handleExtensionAction),
+  "extension-uninstall": withoutFullFlag(handleExtensionUninstall),
   resize: withoutFullFlag(handleResize),
   emulate: withoutFullFlag(handleEmulate),
   console: withoutFullFlag(handleConsole),

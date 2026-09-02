@@ -170,6 +170,8 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
       process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    savedEnv.CHROME_DEVTOOLS_AXI_EXTENSION_MODE =
+      process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -177,6 +179,7 @@ describe("buildTransportArgs", () => {
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    delete process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE;
   });
 
   afterEach(() => {
@@ -194,6 +197,34 @@ describe("buildTransportArgs", () => {
       savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL =
       savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL;
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE =
+      savedEnv.CHROME_DEVTOOLS_AXI_EXTENSION_MODE;
+  });
+
+  it("enables the official Extensions category only in isolated pipe mode", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE = "1";
+
+    expect(buildTransportArgs()).toEqual([
+      "-y",
+      "chrome-devtools-mcp@latest",
+      "--isolated",
+      "--categoryExtensions=true",
+      "--headless",
+      "--chrome-arg=--use-mock-keychain",
+      "--chrome-arg=--password-store=basic",
+    ]);
+  });
+
+  it.each([
+    ["CHROME_DEVTOOLS_AXI_AUTO_CONNECT", "1"],
+    ["CHROME_DEVTOOLS_AXI_BROWSER_URL", "http://127.0.0.1:9222"],
+    ["CHROME_DEVTOOLS_AXI_USER_DATA_DIR", "/normal/profile"],
+    ["CHROME_DEVTOOLS_AXI_CHROME_ARGS", "--user-data-dir=/normal/profile"],
+  ])("rejects extension mode with %s", (key, value) => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE = "1";
+    process.env[key] = value;
+
+    expect(() => buildTransportArgs()).toThrow(/pipe-launched Chrome/);
   });
 
   it("defaults to headless and isolated", () => {

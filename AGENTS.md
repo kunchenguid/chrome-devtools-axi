@@ -56,6 +56,8 @@ Connection modes are env-driven (`buildTransportArgs`): `AUTO_CONNECT` (Chrome 1
 The launch modes (`--isolated`/`--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS` so browsers we start cannot reach the machine owner's password store; attach modes deliberately omit them because that browser's keychain policy belongs to whoever started it.
 `test/keychain-isolation.test.ts` owns the regression rationale and structural invariant; README.md documents the user-facing behavior.
 
+Extension lifecycle commands (`src/extensions.ts`) are explicitly gated by `CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1`. That mode enables the official MCP Extensions category only for a pipe-launched `--isolated` browser and records the bridge mode, so extension work cannot reuse or mutate a remote or operator-selected profile; README.md documents the workflow and pipe-only limitation.
+
 Named sessions (`CHROME_DEVTOOLS_AXI_SESSION`, `src/sessions.ts`) give each name its own bridge - its own port (explicit `CHROME_DEVTOOLS_AXI_PORT`, else a deterministic FNV-1a hash of the name) and its own state dir under `~/.chrome-devtools-axi/sessions/<name>/` (PID file + generation counter) - so concurrent sessions don't share a bridge or each other's stale-ref tracking.
 The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-axi/` paths, so existing behavior is unchanged.
 `resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through; a session isolates only the bridge, so the connection mode and profile compose unchanged.

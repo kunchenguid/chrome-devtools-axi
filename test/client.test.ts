@@ -442,6 +442,27 @@ describe("ensureBridge early-exit fast-fail", () => {
     expect(elapsed).toBeLessThan(5000);
   });
 
+  it("does not reuse a live ordinary bridge when extension mode is requested", async () => {
+    const savedExtensionMode = process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE;
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSION_MODE = "1";
+    const pidFile = resolveSessionPidFile("early-exit-worker");
+    mkdirSync(dirname(pidFile), { recursive: true });
+    writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port: 9224 }));
+
+    try {
+      await expect(
+        ensureBridge(() => {
+          throw new Error("must not spawn or stop the existing bridge");
+        }),
+      ).rejects.toMatchObject({
+        code: "BRIDGE_NOT_READY",
+        message: expect.stringContaining("ordinary browser bridge"),
+      });
+    } finally {
+      restore("CHROME_DEVTOOLS_AXI_EXTENSION_MODE", savedExtensionMode);
+    }
+  });
+
   it("reuses a healthy same-session bridge that won the bind race instead of failing on the loser's early exit", async () => {
     // A concurrent same-session bridge owns the port and reports healthy only on
     // the *second* deep probe, so the loser's first in-loop check fails and the
@@ -1448,6 +1469,11 @@ describe("collectRootDirs", () => {
           filePath: "/home/user/.ssh/id_rsa",
         }),
       ).toEqual([process.cwd()]);
+      expect(
+        collectRootDirs("install_extension", {
+          path: outputRoot,
+        }),
+      ).toEqual([process.cwd(), outputRoot]);
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });
     }

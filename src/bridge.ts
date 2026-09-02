@@ -5,7 +5,7 @@
  * persistent MCP session. Exposes a simple HTTP API:
  *   POST /call  { name, args }  → { result }
  *   GET  /tools                 → [{ name, description }]
- *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
+ *   GET  /health                → { status: "ok", session, mode } or 503 { status: "error", error }
  *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason,
  *                                 200 adds pageIdentityChanged when the probe consumed
  *                                 chrome-devtools-mcp's one-shot reconnect marker *and*
@@ -38,7 +38,10 @@ import { pathToFileURL } from "node:url";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   PAGE_IDENTITY_CHANGED_ERROR,
+  extensionModeConflict,
+  resolveBridgeMode,
   resolveBridgeScript,
+  type BridgeMode,
 } from "./bridge-script.js";
 import { clearSelectedPageId } from "./selected-page.js";
 import {
@@ -52,6 +55,8 @@ import {
 export {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   PAGE_IDENTITY_CHANGED_ERROR,
+  extensionModeConflict,
+  resolveBridgeMode,
   resolveBridgeScript,
 };
 
@@ -150,7 +155,10 @@ export async function isBridgeTargetReachable(
 function writePidFile(port: number): void {
   const pidFile = resolveSessionPidFile();
   mkdirSync(dirname(pidFile), { recursive: true });
-  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port }));
+  writeFileSync(
+    pidFile,
+    JSON.stringify({ pid: process.pid, port, mode: resolveBridgeMode() }),
+  );
 }
 
 /**
@@ -497,6 +505,7 @@ export async function handleBridgeRequest(
   sessionName?: string,
   logForbidden?: (message: string) => void,
   onPageIdentityChanged?: () => boolean | void,
+  bridgeMode?: BridgeMode,
 ): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
@@ -549,7 +558,8 @@ export async function handleBridgeRequest(
       // bridge".
       writeJson(res, 200, {
         status: "ok",
-        session: sessionName,
+        ...(sessionName !== undefined ? { session: sessionName } : {}),
+        ...(bridgeMode !== undefined ? { mode: bridgeMode } : {}),
         ...(droppedSelection ? { pageIdentityChanged: true } : {}),
       });
       return;
@@ -584,6 +594,7 @@ export function createBridgeServer(
       sessionName,
       logBridgeMessage,
       clearSelectedPageId,
+      resolveBridgeMode(),
     );
   });
 }
@@ -654,8 +665,22 @@ export function buildTransportArgs(): string[] {
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   const userDataDir = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
   const channel = process.env.CHROME_DEVTOOLS_AXI_CHANNEL?.trim();
+  const extensionMode = resolveBridgeMode() === "extension";
 
-  if (autoConnect) {
+  if (extensionMode) {
+    const conflict = extensionModeConflict();
+    if (conflict) throw new Error(conflict);
+    // The upstream Extensions category is pipe-only. Always launch a fresh,
+    // temporary profile here; never let an extension command reach an
+    // operator-owned browser or persistent profile.
+    args.push("--isolated", "--categoryExtensions=true");
+    if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
+      args.push("--headless");
+    }
+    for (const arg of KEYCHAIN_ISOLATION_CHROME_ARGS) {
+      args.push(`--chrome-arg=${arg}`);
+    }
+  } else if (autoConnect) {
     // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
     // Connects to the user's running Chrome - no separate browser launched.
     args.push("--autoConnect");

@@ -39,3 +39,72 @@ export const BRIDGE_PORT_IN_USE_EXIT_CODE = 48;
  */
 export const PAGE_IDENTITY_CHANGED_ERROR =
   "The browser reconnected and every page id changed, so this call did not target the page you selected";
+
+/**
+ * Explicit launch mode for the chrome-devtools-mcp Extensions category.
+ * Extension tools are intentionally opt-in because the upstream category is
+ * pipe-only and must never attach to an operator's normal Chrome/profile.
+ */
+export const EXTENSION_MODE_ENV = "CHROME_DEVTOOLS_AXI_EXTENSION_MODE";
+export const EXTENSION_MODE = "extension" as const;
+export const STANDARD_MODE = "standard" as const;
+export type BridgeMode = typeof EXTENSION_MODE | typeof STANDARD_MODE;
+
+export function isExtensionModeEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env[EXTENSION_MODE_ENV] === "1";
+}
+
+export function resolveBridgeMode(
+  env: Record<string, string | undefined> = process.env,
+): BridgeMode {
+  return isExtensionModeEnabled(env) ? EXTENSION_MODE : STANDARD_MODE;
+}
+
+/**
+ * Return an actionable incompatibility when extension mode is combined with a
+ * browser/profile supplied by the operator. The upstream Extensions category
+ * supports only a pipe-launched browser, and --isolated is the security
+ * boundary that keeps extension tests away from a normal Chrome profile.
+ */
+export function extensionModeConflict(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  if (!isExtensionModeEnabled(env)) return null;
+  if (env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1") {
+    return (
+      `${EXTENSION_MODE_ENV}=1 requires a pipe-launched Chrome with a temporary isolated profile; ` +
+      "unset CHROME_DEVTOOLS_AXI_AUTO_CONNECT. The upstream Extensions category does not support autoConnect."
+    );
+  }
+  if (env.CHROME_DEVTOOLS_AXI_BROWSER_URL) {
+    return (
+      `${EXTENSION_MODE_ENV}=1 requires a pipe-launched Chrome with a temporary isolated profile; ` +
+      "unset CHROME_DEVTOOLS_AXI_BROWSER_URL. The upstream Extensions category does not support browserUrl or wsEndpoint."
+    );
+  }
+  if (env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR) {
+    return (
+      `${EXTENSION_MODE_ENV}=1 requires a pipe-launched Chrome with a temporary isolated profile; ` +
+      "unset CHROME_DEVTOOLS_AXI_USER_DATA_DIR so extension operations cannot mutate a normal profile."
+    );
+  }
+  const extraChromeArgs = env.CHROME_DEVTOOLS_AXI_CHROME_ARGS?.trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const profileOverride = extraChromeArgs?.find(
+    (arg) =>
+      arg === "--user-data-dir" ||
+      arg.startsWith("--user-data-dir=") ||
+      arg === "--profile-directory" ||
+      arg.startsWith("--profile-directory="),
+  );
+  if (profileOverride) {
+    return (
+      `${EXTENSION_MODE_ENV}=1 rejects ${profileOverride} because extension mode requires a pipe-launched Chrome with a temporary isolated profile; ` +
+      "remove profile-overriding CHROME_DEVTOOLS_AXI_CHROME_ARGS."
+    );
+  }
+  return null;
+}

@@ -183,6 +183,52 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | `closepage <id>`  | Close a tab by ID           |
 | `resize <w> <h>`  | Resize the browser viewport |
 
+### Chrome extension lifecycle
+
+Extension automation is an explicit opt-in and is isolated from ordinary browser
+sessions. The upstream `chrome-devtools-mcp` Extensions category is currently
+**pipe-only**; it does not support `AUTO_CONNECT`, `BROWSER_URL`/`wsEndpoint`, or
+a caller-supplied profile. Set `CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1` and use a
+dedicated session. AXI then starts chrome-devtools-mcp with
+`--categoryExtensions=true --isolated`, so the browser uses a temporary profile
+owned by that session and is cleaned up by `stop`.
+
+```sh
+export CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1
+export CHROME_DEVTOOLS_AXI_SESSION=extension-test
+
+chrome-devtools-axi extension-install /absolute/path/to/unpacked-extension
+chrome-devtools-axi extensions
+# Copy the exact 32-character id (not the display name) from the list:
+chrome-devtools-axi extension-reload <id>
+chrome-devtools-axi extension-action <id>
+chrome-devtools-axi extension-uninstall <id>
+chrome-devtools-axi stop
+```
+
+Commands are forwarded to the official MCP tools
+`install_extension`, `list_extensions`, `reload_extension`,
+`trigger_extension_action`, and `uninstall_extension`. Install accepts only an
+existing absolute unpacked-extension directory. List reports each extension's
+id, name, version, and enabled state; all mutating commands require an exact
+Chrome extension id and never perform ambiguous name matching. Each response
+shows the operation, selected AXI session, isolated profile, and pipe transport.
+
+Do not set `CHROME_DEVTOOLS_AXI_BROWSER_URL`, `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`,
+or `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` in extension mode. AXI rejects those
+combinations rather than attaching to or mutating an operator's normal Chrome
+profile. Keep extension testing in its own named session so its bridge and
+state cannot collide with an ordinary session. Existing sessions and all
+ordinary page commands remain unchanged when extension mode is unset. If a
+session already has a bridge in the other mode, stop that session explicitly
+before changing modes; AXI will not stop it implicitly.
+
+The extension mode is intended for an agent workflow: install a disposable
+unpacked build, list and record its exact id, trigger/reload it while testing,
+verify behavior with the ordinary page/snapshot commands in that same isolated
+session, then uninstall and stop the session. This feature does not add
+product-specific selectors or extension logic.
+
 ### Emulation
 
 | Command   | Description                     |

@@ -3,8 +3,9 @@
 export const SKILL_DESCRIPTION =
   "Control a Chrome browser session through the chrome-devtools-axi CLI - navigate, snapshot, " +
   "click, fill forms, run JavaScript, inspect console and network, take screenshots, audit " +
-  "performance. Use whenever a task needs a real browser: opening or testing a web page, " +
-  "clicking through a flow, extracting page content, or debugging a website.";
+  "performance, or exercising a Chrome extension in an isolated session. Use whenever a task needs " +
+  "a real browser: opening or testing a web page, clicking through a flow, extracting page content, " +
+  "debugging a website, or exercising an extension lifecycle.";
 
 function yamlDoubleQuote(value: string): string {
   return JSON.stringify(value);

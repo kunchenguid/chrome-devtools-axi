@@ -9,8 +9,12 @@ import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  EXTENSION_MODE,
   PAGE_IDENTITY_CHANGED_ERROR,
+  STANDARD_MODE,
+  resolveBridgeMode,
   resolveBridgeScript,
+  type BridgeMode,
 } from "./bridge-script.js";
 import { needsPageId } from "./pages.js";
 import {
@@ -67,6 +71,7 @@ export class CdpError extends AxiError {
 interface PidInfo {
   pid: number;
   port: number;
+  mode?: BridgeMode;
 }
 
 function readPidFile(
@@ -76,7 +81,11 @@ function readPidFile(
     if (!existsSync(pidFile)) return null;
     const data = JSON.parse(readFileSync(pidFile, "utf-8"));
     if (typeof data.pid === "number" && typeof data.port === "number") {
-      return data as PidInfo;
+      const mode =
+        data.mode === EXTENSION_MODE || data.mode === STANDARD_MODE
+          ? data.mode
+          : undefined;
+      return { pid: data.pid, port: data.port, ...(mode ? { mode } : {}) };
     }
     return null;
   } catch {
@@ -169,6 +178,10 @@ function httpPost(
  * `CHROME_DEVTOOLS_AXI_PORT`). A bridge that omits the field (older version) is
  * accepted, since there is no mismatch to detect.
  *
+ * With `expectedMode`, a bridge that reports a different launch mode is
+ * treated as unhealthy. `ensureBridge` also checks the PID-file mode before
+ * touching a live process, so changing modes never stops a bridge implicitly.
+ *
  * With `notice`, a healthy *deep* probe writes the bridge's `pageIdentityChanged`
  * flag into that caller-owned holder (see {@link PageIdentityNotice}).
  *
@@ -179,6 +192,7 @@ export async function checkBridgeHealth(
   opts: {
     deep?: boolean;
     expectedSession?: string;
+    expectedMode?: BridgeMode;
     notice?: PageIdentityNotice;
   } = {},
 ): Promise<boolean> {
@@ -192,6 +206,13 @@ export async function checkBridgeHealth(
       opts.expectedSession !== undefined &&
       typeof data.session === "string" &&
       data.session !== opts.expectedSession
+    ) {
+      return false;
+    }
+    if (
+      opts.expectedMode !== undefined &&
+      typeof data.mode === "string" &&
+      data.mode !== opts.expectedMode
     ) {
       return false;
     }
@@ -358,6 +379,35 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
 }
 
 /**
+ * Build the error for an attempt to reuse a session bridge in the wrong launch
+ * mode. This is deliberately a non-destructive failure: changing from an
+ * ordinary or operator-selected profile to extension mode must not stop the
+ * existing bridge implicitly.
+ */
+export function buildBridgeModeMismatchError(
+  sessionName: string,
+  runningMode: BridgeMode,
+  requestedMode: BridgeMode,
+): CdpError {
+  const running =
+    runningMode === EXTENSION_MODE ? "isolated extension" : "ordinary browser";
+  const requested =
+    requestedMode === EXTENSION_MODE
+      ? "isolated extension"
+      : "ordinary browser";
+  return new CdpError(
+    `Session "${sessionName}" already has a ${running} bridge, but this command requires ${requested} mode`,
+    "BRIDGE_NOT_READY",
+    [
+      `Run \`CHROME_DEVTOOLS_AXI_SESSION=${sessionName} chrome-devtools-axi stop\` to stop that session explicitly, then retry with the desired mode.`,
+      requestedMode === EXTENSION_MODE
+        ? "For extension operations, set CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1; it enables the upstream Extensions category and launches a temporary isolated pipe browser."
+        : "Unset CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 when using the ordinary browser mode.",
+    ],
+  );
+}
+
+/**
  * Build the error thrown when a freshly spawned bridge exits before it ever
  * reports healthy. Surfacing this the moment the child dies - rather than
  * polling the full readiness deadline - turns an early death into a fast,
@@ -431,6 +481,7 @@ export async function ensureBridge(
   notice?: PageIdentityNotice,
 ): Promise<number> {
   const sessionName = resolveSessionName();
+  const requestedMode = resolveBridgeMode();
   const port = resolveSessionPort(sessionName);
   const pidFile = resolveSessionPidFile(sessionName);
 
@@ -438,10 +489,23 @@ export async function ensureBridge(
   // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
+    // A missing mode is an old PID file and therefore means ordinary mode.
+    // Do not stop a live bridge just because the caller changed mode: the
+    // operator must explicitly stop it, which avoids touching a profile this
+    // invocation did not launch.
+    const runningMode = pidInfo.mode ?? STANDARD_MODE;
+    if (runningMode !== requestedMode) {
+      throw buildBridgeModeMismatchError(
+        sessionName,
+        runningMode,
+        requestedMode,
+      );
+    }
     if (
       await checkBridgeHealth(pidInfo.port, {
         deep: true,
         expectedSession: sessionName,
+        expectedMode: requestedMode,
         notice,
       })
     ) {
@@ -489,6 +553,7 @@ export async function ensureBridge(
       await checkBridgeHealth(port, {
         deep: true,
         expectedSession: sessionName,
+        expectedMode: requestedMode,
         notice,
       })
     ) {
@@ -499,6 +564,7 @@ export async function ensureBridge(
         await checkBridgeHealth(port, {
           deep: true,
           expectedSession: sessionName,
+          expectedMode: requestedMode,
           notice,
         })
       ) {
@@ -573,10 +639,10 @@ async function postTool(
  * Tool argument keys whose value is a caller-supplied output path, resolved to
  * an absolute path by `resolveOutputPath` before it reaches here. The nearest
  * existing ancestor of their parent directory (or of a directory argument
- * itself) is negotiated as an MCP workspace root, so the write is not restricted
- * to the OS temp directory and missing directories can be created beneath an
- * allowed root (issue #96). Add a key here when a new file-writing tool argument
- * is introduced.
+ * itself) is negotiated as an MCP workspace root, so writes are not restricted
+ * to the OS temp directory and local inputs such as an unpacked extension can
+ * be read outside cwd. Add a key here when a file/directory argument needs
+ * roots negotiation.
  */
 const FILE_OUTPUT_ARGS_BY_TOOL = new Map<string, readonly string[]>([
   ["take_screenshot", ["filePath"]],
@@ -587,6 +653,10 @@ const FILE_OUTPUT_ARGS_BY_TOOL = new Map<string, readonly string[]>([
 ]);
 const DIR_OUTPUT_ARGS_BY_TOOL = new Map<string, readonly string[]>([
   ["lighthouse_audit", ["outputDirPath"]],
+]);
+/** Local directory inputs also need a root so MCP can verify and read them. */
+const LOCAL_INPUT_DIR_ARGS_BY_TOOL = new Map<string, readonly string[]>([
+  ["install_extension", ["path"]],
 ]);
 
 function nearestExistingAncestor(path: string): string {
@@ -601,8 +671,9 @@ function nearestExistingAncestor(path: string): string {
 
 /**
  * The workspace roots a call needs: always the invoking cwd (so writes under it
- * pass), plus the nearest existing ancestor of any output path argument (so a
- * write outside cwd, e.g. `$HOME/a.png`, passes too).
+ * pass), plus the nearest existing ancestor of any output path or local input
+ * argument (so a path outside cwd, e.g. `$HOME/a.png` or an extension folder,
+ * passes too).
  */
 export function collectRootDirs(
   name: string,
@@ -616,6 +687,12 @@ export function collectRootDirs(
     }
   }
   for (const key of DIR_OUTPUT_ARGS_BY_TOOL.get(name) ?? []) {
+    const value = args[key];
+    if (typeof value === "string" && value.length > 0) {
+      dirs.add(nearestExistingAncestor(value));
+    }
+  }
+  for (const key of LOCAL_INPUT_DIR_ARGS_BY_TOOL.get(name) ?? []) {
     const value = args[key];
     if (typeof value === "string" && value.length > 0) {
       dirs.add(nearestExistingAncestor(value));
