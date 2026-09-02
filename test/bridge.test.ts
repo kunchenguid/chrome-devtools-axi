@@ -170,6 +170,8 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL =
       process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    savedEnv.CHROME_DEVTOOLS_AXI_EXTENSIONS =
+      process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -177,6 +179,7 @@ describe("buildTransportArgs", () => {
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
+    delete process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS;
   });
 
   afterEach(() => {
@@ -194,6 +197,8 @@ describe("buildTransportArgs", () => {
       savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL =
       savedEnv.CHROME_DEVTOOLS_AXI_CHANNEL;
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS =
+      savedEnv.CHROME_DEVTOOLS_AXI_EXTENSIONS;
   });
 
   it("defaults to headless and isolated", () => {
@@ -421,6 +426,53 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
+  });
+
+  it("adds --pipe when CHROME_DEVTOOLS_AXI_EXTENSIONS=1 in local launch mode", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS = "1";
+    const args = buildTransportArgs();
+    expect(args).toContain("--pipe");
+    expect(args).toContain("--isolated");
+    expect(args).toContain("--headless");
+  });
+
+  it("adds --pipe with headed mode", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS = "1";
+    process.env.CHROME_DEVTOOLS_AXI_HEADED = "1";
+    const args = buildTransportArgs();
+    expect(args).toContain("--pipe");
+    expect(args).not.toContain("--headless");
+  });
+
+  it("rejects extensions mode with CHROME_DEVTOOLS_AXI_AUTO_CONNECT", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS = "1";
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    expect(() => buildTransportArgs()).toThrow(
+      "Extension support (CHROME_DEVTOOLS_AXI_EXTENSIONS=1) is only available in local launch mode",
+    );
+  });
+
+  it("rejects extensions mode with CHROME_DEVTOOLS_AXI_BROWSER_URL", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS = "1";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    expect(() => buildTransportArgs()).toThrow(
+      "Extension support (CHROME_DEVTOOLS_AXI_EXTENSIONS=1) is only available in local launch mode",
+    );
+  });
+
+  it("adds --pipe with user data dir for persistent profile", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS = "1";
+    process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
+    const args = buildTransportArgs();
+    expect(args).toContain("--pipe");
+    expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
+    expect(args).not.toContain("--isolated");
+  });
+
+  it("ignores CHROME_DEVTOOLS_AXI_EXTENSIONS when not set to '1'", () => {
+    process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS = "true";
+    const args = buildTransportArgs();
+    expect(args.some((a) => a === "--pipe")).toBe(false);
   });
 });
 

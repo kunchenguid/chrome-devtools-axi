@@ -189,6 +189,19 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | --------- | ------------------------------- |
 | `emulate` | Emulate device/network/viewport |
 
+### Extensions
+
+| Command              | Description                      |
+| -------------------- | -------------------------------- |
+| `ext-install <path>` | Install an unpacked extension    |
+| `ext-list`           | List installed extensions        |
+| `ext-reload <id>`    | Reload an unpacked extension     |
+| `ext-trigger <id>`   | Trigger extension's toolbar action |
+| `ext-uninstall <id>` | Uninstall an extension           |
+
+Extension commands require `CHROME_DEVTOOLS_AXI_EXTENSIONS=1` and are only available in local launch mode (not with `CHROME_DEVTOOLS_AXI_BROWSER_URL` or `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`).
+A persistent isolated browser is launched to host the extensions - see [Extension Mode](#extension-mode) for details.
+
 ### DevTools Debugging
 
 | Command            | Description                    |
@@ -327,6 +340,30 @@ The default (unset) session keeps port 9224 and the legacy state paths below.
 
 Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.
 Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT` only inline per command.
+
+### Extension mode
+
+Enable Chrome extension lifecycle management with `CHROME_DEVTOOLS_AXI_EXTENSIONS=1`:
+
+```sh
+export CHROME_DEVTOOLS_AXI_EXTENSIONS=1
+chrome-devtools-axi ext-list
+chrome-devtools-axi ext-install /path/to/extension
+chrome-devtools-axi ext-reload <extension-id>
+chrome-devtools-axi ext-trigger <extension-id>
+chrome-devtools-axi ext-uninstall <extension-id>
+```
+
+Extension mode:
+- Only works in local launch mode (default `--isolated` or `CHROME_DEVTOOLS_AXI_USER_DATA_DIR`)
+- Incompatible with `CHROME_DEVTOOLS_AXI_BROWSER_URL` and `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`
+- Uses pipe-based communication with chrome-devtools-mcp for extension access
+- Runs in an isolated browser that does not access your regular Chrome profile
+- Follows the same keychain isolation as described above
+
+This is the recommended mode for AI agents that need to test or interact with browser extensions in an automated way.
+A new isolated browser instance is started and managed entirely by chrome-devtools-axi.
+Extensions are installed into this isolated browser and never touch the user's main Chrome profile.
 
 State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`):
 

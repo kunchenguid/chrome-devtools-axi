@@ -1,5 +1,6 @@
 import { encode } from "@toon-format/toon";
 import { runAxiCli } from "axi-sdk-js";
+import { existsSync } from "node:fs";
 import {
   CdpError,
   callTool,
@@ -53,7 +54,7 @@ export type MainOptions = {
 };
 
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
-commands[35]:
+commands[40]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
   run,
@@ -61,7 +62,9 @@ commands[35]:
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
-  perf-insight <set> <name>, heap <path>, start, stop, setup hooks
+  perf-insight <set> <name>, heap <path>,
+  ext-install <path>, ext-list, ext-reload <id>, ext-trigger <id>, ext-uninstall <id>,
+  start, stop, setup hooks
 
 flags[2]:
   --help, -v/-V/--version
@@ -99,6 +102,11 @@ environment:
                                     on slow/cold systems. Recommended:
                                       npm install -g chrome-devtools-mcp
                                       export CHROME_DEVTOOLS_AXI_MCP_PATH="\$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+  CHROME_DEVTOOLS_AXI_EXTENSIONS    Set to 1 to enable Chrome extension lifecycle management
+                                    (ext-install, ext-list, ext-reload, ext-trigger, ext-uninstall).
+                                    Only available in local launch mode (not with BROWSER_URL or AUTO_CONNECT).
+                                    Requires an isolated browser instance for safety.
+                                    e.g. CHROME_DEVTOOLS_AXI_EXTENSIONS=1
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
 
@@ -588,6 +596,53 @@ Install or repair agent SessionStart hooks for chrome-devtools-axi ambient conte
 
 examples:
   chrome-devtools-axi setup hooks`,
+
+  "ext-install": `usage: chrome-devtools-axi ext-install <path>
+Install an unpacked Chrome extension from a local directory.
+
+Requires CHROME_DEVTOOLS_AXI_EXTENSIONS=1 environment variable to enable extension mode.
+Only available in local launch mode (not with CHROME_DEVTOOLS_AXI_BROWSER_URL or AUTO_CONNECT).
+
+args:
+  <path>  Absolute path to the unpacked extension directory (required)
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSIONS=1 chrome-devtools-axi ext-install /path/to/extension`,
+
+  "ext-list": `usage: chrome-devtools-axi ext-list
+List all installed extensions with id, name, version, and enabled state.
+
+Requires CHROME_DEVTOOLS_AXI_EXTENSIONS=1 environment variable to enable extension mode.
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSIONS=1 chrome-devtools-axi ext-list`,
+
+  "ext-reload": `usage: chrome-devtools-axi ext-reload <id>
+Reload an installed unpacked extension by id.
+
+args:
+  <id>  Extension ID from ext-list (required)
+
+examples:
+  chrome-devtools-axi ext-reload jopfghbocfiapmmcjpbkcbgbefhphpkd`,
+
+  "ext-trigger": `usage: chrome-devtools-axi ext-trigger <id>
+Trigger an extension's default toolbar action.
+
+args:
+  <id>  Extension ID from ext-list (required)
+
+examples:
+  chrome-devtools-axi ext-trigger jopfghbocfiapmmcjpbkcbgbefhphpkd`,
+
+  "ext-uninstall": `usage: chrome-devtools-axi ext-uninstall <id>
+Uninstall an installed extension by id.
+
+args:
+  <id>  Extension ID from ext-list (required)
+
+examples:
+  chrome-devtools-axi ext-uninstall jopfghbocfiapmmcjpbkcbgbefhphpkd`,
 };
 
 export function getCommandHelp(command: string): string | null {
@@ -1671,6 +1726,89 @@ async function handleSetup(args: string[]): Promise<string> {
   ]);
 }
 
+// --- Extension lifecycle commands ---
+
+async function handleExtInstall(args: string[]): Promise<string> {
+  const path = args[0];
+  if (!path) {
+    throw new CdpError("Missing extension path", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi ext-install /absolute/path/to/extension`",
+    ]);
+  }
+
+  if (!path.startsWith("/")) {
+    throw new CdpError("Extension path must be absolute", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi ext-install /absolute/path/to/extension`",
+    ]);
+  }
+
+  if (!existsSync(path)) {
+    throw new CdpError(
+      `Extension path does not exist: ${path}`,
+      "VALIDATION_ERROR",
+      [
+        "Verify the path is correct and the directory exists",
+        "Run `chrome-devtools-axi ext-install /absolute/path/to/extension`",
+      ],
+    );
+  }
+
+  const result = await callTool("install_unpacked_extension", { path });
+  return formatMcpResult("extension installed", result, [
+    "Run `chrome-devtools-axi ext-list` to see the new extension's ID",
+    "Run `chrome-devtools-axi ext-trigger <id>` to activate the extension",
+  ]);
+}
+
+async function handleExtList(): Promise<string> {
+  const result = await callTool("list_extensions", {});
+  return formatMcpResult("extensions", result, [
+    "Use extension IDs with ext-reload, ext-trigger, and ext-uninstall",
+  ]);
+}
+
+async function handleExtReload(args: string[]): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new CdpError("Missing extension ID", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi ext-reload <id>` — get id from ext-list",
+    ]);
+  }
+
+  const result = await callTool("reload_extension", { extensionId: id });
+  return formatMcpResult("extension reloaded", result, [
+    "Run `chrome-devtools-axi ext-list` to verify the reload",
+  ]);
+}
+
+async function handleExtTrigger(args: string[]): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new CdpError("Missing extension ID", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi ext-trigger <id>` — get id from ext-list",
+    ]);
+  }
+
+  const result = await callTool("trigger_extension_action", { extensionId: id });
+  return formatMcpResult("extension action triggered", result, [
+    "Verify the extension's default toolbar action was activated",
+  ]);
+}
+
+async function handleExtUninstall(args: string[]): Promise<string> {
+  const id = args[0];
+  if (!id) {
+    throw new CdpError("Missing extension ID", "VALIDATION_ERROR", [
+      "Run `chrome-devtools-axi ext-uninstall <id>` — get id from ext-list",
+    ]);
+  }
+
+  const result = await callTool("uninstall_extension", { extensionId: id });
+  return formatMcpResult("extension uninstalled", result, [
+    "Run `chrome-devtools-axi ext-list` to verify the uninstall",
+  ]);
+}
+
 async function handleHome(_full: boolean): Promise<string> {
   const result = await getSessionSnapshotIfRunning();
   if (!result) {
@@ -1743,6 +1881,11 @@ const COMMANDS: Record<string, CommandFn> = {
   "perf-stop": withoutFullFlag(handlePerfStop),
   "perf-insight": withoutFullFlag(handlePerfInsight),
   heap: withoutFullFlag(handleHeap),
+  "ext-install": withoutFullFlag(handleExtInstall),
+  "ext-list": async () => handleExtList(),
+  "ext-reload": withoutFullFlag(handleExtReload),
+  "ext-trigger": withoutFullFlag(handleExtTrigger),
+  "ext-uninstall": withoutFullFlag(handleExtUninstall),
   start: async () => handleStart(),
   stop: async () => handleStop(),
   setup: withoutFullFlag(handleSetup),

@@ -654,6 +654,7 @@ export function buildTransportArgs(): string[] {
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   const userDataDir = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
   const channel = process.env.CHROME_DEVTOOLS_AXI_CHANNEL?.trim();
+  const enableExtensions = process.env.CHROME_DEVTOOLS_AXI_EXTENSIONS === "1";
 
   if (autoConnect) {
     // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
@@ -720,6 +721,18 @@ export function buildTransportArgs(): string[] {
     for (const arg of extraChromeArgs.trim().split(/\s+/)) {
       args.push(`--chrome-arg=${arg}`);
     }
+  }
+
+  // Extension support requires pipe mode in chrome-devtools-mcp.
+  // Only available when launching a new browser (not remote attach).
+  if (enableExtensions) {
+    if (autoConnect || browserUrl) {
+      throw new Error(
+        "Extension support (CHROME_DEVTOOLS_AXI_EXTENSIONS=1) is only available in local launch mode. " +
+        "Remove CHROME_DEVTOOLS_AXI_AUTO_CONNECT and CHROME_DEVTOOLS_AXI_BROWSER_URL to enable extensions.",
+      );
+    }
+    args.push("--pipe");
   }
 
   return args;
