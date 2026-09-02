@@ -25,9 +25,11 @@ vi.mock("../src/client.js", () => ({
 import {
   assertExtensionMode,
   handleExtensionAction,
+  handleExtensionInspect,
   handleExtensionInstall,
   handleExtensionList,
   handleExtensionReload,
+  handleExtensionTargets,
   handleExtensionUninstall,
   parseExtensionList,
   validateExtensionId,
@@ -181,5 +183,79 @@ describe("extension lifecycle commands", () => {
 
   it("asserts the mode gate independently of tool execution", () => {
     expect(() => assertExtensionMode()).not.toThrow();
+  });
+
+  it("lists extension targets (service workers and extension pages)", async () => {
+    callTool.mockResolvedValueOnce(
+      [
+        "## Pages",
+        "0: https://example.com (https://example.com/)",
+        "",
+        "## Extension Pages",
+        `1: extension://popup (extension://${EXTENSION_ID}/popup.html)`,
+        "",
+        "## Extension Service Workers",
+        `2: extension://worker (extension://${EXTENSION_ID}/background.js)`,
+      ].join("\n"),
+    );
+
+    const output = await handleExtensionTargets([]);
+
+    expect(callTool).toHaveBeenCalledWith("list_pages");
+    expect(output).toContain("operation: targets");
+    expect(output).toContain("popup.html");
+    expect(output).toContain("background.js");
+  });
+
+  it("reports when no extension targets are found", async () => {
+    callTool.mockResolvedValueOnce("## Pages\n0: https://example.com");
+
+    const output = await handleExtensionTargets([]);
+
+    expect(output).toContain("No extension targets found");
+  });
+
+  it("inspects extension metadata by ID", async () => {
+    callTool.mockResolvedValueOnce(
+      [
+        "## Extensions",
+        `id=${EXTENSION_ID} "Test Extension" v1.0.0 Enabled`,
+      ].join("\n"),
+    );
+
+    const output = await handleExtensionInspect([EXTENSION_ID]);
+
+    expect(callTool).toHaveBeenCalledWith("list_extensions");
+    expect(output).toContain(EXTENSION_ID);
+    expect(output).toContain("Test Extension");
+    expect(output).toContain("1.0.0");
+    expect(output).toContain("true");
+  });
+
+  it("rejects inspect when extension ID is not found", async () => {
+    callTool.mockResolvedValueOnce(
+      [
+        "## Extensions",
+        `id=ponmlkjihgfedcbaponmlkjihgfedcba "Other Extension" v1.0.0 Disabled`,
+      ].join("\n"),
+    );
+
+    await expect(handleExtensionInspect([EXTENSION_ID])).rejects.toMatchObject(
+      {
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("not found"),
+      },
+    );
+  });
+
+  it("handles unparseable extension list on inspect", async () => {
+    callTool.mockResolvedValueOnce("future format");
+
+    await expect(handleExtensionInspect([EXTENSION_ID])).rejects.toMatchObject(
+      {
+        code: "BROWSER_ERROR",
+        message: expect.stringContaining("Unable to parse"),
+      },
+    );
   });
 });

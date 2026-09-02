@@ -33,9 +33,11 @@ import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
 import {
   handleExtensionAction,
+  handleExtensionInspect,
   handleExtensionInstall,
   handleExtensionList,
   handleExtensionReload,
+  handleExtensionTargets,
   handleExtensionUninstall,
 } from "./extensions.js";
 
@@ -60,14 +62,15 @@ export type MainOptions = {
 };
 
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
-commands[40]:
+commands[43]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
   run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
-  extension-install <absolute-path>, extensions, extension-reload <id>,
-  extension-action <id>, extension-uninstall <id>,
+  extension-install <absolute-path>, extensions, extension-targets,
+  extension-inspect <id>, extension-reload <id>, extension-action <id>,
+  extension-uninstall <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
   perf-insight <set> <name>, heap <path>, start, stop, setup hooks
@@ -443,6 +446,37 @@ requires:
 
 examples:
   CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 chrome-devtools-axi extension-uninstall \\
+    abcdefghijklmnopabcdefghijklmnop`,
+
+  "extension-targets": `usage: chrome-devtools-axi extension-targets
+List all extension-related targets (service workers and extension pages).
+
+output:
+  Shows all active extension service workers and extension pages in the
+  browser session. Service workers are the extension's background script;
+  extension pages are popup windows and options pages.
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 and an installed extension
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 chrome-devtools-axi extension-targets`,
+
+  "extension-inspect": `usage: chrome-devtools-axi extension-inspect <id>
+Show detailed metadata for one extension by its exact Chrome extension ID.
+
+args:
+  <id>  32 lowercase a-p extension ID from \`chrome-devtools-axi extensions\` (required)
+
+output:
+  Displays the extension's id, name, version, and enabled state.
+  Use this to validate extension installation after extension-install.
+
+requires:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1
+
+examples:
+  CHROME_DEVTOOLS_AXI_EXTENSION_MODE=1 chrome-devtools-axi extension-inspect \\
     abcdefghijklmnopabcdefghijklmnop`,
 
   resize: `usage: chrome-devtools-axi resize <width> <height>
@@ -1824,6 +1858,8 @@ const COMMANDS: Record<string, CommandFn> = {
   "extension-install": withoutFullFlag(handleExtensionInstall),
   extensions: withoutFullFlag(handleExtensionList),
   "extension-list": withoutFullFlag(handleExtensionList),
+  "extension-targets": withoutFullFlag(handleExtensionTargets),
+  "extension-inspect": withoutFullFlag(handleExtensionInspect),
   "extension-reload": withoutFullFlag(handleExtensionReload),
   "extension-action": withoutFullFlag(handleExtensionAction),
   "extension-trigger-action": withoutFullFlag(handleExtensionAction),

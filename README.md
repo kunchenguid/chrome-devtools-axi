@@ -200,8 +200,15 @@ export CHROME_DEVTOOLS_AXI_SESSION=extension-test
 chrome-devtools-axi extension-install /absolute/path/to/unpacked-extension
 chrome-devtools-axi extensions
 # Copy the exact 32-character id (not the display name) from the list:
+chrome-devtools-axi extension-inspect <id>
+chrome-devtools-axi extension-targets
 chrome-devtools-axi extension-reload <id>
 chrome-devtools-axi extension-action <id>
+# Verify with ordinary page commands:
+chrome-devtools-axi pages
+chrome-devtools-axi selectpage <service-worker-id>
+chrome-devtools-axi eval "console.log('Service worker alive')"
+# Cleanup:
 chrome-devtools-axi extension-uninstall <id>
 chrome-devtools-axi stop
 ```
@@ -211,8 +218,14 @@ Commands are forwarded to the official MCP tools
 `trigger_extension_action`, and `uninstall_extension`. Install accepts only an
 existing absolute unpacked-extension directory. List reports each extension's
 id, name, version, and enabled state; all mutating commands require an exact
-Chrome extension id and never perform ambiguous name matching. Each response
-shows the operation, selected AXI session, isolated profile, and pipe transport.
+Chrome extension id and never perform ambiguous name matching.
+
+Extension inspection commands:
+- `extension-inspect <id>` - Show extension metadata (name, version, enabled state)
+- `extension-targets` - List all extension-related targets (service workers and extension pages)
+  that can be debugged with the ordinary `pages`, `selectpage`, and `eval` commands
+
+Each response shows the operation, selected AXI session, isolated profile, and pipe transport.
 
 Do not set `CHROME_DEVTOOLS_AXI_BROWSER_URL`, `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`,
 or `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` in extension mode. AXI rejects those

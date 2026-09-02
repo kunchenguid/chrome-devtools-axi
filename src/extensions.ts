@@ -23,7 +23,9 @@ export type ExtensionOperation =
   | "list"
   | "reload"
   | "action"
-  | "uninstall";
+  | "uninstall"
+  | "targets"
+  | "inspect";
 
 export const EXTENSION_PROFILE_DESCRIPTION =
   "temporary isolated profile (owned by this session)";
@@ -266,4 +268,100 @@ export function handleExtensionUninstall(args: string[]): Promise<string> {
     "chrome-devtools-axi extension-uninstall <id>",
     "uninstall_extension",
   );
+}
+
+/**
+ * List all extension-related targets (service workers and extension pages).
+ * Uses list_pages to identify extension targets in the browser session.
+ */
+export async function handleExtensionTargets(args: string[]): Promise<string> {
+  assertExtensionMode();
+  assertNoExtraArgs(args, "chrome-devtools-axi extension-targets");
+  const result = await callTool("list_pages");
+
+  const metadata = encode({
+    extension: extensionMetadata("targets"),
+  });
+
+  // Parse the list_pages output for extension targets
+  const lines = result.split(/\r?\n/).map((l) => l.trim());
+  const targetLines: string[] = [];
+  let inExtensionSection = false;
+
+  for (const line of lines) {
+    if (line.match(/^##\s+(Extension Pages|Extension Service Workers)$/)) {
+      inExtensionSection = true;
+      continue;
+    }
+    if (line.match(/^##\s+/)) {
+      inExtensionSection = false;
+      continue;
+    }
+    if (inExtensionSection && line.length > 0) {
+      targetLines.push(line);
+    }
+  }
+
+  const content =
+    targetLines.length > 0
+      ? `targets:\n${targetLines.join("\n")}`
+      : "No extension targets found. Install an extension with extension-install first.";
+
+  return [metadata, content].join("\n");
+}
+
+/**
+ * Parse extension list to get detailed info about a specific extension.
+ */
+export async function handleExtensionInspect(args: string[]): Promise<string> {
+  assertExtensionMode();
+  if (args.length !== 1) {
+    throw new CdpError(
+      "Missing or unexpected extension ID",
+      "VALIDATION_ERROR",
+      [`Run \`chrome-devtools-axi extension-inspect <id>\``],
+    );
+  }
+  const id = validateExtensionId(args[0]);
+
+  // Get the extension list
+  const listResult = await callTool("list_extensions");
+  const extensions = parseExtensionList(listResult);
+
+  if (!extensions) {
+    throw new CdpError(
+      "Unable to parse extension list",
+      "BROWSER_ERROR",
+      [
+        "Run `chrome-devtools-axi extensions` to see the current extension list format",
+      ],
+    );
+  }
+
+  const extension = extensions.find((ext) => ext.id === id);
+  if (!extension) {
+    throw new CdpError(
+      `Extension ${id} not found`,
+      "VALIDATION_ERROR",
+      [
+        "Run `chrome-devtools-axi extensions` to list all extension IDs",
+        "Copy the exact 32-character id from the list",
+      ],
+    );
+  }
+
+  const metadata = encode({
+    extension: extensionMetadata("inspect", { id }),
+  });
+
+  const details = encode({
+    details: {
+      id: extension.id,
+      name: extension.name,
+      version: extension.version,
+      enabled: extension.enabled,
+    },
+  });
+
+  return [metadata, details].join("\n");
 }
