@@ -195,7 +195,10 @@ describe("main", () => {
 
       await main(argv);
 
-      expect(callTool).toHaveBeenCalledWith(tool, expect.objectContaining(args));
+      expect(callTool).toHaveBeenCalledWith(
+        tool,
+        expect.objectContaining(args),
+      );
       expect(process.exitCode).toBeUndefined();
     },
   );
