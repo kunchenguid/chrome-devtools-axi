@@ -174,6 +174,22 @@ describe("main", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it.each([
+    {
+      argv: ["emulate", "--user-agent", "--automation-test"],
+      tool: "emulate",
+      args: { userAgent: "--automation-test" },
+    },
+  ])("passes dash-prefixed values to $tool", async ({ argv, tool, args }) => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(argv);
+
+    expect(callTool).toHaveBeenCalledWith(tool, args);
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("recovers open by creating a page when the browser is not yet connected", async () => {
     const write = vi
       .spyOn(process.stdout, "write")

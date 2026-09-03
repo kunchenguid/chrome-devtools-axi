@@ -1714,12 +1714,17 @@ function validateCommandFlags(
   command: string,
   args: string[],
   allowedFlags: readonly string[],
+  valueFlags: readonly string[],
   positionalArgsBeforeText = args.length,
 ): void {
   let positionalArgs = 0;
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (positionalArgs === positionalArgsBeforeText) return;
-    if (arg === "--help" || allowedFlags.includes(arg)) continue;
+    if (arg === "--help" || allowedFlags.includes(arg)) {
+      if (valueFlags.includes(arg)) i += 1;
+      continue;
+    }
     if (arg !== "-" && arg.startsWith("-")) {
       throw new CdpError(
         `Unknown flag ${arg} for \`${command}\``,
@@ -1814,6 +1819,17 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   setup: [],
 };
 
+const COMMAND_VALUE_FLAGS: Partial<Record<string, readonly string[]>> = {
+  screenshot: ["--uid", "--format"],
+  emulate: COMMAND_FLAGS.emulate,
+  console: COMMAND_FLAGS.console,
+  network: COMMAND_FLAGS.network,
+  "network-get": COMMAND_FLAGS["network-get"],
+  lighthouse: COMMAND_FLAGS.lighthouse,
+  "perf-start": ["--file"],
+  "perf-stop": COMMAND_FLAGS["perf-stop"],
+};
+
 const COMMAND_POSITIONAL_TEXT_START: Partial<Record<string, number>> = {
   fill: 1,
   type: 0,
@@ -1830,6 +1846,7 @@ const COMMANDS: Record<string, CommandFn> = Object.fromEntries(
         command,
         args,
         COMMAND_FLAGS[command] ?? [],
+        COMMAND_VALUE_FLAGS[command] ?? [],
         COMMAND_POSITIONAL_TEXT_START[command],
       );
       return handler(args);
