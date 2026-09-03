@@ -1715,6 +1715,7 @@ function validateCommandFlags(
   args: string[],
   allowedFlags: readonly string[],
   valueFlags: readonly string[],
+  dashPositionalSlots: readonly number[],
   positionalArgsBeforeText = args.length,
 ): void {
   let positionalArgs = 0;
@@ -1725,7 +1726,11 @@ function validateCommandFlags(
       if (valueFlags.includes(arg)) i += 1;
       continue;
     }
-    if (arg !== "-" && arg.startsWith("-")) {
+    if (
+      arg !== "-" &&
+      arg.startsWith("-") &&
+      (arg.startsWith("--") || !dashPositionalSlots.includes(positionalArgs))
+    ) {
       throw new CdpError(
         `Unknown flag ${arg} for \`${command}\``,
         "VALIDATION_ERROR",
@@ -1838,6 +1843,14 @@ const COMMAND_POSITIONAL_TEXT_START: Partial<Record<string, number>> = {
   dialog: 1,
 };
 
+const COMMAND_DASH_POSITIONAL_SLOTS: Partial<
+  Record<string, readonly number[]>
+> = {
+  heap: [0],
+  upload: [1],
+  screenshot: [0],
+};
+
 const COMMANDS: Record<string, CommandFn> = Object.fromEntries(
   Object.entries(COMMAND_HANDLERS).map(([command, handler]) => [
     command,
@@ -1847,6 +1860,7 @@ const COMMANDS: Record<string, CommandFn> = Object.fromEntries(
         args,
         COMMAND_FLAGS[command] ?? [],
         COMMAND_VALUE_FLAGS[command] ?? [],
+        COMMAND_DASH_POSITIONAL_SLOTS[command] ?? [],
         COMMAND_POSITIONAL_TEXT_START[command],
       );
       return handler(args);
