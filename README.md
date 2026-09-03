@@ -231,6 +231,10 @@ session is active or the no-session status/help block when one is not.
 
 ### Flags
 
+`--help`, `-v`, `-V`, and `--version` are top-level options. All other flags
+are command-specific; the CLI rejects a flag that is not listed by
+`chrome-devtools-axi <command> --help`.
+
 | Flag                        | Description                                 |
 | --------------------------- | ------------------------------------------- |
 | `--help`                    | Show usage information                      |

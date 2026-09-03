@@ -1710,7 +1710,38 @@ function withoutFullFlag(
   return (args) => handler(splitFullFlag(args).args);
 }
 
-const COMMANDS: Record<string, CommandFn> = {
+function validateCommandFlags(
+  command: string,
+  args: string[],
+  allowedFlags: readonly string[],
+  valueFlags: readonly string[],
+  dashPositionalSlots: readonly number[],
+  positionalArgsBeforeText = args.length,
+): void {
+  let positionalArgs = 0;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (positionalArgs === positionalArgsBeforeText) return;
+    if (arg === "--help" || allowedFlags.includes(arg)) {
+      if (valueFlags.includes(arg)) i += 1;
+      continue;
+    }
+    if (
+      arg !== "-" &&
+      arg.startsWith("-") &&
+      (arg.startsWith("--") || !dashPositionalSlots.includes(positionalArgs))
+    ) {
+      throw new CdpError(
+        `Unknown flag ${arg} for \`${command}\``,
+        "VALIDATION_ERROR",
+        [`Run \`chrome-devtools-axi ${command} --help\` to see valid flags`],
+      );
+    }
+    positionalArgs += 1;
+  }
+}
+
+const COMMAND_HANDLERS: Record<string, CommandFn> = {
   open: withFullFlag(handleOpen),
   snapshot: async (args) => handleSnapshot(splitFullFlag(args).full),
   screenshot: withoutFullFlag(handleScreenshot),
@@ -1747,6 +1778,95 @@ const COMMANDS: Record<string, CommandFn> = {
   stop: async () => handleStop(),
   setup: withoutFullFlag(handleSetup),
 };
+
+const COMMAND_FLAGS: Record<string, readonly string[]> = {
+  open: ["--full"],
+  screenshot: ["--uid", "--full-page", "--format"],
+  snapshot: ["--full"],
+  click: ["--full"],
+  fill: ["--full"],
+  type: ["--full"],
+  press: ["--full"],
+  scroll: ["--full"],
+  back: ["--full"],
+  wait: [],
+  eval: ["--full"],
+  run: [],
+  hover: ["--full"],
+  drag: ["--full"],
+  fillform: ["--full"],
+  dialog: [],
+  upload: ["--full"],
+  pages: [],
+  newpage: ["--background", "--full"],
+  selectpage: ["--full"],
+  closepage: [],
+  resize: [],
+  emulate: [
+    "--viewport",
+    "--color-scheme",
+    "--network",
+    "--cpu",
+    "--geolocation",
+    "--user-agent",
+  ],
+  console: ["--type", "--limit", "--page"],
+  "console-get": [],
+  network: ["--type", "--limit", "--page"],
+  "network-get": ["--response-file", "--request-file"],
+  lighthouse: ["--device", "--mode", "--output-dir"],
+  "perf-start": ["--no-reload", "--no-auto-stop", "--file"],
+  "perf-stop": ["--file"],
+  "perf-insight": [],
+  heap: [],
+  start: [],
+  stop: [],
+  setup: [],
+};
+
+const COMMAND_VALUE_FLAGS: Partial<Record<string, readonly string[]>> = {
+  screenshot: ["--uid", "--format"],
+  emulate: COMMAND_FLAGS.emulate,
+  console: COMMAND_FLAGS.console,
+  network: COMMAND_FLAGS.network,
+  "network-get": COMMAND_FLAGS["network-get"],
+  lighthouse: COMMAND_FLAGS.lighthouse,
+  "perf-start": ["--file"],
+  "perf-stop": COMMAND_FLAGS["perf-stop"],
+};
+
+const COMMAND_POSITIONAL_TEXT_START: Partial<Record<string, number>> = {
+  fill: 1,
+  type: 0,
+  wait: 0,
+  eval: 0,
+  dialog: 1,
+};
+
+const COMMAND_DASH_POSITIONAL_SLOTS: Partial<
+  Record<string, readonly number[]>
+> = {
+  heap: [0],
+  upload: [1],
+  screenshot: [0],
+};
+
+const COMMANDS: Record<string, CommandFn> = Object.fromEntries(
+  Object.entries(COMMAND_HANDLERS).map(([command, handler]) => [
+    command,
+    (args: string[]) => {
+      validateCommandFlags(
+        command,
+        args,
+        COMMAND_FLAGS[command] ?? [],
+        COMMAND_VALUE_FLAGS[command] ?? [],
+        COMMAND_DASH_POSITIONAL_SLOTS[command] ?? [],
+        COMMAND_POSITIONAL_TEXT_START[command],
+      );
+      return handler(args);
+    },
+  ]),
+);
 
 export async function main(
   options: MainOptions | string[] = {},

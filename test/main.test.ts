@@ -107,6 +107,133 @@ describe("main", () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it.each([
+    {
+      argv: ["pages", "--zzzz", "nonsense"],
+      command: "pages",
+      flag: "--zzzz",
+    },
+    {
+      argv: ["pages", "-zzzz", "nonsense"],
+      command: "pages",
+      flag: "-zzzz",
+    },
+    { argv: ["heap", "--zzzz"], command: "heap", flag: "--zzzz" },
+  ])(
+    "rejects unknown command flag $flag for $command before calling MCP",
+    async ({ argv, command, flag }) => {
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+
+      await main(argv);
+
+      expect(callTool).not.toHaveBeenCalled();
+      expect(String(write.mock.calls[0]?.[0])).toContain(
+        `Unknown flag ${flag} for \`${command}\``,
+      );
+      expect(process.exitCode).toBe(2);
+    },
+  );
+
+  it("rejects an unknown flag after fill's allowed --full flag", async () => {
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    await main(["fill", "--full", "--zzzz", "value"]);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(String(write.mock.calls[0]?.[0])).toContain(
+      "Unknown flag --zzzz for `fill`",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it.each([
+    { argv: ["fill", "@1", "--literal"], tool: "fill" },
+    { argv: ["type", "--literal"], tool: "type_text" },
+    { argv: ["wait", "--ready"], tool: "wait_for" },
+    { argv: ["eval", "--counter"], tool: "evaluate_script" },
+    { argv: ["dialog", "accept", "--ready"], tool: "handle_dialog" },
+  ])(
+    "keeps positional text beginning with -- for $tool",
+    async ({ argv, tool }) => {
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      callTool.mockResolvedValue("");
+
+      await main(argv);
+
+      expect(callTool.mock.calls[0]?.[0]).toBe(tool);
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it.each([
+    {
+      argv: ["heap", "-capture.heapsnapshot"],
+      tool: "take_memory_snapshot",
+      args: { filePath: resolve(process.cwd(), "-capture.heapsnapshot") },
+    },
+    {
+      argv: ["upload", "@1", "-file"],
+      tool: "upload_file",
+      args: { uid: "1", filePath: "-file" },
+    },
+    {
+      argv: ["screenshot", "-shot.png"],
+      tool: "take_screenshot",
+      args: { filePath: resolve(process.cwd(), "-shot.png") },
+    },
+  ])(
+    "passes dash-prefixed positional paths to $tool",
+    async ({ argv, tool, args }) => {
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      callTool.mockResolvedValue("");
+
+      await main(argv);
+
+      expect(callTool).toHaveBeenCalledWith(
+        tool,
+        expect.objectContaining(args),
+      );
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it("keeps command-specific flags available", async () => {
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(["screenshot", "./shot.png", "--full-page"]);
+
+    expect(callTool).toHaveBeenCalledWith("take_screenshot", {
+      filePath: resolve(process.cwd(), "./shot.png"),
+      fullPage: true,
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.each([
+    {
+      argv: ["emulate", "--user-agent", "--automation-test"],
+      tool: "emulate",
+      args: { userAgent: "--automation-test" },
+    },
+  ])("passes dash-prefixed values to $tool", async ({ argv, tool, args }) => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValueOnce("");
+
+    await main(argv);
+
+    expect(callTool).toHaveBeenCalledWith(tool, args);
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("recovers open by creating a page when the browser is not yet connected", async () => {
     const write = vi
       .spyOn(process.stdout, "write")
