@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.34](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.33...chrome-devtools-axi-v0.1.34) (2026-09-03)
+
+
+### Bug Fixes
+
+* **cli:** reject unknown command flags ([#129](https://github.com/kunchenguid/chrome-devtools-axi/issues/129)) ([deb13a3](https://github.com/kunchenguid/chrome-devtools-axi/commit/deb13a3de2429710f7be4b90b28432d91d11214c))
+
 ## [0.1.33](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.32...chrome-devtools-axi-v0.1.33) (2026-08-28)
 
 
