@@ -233,6 +233,36 @@ describe("createPageHelper", () => {
     expect(snap).toContain("uid=g7:1");
   });
 
+  it("page.snapshot recaptures after a mutation during capture", async () => {
+    vi.spyOn(generation, "bumpGeneration")
+      .mockReturnValueOnce(7)
+      .mockReturnValueOnce(8);
+    callTool
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce('RootWebArea "First"\n  uid=1 link "Home"')
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":1}\n```',
+      )
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce('RootWebArea "Second"\n  uid=2 link "Account"')
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":8,"mutations":0}\n```',
+      );
+
+    const snap = await createPageHelper(callTool).snapshot();
+
+    expect(callTool.mock.calls.map(([name]) => name)).toEqual([
+      "evaluate_script",
+      "take_snapshot",
+      "evaluate_script",
+      "evaluate_script",
+      "take_snapshot",
+      "evaluate_script",
+    ]);
+    expect(snap).toContain('RootWebArea "Second"');
+    expect(snap).toContain("uid=g8:2");
+  });
+
   it("page.wait with number waits by duration", async () => {
     callTool.mockResolvedValueOnce("");
 

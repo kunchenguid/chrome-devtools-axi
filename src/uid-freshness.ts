@@ -17,10 +17,12 @@ export async function captureFreshSnapshot(
   caller: ToolCaller,
   capture: () => Promise<string>,
 ): Promise<string> {
-  const generation = bumpGeneration();
-  await markPageSnapshotGeneration(generation, caller);
-  const snapshot = await capture();
-  return stampSnapshotGeneration(snapshot, generation);
+  const first = await captureSnapshot(caller, capture);
+  const fresh =
+    first.state?.generation === first.generation && first.state.mutations > 0
+      ? await captureSnapshot(caller, capture)
+      : first;
+  return stampSnapshotGeneration(fresh.snapshot, fresh.generation);
 }
 
 function throwStaleRef(
@@ -64,6 +66,22 @@ async function markPageSnapshotGeneration(
 interface PageRefState {
   generation: number;
   mutations: number;
+}
+
+interface CapturedSnapshot {
+  generation: number;
+  snapshot: string;
+  state: PageRefState | null;
+}
+
+async function captureSnapshot(
+  caller: ToolCaller,
+  capture: () => Promise<string>,
+): Promise<CapturedSnapshot> {
+  const generation = bumpGeneration();
+  await markPageSnapshotGeneration(generation, caller);
+  const snapshot = await capture();
+  return { generation, snapshot, state: await getPageRefState(caller) };
 }
 
 async function getPageRefState(

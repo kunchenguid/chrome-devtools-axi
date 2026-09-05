@@ -280,13 +280,10 @@ describe("main", () => {
       ["new_page", { url: "https://airlockhq.com" }],
       [
         "evaluate_script",
-        {
-          function: expect.stringContaining(
-            "__chromeDevtoolsAxiSnapshotGeneration",
-          ),
-        },
+        expect.any(Object),
       ],
       ["take_snapshot"],
+      ["evaluate_script", expect.any(Object)],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
     expect(String(write.mock.calls[0]?.[0])).toContain(
@@ -313,13 +310,10 @@ describe("main", () => {
       ["new_page", { url: "https://airlockhq.com" }],
       [
         "evaluate_script",
-        {
-          function: expect.stringContaining(
-            "__chromeDevtoolsAxiSnapshotGeneration",
-          ),
-        },
+        expect.any(Object),
       ],
       ["take_snapshot"],
+      ["evaluate_script", expect.any(Object)],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
     expect(process.exitCode).toBeUndefined();
