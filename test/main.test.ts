@@ -26,6 +26,7 @@ vi.mock("../src/client.js", () => ({
 
 import { main } from "../src/cli.js";
 import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
+import * as generation from "../src/generation.js";
 import { setSelectedPageId } from "../src/selected-page.js";
 
 /**
@@ -162,7 +163,16 @@ describe("main", () => {
       const write = vi
         .spyOn(process.stdout, "write")
         .mockImplementation(() => true);
-      callTool.mockResolvedValue("");
+      if (preflight) {
+        vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+        callTool
+          .mockResolvedValueOnce(
+            'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+          )
+          .mockResolvedValue("");
+      } else {
+        callTool.mockResolvedValue("");
+      }
 
       await main(argv);
 
@@ -189,6 +199,7 @@ describe("main", () => {
       argv: ["upload", "@1", "-file"],
       tool: "upload_file",
       args: { uid: "1", filePath: "-file" },
+      preflight: true,
     },
     {
       argv: ["screenshot", "-shot.png"],
@@ -197,9 +208,18 @@ describe("main", () => {
     },
   ])(
     "passes dash-prefixed positional paths to $tool",
-    async ({ argv, tool, args }) => {
+    async ({ argv, tool, args, preflight }) => {
       vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      callTool.mockResolvedValue("");
+      if (preflight) {
+        vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+        callTool
+          .mockResolvedValueOnce(
+            'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+          )
+          .mockResolvedValue("");
+      } else {
+        callTool.mockResolvedValue("");
+      }
 
       await main(argv);
 
