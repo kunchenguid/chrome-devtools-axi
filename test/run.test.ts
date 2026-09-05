@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AxiError } from "axi-sdk-js";
 
 // --- Mock the client layer ---
@@ -31,6 +31,7 @@ import {
   parseEvalOutput,
   runScript,
 } from "../src/run.js";
+import * as generation from "../src/generation.js";
 
 /** Mock response for the evaluate_script call that page.open() makes to read url+status. */
 const OPEN_INFO_RESPONSE =
@@ -55,6 +56,7 @@ afterEach(() => {
   callTool.mockReset();
   process.exitCode = undefined;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 // --- 1. No-args output teaches `run` ---
@@ -130,6 +132,10 @@ describe("parseEvalOutput", () => {
 // --- 4. Script helper object maps commands to bridge calls ---
 
 describe("createPageHelper", () => {
+  beforeEach(() => {
+    vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+  });
+
   it("page.open calls navigate_page, falls back to new_page, returns { url, status }", async () => {
     callTool
       .mockRejectedValueOnce(new CdpError("not connected", "BROWSER_ERROR"))
@@ -208,8 +214,9 @@ describe("createPageHelper", () => {
     expect(result).toBe(3);
   });
 
-  it("page.snapshot strips header", async () => {
-    callTool.mockResolvedValueOnce(
+  it("page.snapshot stamps refs with its generation", async () => {
+    vi.spyOn(generation, "bumpGeneration").mockReturnValue(7);
+    callTool.mockResolvedValue(
       '## Latest page snapshot\nRootWebArea "Title"\n  uid=1 link "Home"',
     );
 
@@ -219,6 +226,7 @@ describe("createPageHelper", () => {
     expect(callTool).toHaveBeenCalledWith("take_snapshot");
     expect(snap).toContain("RootWebArea");
     expect(snap).not.toContain("## Latest");
+    expect(snap).toContain("uid=g7:1");
   });
 
   it("page.wait with number waits by duration", async () => {
@@ -256,8 +264,13 @@ describe("createPageHelper", () => {
     expect(fn).toContain("5000");
   });
 
-  it("page.click calls click with parsed uid", async () => {
-    callTool.mockResolvedValueOnce("");
+  it("page.click calls click with a fresh uid", async () => {
+    vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+    callTool
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+      )
+      .mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.click("@12");
@@ -266,7 +279,11 @@ describe("createPageHelper", () => {
   });
 
   it("page.click accepts uid without @", async () => {
-    callTool.mockResolvedValueOnce("");
+    callTool
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+      )
+      .mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.click("5");
@@ -275,7 +292,11 @@ describe("createPageHelper", () => {
   });
 
   it("page.click accepts stamped uid refs", async () => {
-    callTool.mockResolvedValueOnce("");
+    callTool
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+      )
+      .mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.click("@g7:12_3");
@@ -307,8 +328,13 @@ describe("createPageHelper", () => {
     expect(fn).toContain(".click()");
   });
 
-  it("page.fill calls fill with uid and value", async () => {
-    callTool.mockResolvedValueOnce("");
+  it("page.fill calls fill with a fresh uid and value", async () => {
+    vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+    callTool
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+      )
+      .mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.fill("@3", "hello");
@@ -317,7 +343,11 @@ describe("createPageHelper", () => {
   });
 
   it("page.fill accepts stamped uid refs", async () => {
-    callTool.mockResolvedValueOnce("");
+    callTool
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+      )
+      .mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.fill("@g7:3", "hello");
@@ -325,21 +355,72 @@ describe("createPageHelper", () => {
     expect(callTool).toHaveBeenCalledWith("fill", { uid: "3", value: "hello" });
   });
 
-  it("page.fill with CSS selector uses evaluate_script", async () => {
+  it("page.fill with CSS selector updates the native value and sends events", async () => {
     callTool.mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.fill("input[name='search']", "query");
 
-    expect(callTool).toHaveBeenCalledWith("evaluate_script", {
-      function: expect.stringContaining("input[name='search']"),
-    });
     const fn = callTool.mock.calls[0][1].function;
-    expect(fn).toContain("query");
-    expect(fn).toContain("dispatchEvent");
-    expect(fn).toContain("HTMLInputElement.prototype");
-    expect(fn).toContain("Object.getOwnPropertyDescriptor(proto, 'value').set");
-    expect(fn).not.toContain("el.value =");
+    class Field {
+      currentValue = "";
+      readonly events: string[] = [];
+
+      focus(): void {}
+
+      dispatchEvent(event: { type: string }): boolean {
+        this.events.push(event.type);
+        return true;
+      }
+    }
+    class Input extends Field {}
+    class TextArea extends Field {}
+    class Select extends Field {}
+    for (const Element of [Input, TextArea, Select]) {
+      Object.defineProperty(Element.prototype, "value", {
+        get(this: Field): string {
+          return this.currentValue;
+        },
+        set(this: Field, value: string) {
+          this.currentValue = value;
+        },
+      });
+    }
+    class TestEvent {
+      constructor(public readonly type: string) {}
+    }
+    const elements = [new Input(), new TextArea(), new Select()];
+    let current = elements[0];
+    vi.stubGlobal("document", {
+      querySelector: (selector: string) =>
+        selector === "input[name='search']" ? current : null,
+    });
+    vi.stubGlobal("HTMLInputElement", Input);
+    vi.stubGlobal("HTMLTextAreaElement", TextArea);
+    vi.stubGlobal("HTMLSelectElement", Select);
+    vi.stubGlobal("Event", TestEvent);
+
+    for (const element of elements) {
+      current = element;
+      new Function(fn)();
+      expect(element.currentValue).toBe("query");
+      expect(element.events).toEqual(["input", "change"]);
+    }
+  });
+
+  it.each([
+    ["click", (page: ReturnType<typeof createPageHelper>) => page.click("@12")],
+    ["fill", (page: ReturnType<typeof createPageHelper>) => page.fill("@12", "text")],
+  ])("page.%s rejects an unobserved uid before MCP acts", async (_name, action) => {
+    callTool.mockResolvedValueOnce(
+      "Script ran on page and returned:\n```json\nnull\n```",
+    );
+
+    await expect(action(createPageHelper(callTool))).rejects.toMatchObject({
+      code: "STALE_REF",
+    });
+    expect(callTool).not.toHaveBeenCalledWith("click", expect.anything());
+    expect(callTool).not.toHaveBeenCalledWith("fill", expect.anything());
   });
 
   it("page.type calls type_text", async () => {

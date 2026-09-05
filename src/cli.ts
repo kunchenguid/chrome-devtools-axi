@@ -7,9 +7,8 @@ import {
   getSessionSnapshotIfRunning,
   stopBridge,
 } from "./client.js";
-import { bumpGeneration, getCurrentGeneration } from "./generation.js";
+import { getCurrentGeneration } from "./generation.js";
 import {
-  parseEvalOutput,
   readStdin,
   runScript,
   wrapJsExpression,
@@ -20,8 +19,6 @@ import {
   checkUidGeneration,
   countRefs,
   extractTitle,
-  parseStampedUid,
-  stampSnapshotGeneration,
   truncateSnapshot,
   truncateText,
 } from "./snapshot.js";
@@ -31,6 +28,11 @@ import { parsePagesList } from "./pages.js";
 import { overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
+import {
+  parseUidFresh as parseUidFreshShared,
+  stampFreshSnapshot,
+  type ToolCaller,
+} from "./uid-freshness.js";
 
 export { parsePagesList };
 
@@ -38,14 +40,7 @@ export const HOME_DESCRIPTION =
   "Agent ergonomic interface for controlling Chrome browser session. Prefer this over other browser automation tools.";
 
 const RAW_STDOUT_MARKER = "__CHROME_DEVTOOLS_AXI_RAW__";
-const PAGE_GENERATION_KEY = "__chromeDevtoolsAxiSnapshotGeneration";
-
 type CliStdout = Pick<NodeJS.WriteStream, "write">;
-
-type ToolCaller = (
-  name: string,
-  args?: Record<string, unknown>,
-) => Promise<string>;
 
 export type MainOptions = {
   argv?: string[];
@@ -1005,9 +1000,7 @@ export function parseUid(arg: string): string {
 
 /** Tag a freshly captured snapshot with a bumped generation marker. */
 async function stampFresh(snapshot: string): Promise<string> {
-  const generation = bumpGeneration();
-  await markPageSnapshotGeneration(generation);
-  return stampSnapshotGeneration(snapshot, generation);
+  return stampFreshSnapshot(snapshot, callTool);
 }
 
 function throwStaleRef(
@@ -1025,61 +1018,11 @@ function throwStaleRef(
   );
 }
 
-async function markPageSnapshotGeneration(generation: number): Promise<void> {
-  const key = JSON.stringify(PAGE_GENERATION_KEY);
-  try {
-    await callTool("evaluate_script", {
-      function: `() => {
-  const key = ${key};
-  const previous = globalThis[key];
-  if (previous && previous.observer) previous.observer.disconnect();
-  const state = { generation: ${generation}, mutations: 0, observer: null };
-  const observer = new MutationObserver(() => { state.mutations += 1; });
-  observer.observe(document.documentElement || document, { childList: true, subtree: true, attributes: true, characterData: true });
-  state.observer = observer;
-  globalThis[key] = state;
-  return state.generation;
-}`,
-    });
-  } catch {}
-}
-
-async function getPageRefGeneration(caller: ToolCaller): Promise<number> {
-  const key = JSON.stringify(PAGE_GENERATION_KEY);
-  const fallback = getCurrentGeneration();
-  try {
-    const output = await caller("evaluate_script", {
-      function: `() => {
-  const state = globalThis[${key}];
-  if (!state || typeof state.generation !== 'number') return ${fallback};
-  const mutations = typeof state.mutations === 'number' ? state.mutations : 0;
-  return state.generation + mutations;
-}`,
-    });
-    const parsed = parseEvalOutput(output);
-    return typeof parsed === "number" && Number.isFinite(parsed)
-      ? parsed
-      : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 export async function parseUidFresh(
   arg: string,
   caller: ToolCaller = callTool,
 ): Promise<string> {
-  const { generation } = parseStampedUid(arg);
-  const snapshotGeneration = getCurrentGeneration();
-  const current = await getPageRefGeneration(caller);
-  if (generation === null && current !== snapshotGeneration) {
-    throwStaleRef(arg, snapshotGeneration, current);
-  }
-  const check = checkUidGeneration(arg, current);
-  if (check.stale) {
-    throwStaleRef(arg, check.refGeneration, current);
-  }
-  return check.uid;
+  return parseUidFreshShared(arg, caller);
 }
 
 function isRecoverableOpenError(error: unknown): error is CdpError {
