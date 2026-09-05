@@ -1070,10 +1070,11 @@ export async function parseUidFresh(
   caller: ToolCaller = callTool,
 ): Promise<string> {
   const { generation } = parseStampedUid(arg);
-  const current =
-    generation === null
-      ? getCurrentGeneration()
-      : await getPageRefGeneration(caller);
+  const snapshotGeneration = getCurrentGeneration();
+  const current = await getPageRefGeneration(caller);
+  if (generation === null && current !== snapshotGeneration) {
+    throwStaleRef(arg, snapshotGeneration, current);
+  }
   const check = checkUidGeneration(arg, current);
   if (check.stale) {
     throwStaleRef(arg, check.refGeneration, current);

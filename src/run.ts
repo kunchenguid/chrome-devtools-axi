@@ -271,7 +271,10 @@ export function createPageHelper(callTool: CallTool): PageHelper {
   const el = document.querySelector(${sel});
   if (!el) throw new Error('Element not found: ' + ${sel});
   el.focus();
-  el.value = ${val};
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+    : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+    : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${val});
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
 })()`,

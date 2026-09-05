@@ -151,14 +151,14 @@ describe("main", () => {
   });
 
   it.each([
-    { argv: ["fill", "@1", "--literal"], tool: "fill" },
+    { argv: ["fill", "@1", "--literal"], tool: "fill", preflight: true },
     { argv: ["type", "--literal"], tool: "type_text" },
     { argv: ["wait", "--ready"], tool: "wait_for" },
     { argv: ["eval", "--counter"], tool: "evaluate_script" },
     { argv: ["dialog", "accept", "--ready"], tool: "handle_dialog" },
   ])(
     "keeps positional text beginning with -- for $tool",
-    async ({ argv, tool }) => {
+    async ({ argv, tool, preflight }) => {
       const write = vi
         .spyOn(process.stdout, "write")
         .mockImplementation(() => true);
@@ -166,7 +166,15 @@ describe("main", () => {
 
       await main(argv);
 
-      expect(callTool.mock.calls[0]?.[0]).toBe(tool);
+      expect(callTool.mock.calls[0]?.[0]).toBe(
+        preflight ? "evaluate_script" : tool,
+      );
+      if (preflight) {
+        expect(callTool.mock.calls[1]).toEqual([
+          tool,
+          expect.objectContaining({ value: argv[argv.length - 1] }),
+        ]);
+      }
       expect(process.exitCode).toBeUndefined();
     },
   );

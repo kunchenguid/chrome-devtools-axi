@@ -337,6 +337,9 @@ describe("createPageHelper", () => {
     const fn = callTool.mock.calls[0][1].function;
     expect(fn).toContain("query");
     expect(fn).toContain("dispatchEvent");
+    expect(fn).toContain("HTMLInputElement.prototype");
+    expect(fn).toContain("Object.getOwnPropertyDescriptor(proto, 'value').set");
+    expect(fn).not.toContain("el.value =");
   });
 
   it("page.type calls type_text", async () => {
