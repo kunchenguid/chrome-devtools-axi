@@ -26,6 +26,7 @@ vi.mock("../src/client.js", () => ({
 
 import { main } from "../src/cli.js";
 import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
+import * as generation from "../src/generation.js";
 import { setSelectedPageId } from "../src/selected-page.js";
 
 /**
@@ -151,22 +152,39 @@ describe("main", () => {
   });
 
   it.each([
-    { argv: ["fill", "@1", "--literal"], tool: "fill" },
+    { argv: ["fill", "@1", "--literal"], tool: "fill", preflight: true },
     { argv: ["type", "--literal"], tool: "type_text" },
     { argv: ["wait", "--ready"], tool: "wait_for" },
     { argv: ["eval", "--counter"], tool: "evaluate_script" },
     { argv: ["dialog", "accept", "--ready"], tool: "handle_dialog" },
   ])(
     "keeps positional text beginning with -- for $tool",
-    async ({ argv, tool }) => {
+    async ({ argv, tool, preflight }) => {
       const write = vi
         .spyOn(process.stdout, "write")
         .mockImplementation(() => true);
-      callTool.mockResolvedValue("");
+      if (preflight) {
+        vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+        callTool
+          .mockResolvedValueOnce(
+            'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+          )
+          .mockResolvedValue("");
+      } else {
+        callTool.mockResolvedValue("");
+      }
 
       await main(argv);
 
-      expect(callTool.mock.calls[0]?.[0]).toBe(tool);
+      expect(callTool.mock.calls[0]?.[0]).toBe(
+        preflight ? "evaluate_script" : tool,
+      );
+      if (preflight) {
+        expect(callTool.mock.calls[1]).toEqual([
+          tool,
+          expect.objectContaining({ value: argv[argv.length - 1] }),
+        ]);
+      }
       expect(process.exitCode).toBeUndefined();
     },
   );
@@ -181,6 +199,7 @@ describe("main", () => {
       argv: ["upload", "@1", "-file"],
       tool: "upload_file",
       args: { uid: "1", filePath: "-file" },
+      preflight: true,
     },
     {
       argv: ["screenshot", "-shot.png"],
@@ -189,9 +208,18 @@ describe("main", () => {
     },
   ])(
     "passes dash-prefixed positional paths to $tool",
-    async ({ argv, tool, args }) => {
+    async ({ argv, tool, args, preflight }) => {
       vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      callTool.mockResolvedValue("");
+      if (preflight) {
+        vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+        callTool
+          .mockResolvedValueOnce(
+            'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+          )
+          .mockResolvedValue("");
+      } else {
+        callTool.mockResolvedValue("");
+      }
 
       await main(argv);
 
@@ -242,6 +270,7 @@ describe("main", () => {
     callTool
       .mockRejectedValueOnce(new CdpError("Not connected", "BROWSER_ERROR"))
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
 
     await main(["open", "https://airlockhq.com"]);
@@ -249,15 +278,9 @@ describe("main", () => {
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "https://airlockhq.com" }],
+      ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
-      [
-        "evaluate_script",
-        {
-          function: expect.stringContaining(
-            "__chromeDevtoolsAxiSnapshotGeneration",
-          ),
-        },
-      ],
+      ["evaluate_script", expect.any(Object)],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
     expect(String(write.mock.calls[0]?.[0])).toContain(
@@ -274,6 +297,7 @@ describe("main", () => {
     callTool
       .mockRejectedValueOnce(await reconnectClearedError())
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
 
     await main(["open", "https://airlockhq.com"]);
@@ -281,15 +305,9 @@ describe("main", () => {
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "https://airlockhq.com" }],
+      ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
-      [
-        "evaluate_script",
-        {
-          function: expect.stringContaining(
-            "__chromeDevtoolsAxiSnapshotGeneration",
-          ),
-        },
-      ],
+      ["evaluate_script", expect.any(Object)],
     ]);
     expect(String(write.mock.calls[0]?.[0])).toContain("title: Airlock");
     expect(process.exitCode).toBeUndefined();

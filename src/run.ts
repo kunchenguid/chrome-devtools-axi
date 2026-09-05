@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CdpError } from "./client.js";
-import { parseStampedUid } from "./snapshot.js";
+import { captureFreshSnapshot, parseUidFresh } from "./uid-freshness.js";
 
 type CallTool = (
   name: string,
@@ -125,11 +125,6 @@ function stripSnapshotHeader(text: string): string {
   return text.replace(/^[\s\S]*?##\s+Latest page snapshot\s*\n/, "");
 }
 
-/** Strip leading @ from uid ref string. */
-function parseUid(ref: string): string {
-  return parseStampedUid(ref).uid;
-}
-
 /** Check if an open error is recoverable by falling back to new_page. */
 function isRecoverableOpenError(error: unknown): boolean {
   if (!(error instanceof CdpError)) return false;
@@ -240,13 +235,16 @@ export function createPageHelper(callTool: CallTool): PageHelper {
     },
 
     async snapshot(): Promise<string> {
-      const result = await callTool("take_snapshot");
-      return stripSnapshotHeader(result);
+      return captureFreshSnapshot(callTool, async () =>
+        stripSnapshotHeader(await callTool("take_snapshot")),
+      );
     },
 
     async click(refOrSelector: string): Promise<void> {
       if (isUidRef(refOrSelector)) {
-        await callTool("click", { uid: parseUid(refOrSelector) });
+        await callTool("click", {
+          uid: await parseUidFresh(refOrSelector, callTool),
+        });
       } else {
         const sel = JSON.stringify(refOrSelector);
         await callTool("evaluate_script", {
@@ -262,7 +260,10 @@ export function createPageHelper(callTool: CallTool): PageHelper {
 
     async fill(refOrSelector: string, text: string): Promise<void> {
       if (isUidRef(refOrSelector)) {
-        await callTool("fill", { uid: parseUid(refOrSelector), value: text });
+        await callTool("fill", {
+          uid: await parseUidFresh(refOrSelector, callTool),
+          value: text,
+        });
       } else {
         const sel = JSON.stringify(refOrSelector);
         const val = JSON.stringify(text);
@@ -271,7 +272,10 @@ export function createPageHelper(callTool: CallTool): PageHelper {
   const el = document.querySelector(${sel});
   if (!el) throw new Error('Element not found: ' + ${sel});
   el.focus();
-  el.value = ${val};
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+    : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+    : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${val});
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
 })()`,

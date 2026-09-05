@@ -125,13 +125,33 @@ describe("parseUidFresh", () => {
     vi.restoreAllMocks();
   });
 
-  it("throws STALE_REF when page mutations advance the current ref generation", async () => {
-    const callTool = vi
-      .fn()
-      .mockResolvedValue("Script ran on page and returned:\n```json\n8\n```");
+  it.each(["@g7:237_15", "@237_15"])(
+    "throws STALE_REF when page mutations advance the current ref generation for %s",
+    async (ref) => {
+      const callTool = vi
+        .fn()
+        .mockResolvedValue(
+          'Script ran on page and returned:\n```json\n{"generation":7,"mutations":1}\n```',
+        );
 
-    await expect(parseUidFresh("@g7:237_15", callTool)).rejects.toMatchObject({
-      code: "STALE_REF",
-    });
-  });
+      await expect(parseUidFresh(ref, callTool)).rejects.toMatchObject({
+        code: "STALE_REF",
+      });
+    },
+  );
+
+  it.each(["@g7:237_15", "@237_15"])(
+    "throws STALE_REF when the page freshness marker is unavailable for %s",
+    async (ref) => {
+      const callTool = vi
+        .fn()
+        .mockResolvedValue(
+          "Script ran on page and returned:\n```json\nnull\n```",
+        );
+
+      await expect(parseUidFresh(ref, callTool)).rejects.toMatchObject({
+        code: "STALE_REF",
+      });
+    },
+  );
 });
