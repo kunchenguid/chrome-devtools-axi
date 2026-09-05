@@ -29,8 +29,8 @@ import { overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
 import {
+  captureFreshSnapshot,
   parseUidFresh as parseUidFreshShared,
-  stampFreshSnapshot,
   type ToolCaller,
 } from "./uid-freshness.js";
 
@@ -914,24 +914,6 @@ function shouldRenderFullHome(argv: string[]): boolean {
   return argv.length === 1 && argv[0] === "--full";
 }
 
-/**
- * Parse snapshot from an includeSnapshot response.
- * The response contains a "## Latest page snapshot" section.
- */
-function parseSnapshotFromResponse(response: string): string | null {
-  const marker = "## Latest page snapshot";
-  const idx = response.indexOf(marker);
-  if (idx === -1) return null;
-  const after = response.slice(idx + marker.length);
-  // The snapshot follows after the header line, possibly with a blank line
-  const trimmed = after.replace(/^\s*\n/, "");
-  // Snapshot ends at the next ## heading or end of text
-  const nextHeading = trimmed.indexOf("\n## ");
-  return nextHeading === -1
-    ? trimmed.trimEnd()
-    : trimmed.slice(0, nextHeading).trimEnd();
-}
-
 /** Format page metadata (TOON) + raw snapshot + suggestions. */
 function formatPageOutput(
   snapshot: string,
@@ -999,8 +981,10 @@ export function parseUid(arg: string): string {
 }
 
 /** Tag a freshly captured snapshot with a bumped generation marker. */
-async function stampFresh(snapshot: string): Promise<string> {
-  return stampFreshSnapshot(snapshot, callTool);
+async function stampFresh(): Promise<string> {
+  return captureFreshSnapshot(callTool, async () =>
+    stripSnapshotHeader(await callTool("take_snapshot")),
+  );
 }
 
 function throwStaleRef(
@@ -1033,21 +1017,12 @@ function isRecoverableOpenError(error: unknown): error is CdpError {
   );
 }
 
-/**
- * Call a tool with includeSnapshot:true and extract the snapshot.
- * Falls back to a separate take_snapshot() if parsing fails.
- */
 async function callWithSnapshot(
   name: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const result = await callTool(name, { ...args, includeSnapshot: true });
-  const snapshot = parseSnapshotFromResponse(result);
-  if (snapshot && snapshot.length > 0) {
-    return await stampFresh(stripSnapshotHeader(snapshot));
-  }
-  // Fallback: take snapshot separately
-  return await stampFresh(stripSnapshotHeader(await callTool("take_snapshot")));
+  await callTool(name, args);
+  return stampFresh();
 }
 
 const SCROLL_FUNCTIONS: Record<string, string> = {
@@ -1073,16 +1048,12 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
     }
     await callTool("new_page", { url });
   }
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "open", url, full);
 }
 
 async function handleSnapshot(full: boolean): Promise<string> {
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "snapshot", undefined, full);
 }
 
@@ -1160,9 +1131,7 @@ async function handleType(args: string[], full: boolean): Promise<string> {
   }
 
   await callTool("type_text", { text });
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "type", undefined, full);
 }
 
@@ -1176,17 +1145,13 @@ async function handleScroll(args: string[], full: boolean): Promise<string> {
   }
 
   await callTool("evaluate_script", { function: fn });
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "scroll", undefined, full);
 }
 
 async function handleBack(full: boolean): Promise<string> {
   await callTool("navigate_page", { type: "back" });
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "back", undefined, full);
 }
 
@@ -1305,9 +1270,7 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
   const toolArgs: Record<string, unknown> = { url };
   if (background) toolArgs.background = true;
   await callTool("new_page", toolArgs);
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "newpage", url, full);
 }
 
@@ -1328,9 +1291,7 @@ async function handleSelectPage(
     ]);
   }
   await callTool("select_page", { pageId });
-  const snapshot = await stampFresh(
-    stripSnapshotHeader(await callTool("take_snapshot")),
-  );
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "selectpage", undefined, full);
 }
 
@@ -1623,7 +1584,7 @@ async function handleHome(_full: boolean): Promise<string> {
       renderHelp(["Run `chrome-devtools-axi open <url>` to start browsing"]),
     ]);
   }
-  const snapshot = await stampFresh(stripSnapshotHeader(result));
+  const snapshot = stripSnapshotHeader(result);
   const title = extractTitle(snapshot);
   const refs = countRefs(snapshot);
   const page: Record<string, unknown> = {};

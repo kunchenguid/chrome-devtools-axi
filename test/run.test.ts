@@ -223,6 +223,10 @@ describe("createPageHelper", () => {
     const page = createPageHelper(callTool);
     const snap = await page.snapshot();
 
+    expect(callTool.mock.calls.slice(0, 2).map(([name]) => name)).toEqual([
+      "evaluate_script",
+      "take_snapshot",
+    ]);
     expect(callTool).toHaveBeenCalledWith("take_snapshot");
     expect(snap).toContain("RootWebArea");
     expect(snap).not.toContain("## Latest");
@@ -364,11 +368,18 @@ describe("createPageHelper", () => {
     const fn = callTool.mock.calls[0][1].function;
     class Field {
       currentValue = "";
+      trackerValue = "";
       readonly events: string[] = [];
+      readonly observedExternalValues: boolean[] = [];
 
       focus(): void {}
 
       dispatchEvent(event: { type: string }): boolean {
+        if (event.type === "input") {
+          const changed = this.currentValue !== this.trackerValue;
+          this.observedExternalValues.push(changed);
+          if (changed) this.trackerValue = this.currentValue;
+        }
         this.events.push(event.type);
         return true;
       }
@@ -401,10 +412,22 @@ describe("createPageHelper", () => {
     vi.stubGlobal("Event", TestEvent);
 
     for (const element of elements) {
+      const proto = Object.getPrototypeOf(element);
+      const nativeValue = Object.getOwnPropertyDescriptor(proto, "value")!;
+      Object.defineProperty(element, "value", {
+        get(this: Field): string {
+          return nativeValue.get!.call(this);
+        },
+        set(this: Field, value: string) {
+          nativeValue.set!.call(this, value);
+          this.trackerValue = value;
+        },
+      });
       current = element;
       new Function(fn)();
       expect(element.currentValue).toBe("query");
       expect(element.events).toEqual(["input", "change"]);
+      expect(element.observedExternalValues).toEqual([true]);
     }
   });
 
@@ -566,9 +589,11 @@ describe("page.open fallback", () => {
 
 describe("page.snapshot header stripping", () => {
   it("strips MCP preamble from snapshot", async () => {
-    callTool.mockResolvedValueOnce(
-      'Page snapshot captured.\n\n## Latest page snapshot\n\nRootWebArea "Hi"\n  uid=1 button "OK"',
-    );
+    callTool
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce(
+        'Page snapshot captured.\n\n## Latest page snapshot\n\nRootWebArea "Hi"\n  uid=1 button "OK"',
+      );
 
     const page = createPageHelper(callTool);
     const snap = await page.snapshot();

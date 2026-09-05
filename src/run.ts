@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CdpError } from "./client.js";
-import { parseUidFresh, stampFreshSnapshot } from "./uid-freshness.js";
+import { captureFreshSnapshot, parseUidFresh } from "./uid-freshness.js";
 
 type CallTool = (
   name: string,
@@ -235,8 +235,9 @@ export function createPageHelper(callTool: CallTool): PageHelper {
     },
 
     async snapshot(): Promise<string> {
-      const result = await callTool("take_snapshot");
-      return stampFreshSnapshot(stripSnapshotHeader(result), callTool);
+      return captureFreshSnapshot(callTool, async () =>
+        stripSnapshotHeader(await callTool("take_snapshot")),
+      );
     },
 
     async click(refOrSelector: string): Promise<void> {

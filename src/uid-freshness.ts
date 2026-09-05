@@ -13,12 +13,13 @@ export type ToolCaller = (
 
 export const PAGE_GENERATION_KEY = "__chromeDevtoolsAxiSnapshotGeneration";
 
-export async function stampFreshSnapshot(
-  snapshot: string,
+export async function captureFreshSnapshot(
   caller: ToolCaller,
+  capture: () => Promise<string>,
 ): Promise<string> {
   const generation = bumpGeneration();
   await markPageSnapshotGeneration(generation, caller);
+  const snapshot = await capture();
   return stampSnapshotGeneration(snapshot, generation);
 }
 
