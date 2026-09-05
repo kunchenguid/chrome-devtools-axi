@@ -80,9 +80,8 @@ Both fixes live at the single `callTool`/`handleCallRequest` chokepoint, so ever
 ### Snapshot generations and STALE_REF
 
 Snapshots are accessibility trees whose interactive elements carry `uid=` refs.
-Because CLI processes are short-lived, a generation counter persists in the active session's state dir as `snapshot-generation` (`~/.chrome-devtools-axi/snapshot-generation` by default; `src/generation.ts`); every fresh snapshot bumps it and `stampSnapshotGeneration` (`src/snapshot.ts`) rewrites `uid=X` to `uid=g<N>:X`.
-Action commands parse refs through `parseUidFresh` (`src/cli.ts`), which fails loudly with `STALE_REF` instead of letting upstream MCP silently no-op against a stale tree.
-`stampFresh` also installs a MutationObserver in the page (`markPageSnapshotGeneration`), so the effective page generation is `snapshot generation + observed mutations` - a re-render invalidates refs even without a newer snapshot.
+Because CLI processes are short-lived, a generation counter persists in the active session's state dir as `snapshot-generation` (`~/.chrome-devtools-axi/snapshot-generation` by default; `src/generation.ts`). `captureFreshSnapshot` (`src/uid-freshness.ts`) starts its page MutationObserver before capture, recaptures once if a mutation occurs during capture, and stamps the resulting tree from `uid=X` to `uid=g<N>:X`.
+Action commands and `run` UID actions parse refs through `parseUidFresh` (`src/uid-freshness.ts`), which requires the observer state to match the persisted snapshot generation with zero mutations. Missing or unusable observer state, a generation mismatch, or a mutation fails loudly with `STALE_REF` instead of letting upstream MCP silently no-op against a stale tree.
 
 ### CLI output and AXI integration
 

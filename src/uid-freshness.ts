@@ -97,10 +97,9 @@ async function getPageRefState(
 }`,
     });
     const jsonBlock = output.match(/```json\n([\s\S]*?)\n```/);
-    const raw = jsonBlock?.[1] ?? output.replace(
-      /^Script ran on page and returned:\s*/,
-      "",
-    );
+    const raw =
+      jsonBlock?.[1] ??
+      output.replace(/^Script ran on page and returned:\s*/, "");
     const parsed: unknown = JSON.parse(raw.trim());
     if (
       typeof parsed !== "object" ||

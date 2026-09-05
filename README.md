@@ -73,7 +73,7 @@ snapshot:
 ...
 ```
 
-Refs in snapshot output carry a `g<N>:` generation prefix that bumps every time a new accessibility tree is captured. Pass refs back exactly as printed - if the page re-rendered between snapshot and action, the action fails loudly with `STALE_REF` instead of silently no-op'ing, so the agent re-snapshots and retries.
+Refs in snapshot output carry a `g<N>:` generation prefix that bumps every time a new accessibility tree is captured. Pass refs back exactly as printed. UID actions also verify that the tracked page has not mutated since that snapshot; if freshness cannot be confirmed (including for a legacy untagged ref), they fail loudly with `STALE_REF` instead of silently no-op'ing, so the agent re-snapshots and retries.
 The skill also instructs agents to verify state-changing actions with a fresh snapshot, `eval`, or screenshot before reporting success, because a current ref can still produce no visible page change.
 
 ## Other Ways to Install

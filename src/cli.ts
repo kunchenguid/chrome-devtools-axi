@@ -8,11 +8,7 @@ import {
   stopBridge,
 } from "./client.js";
 import { getCurrentGeneration } from "./generation.js";
-import {
-  readStdin,
-  runScript,
-  wrapJsExpression,
-} from "./run.js";
+import { readStdin, runScript, wrapJsExpression } from "./run.js";
 
 export { wrapJsExpression };
 import {
@@ -270,19 +266,19 @@ Pipe a script via heredoc or stdin — no file path needed.
 script API (available as global \`page\`):
   await page.open(url)              Navigate, returns { url, status }
   await page.eval(jsOrFn)           Evaluate JS in the page, returns the value
-  await page.snapshot()             Get the accessibility tree as text
+  await page.snapshot()             Get the generation-tagged accessibility tree
   await page.wait(ms)               Wait by duration
   await page.wait(selector)         Wait for CSS selector (30s timeout)
   await page.wait(selector, ms)     Wait for CSS selector with timeout
-  await page.click("@uid")          Click an element by ref
+  await page.click("@uid")          Click an element by fresh ref
   await page.click(selector)        Click via CSS selector
-  await page.fill("@uid", text)     Fill a form field by ref
-  await page.fill(selector, text)   Fill via CSS selector
+  await page.fill("@uid", text)     Fill a form field by fresh ref
+  await page.fill(selector, text)   Fill via CSS selector, including controlled fields
   await page.type(text)             Type at the focused element
   await page.press(key)             Press a keyboard key
   await page.back()                 Navigate back
 
-click and fill accept either @uid refs (from snapshot) or CSS selectors.
+click and fill accept either @uid refs (from snapshot) or CSS selectors. UID actions verify that the page has not mutated since the snapshot and fail with STALE_REF when freshness cannot be confirmed, including for legacy untagged refs.
 page.eval accepts functions, arrow functions, and bare expression strings; no-arg IIFE strings are unwrapped automatically.
 
 examples:

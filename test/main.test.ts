@@ -278,10 +278,7 @@ describe("main", () => {
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "https://airlockhq.com" }],
-      [
-        "evaluate_script",
-        expect.any(Object),
-      ],
+      ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
     ]);
@@ -308,10 +305,7 @@ describe("main", () => {
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "https://airlockhq.com" }],
-      [
-        "evaluate_script",
-        expect.any(Object),
-      ],
+      ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
     ]);

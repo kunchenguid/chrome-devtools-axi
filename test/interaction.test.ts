@@ -145,7 +145,9 @@ describe("parseUidFresh", () => {
     async (ref) => {
       const callTool = vi
         .fn()
-        .mockResolvedValue("Script ran on page and returned:\n```json\nnull\n```");
+        .mockResolvedValue(
+          "Script ran on page and returned:\n```json\nnull\n```",
+        );
 
       await expect(parseUidFresh(ref, callTool)).rejects.toMatchObject({
         code: "STALE_REF",

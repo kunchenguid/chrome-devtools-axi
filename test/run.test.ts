@@ -463,18 +463,24 @@ describe("createPageHelper", () => {
 
   it.each([
     ["click", (page: ReturnType<typeof createPageHelper>) => page.click("@12")],
-    ["fill", (page: ReturnType<typeof createPageHelper>) => page.fill("@12", "text")],
-  ])("page.%s rejects an unobserved uid before MCP acts", async (_name, action) => {
-    callTool.mockResolvedValueOnce(
-      "Script ran on page and returned:\n```json\nnull\n```",
-    );
+    [
+      "fill",
+      (page: ReturnType<typeof createPageHelper>) => page.fill("@12", "text"),
+    ],
+  ])(
+    "page.%s rejects an unobserved uid before MCP acts",
+    async (_name, action) => {
+      callTool.mockResolvedValueOnce(
+        "Script ran on page and returned:\n```json\nnull\n```",
+      );
 
-    await expect(action(createPageHelper(callTool))).rejects.toMatchObject({
-      code: "STALE_REF",
-    });
-    expect(callTool).not.toHaveBeenCalledWith("click", expect.anything());
-    expect(callTool).not.toHaveBeenCalledWith("fill", expect.anything());
-  });
+      await expect(action(createPageHelper(callTool))).rejects.toMatchObject({
+        code: "STALE_REF",
+      });
+      expect(callTool).not.toHaveBeenCalledWith("click", expect.anything());
+      expect(callTool).not.toHaveBeenCalledWith("fill", expect.anything());
+    },
+  );
 
   it("page.type calls type_text", async () => {
     callTool.mockResolvedValueOnce("");
