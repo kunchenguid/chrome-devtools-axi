@@ -1,3 +1,8 @@
+import {
+  ownsTemporaryHeadlessBrowser,
+  testingChromePath,
+  createIdleLifecycle,
+} from "./automation-lifecycle.js";
 /**
  * Persistent MCP bridge server for chrome-devtools-axi.
  *
@@ -575,8 +580,10 @@ export async function handleBridgeRequest(
 export function createBridgeServer(
   client: BridgeClient,
   sessionName?: string,
+  lifecycle?: ReturnType<typeof createIdleLifecycle>,
 ): Server {
   return createServer((req, res) => {
+    const end = lifecycle?.begin(req);
     void handleBridgeRequest(
       client,
       req,
@@ -584,7 +591,7 @@ export function createBridgeServer(
       sessionName,
       logBridgeMessage,
       clearSelectedPageId,
-    );
+    ).finally(() => end?.());
   });
 }
 
@@ -647,7 +654,10 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
   "--password-store=basic",
 ] as const;
 
-export function buildTransportArgs(): string[] {
+export function buildTransportArgs(
+  platform: NodeJS.Platform = process.platform,
+  findTestingChrome: () => string = testingChromePath,
+): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest"];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
@@ -698,6 +708,13 @@ export function buildTransportArgs(): string[] {
     }
     if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
       args.push("--headless");
+      if (
+        platform === "darwin" &&
+        (!channel || channel === "stable") &&
+        ownsTemporaryHeadlessBrowser()
+      ) {
+        args.push(`--executablePath=${findTestingChrome()}`);
+      }
     }
     // Launch modes only: `--chrome-arg` is ignored when chrome-devtools-mcp
     // attaches to a browser somebody else started, and that browser's keychain
@@ -711,7 +728,11 @@ export function buildTransportArgs(): string[] {
   // targets: the running instance --autoConnect attaches to, or the one launched
   // by default. It is irrelevant when attaching to an explicit endpoint, so it is
   // omitted in BROWSER_URL/wsEndpoint mode. Validation is left to chrome-devtools-mcp.
-  if (channel && !browserUrl) {
+  if (
+    channel &&
+    !browserUrl &&
+    !args.some((arg) => arg.startsWith("--executablePath="))
+  ) {
     args.push(`--channel=${channel}`);
   }
 
@@ -957,7 +978,15 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
-  const server = createBridgeServer(bridgeClient, sessionName);
+  const lifecycle = ownsTemporaryHeadlessBrowser()
+    ? createIdleLifecycle(10 * 60 * 1000, () => {
+        logBridgeMessage(
+          "Closing temporary headless session after ten idle minutes",
+        );
+        void shutdown();
+      })
+    : undefined;
+  const server = createBridgeServer(bridgeClient, sessionName, lifecycle);
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);
   });
@@ -971,12 +1000,18 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (idleTimer) clearInterval(idleTimer);
     removePidFile();
     await closeServer(server);
     await client.close();
     await transport.close();
     process.exit(0);
   };
+
+  const idleTimer = lifecycle
+    ? setInterval(() => lifecycle.check(), 1000)
+    : undefined;
+  idleTimer?.unref();
 
   // Kill our entire process group on exit so chrome-devtools-mcp children
   // don't survive as orphans. The bridge is spawned with detached:true,
