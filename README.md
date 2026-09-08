@@ -316,7 +316,7 @@ On macOS this also means the browser can never raise the system "Keychain Not Fo
 Your own externally launched Chrome is unaffected: its saved passwords remain available and untouched because this tool does not read, write, move, or reset the login keychain or its `Chrome Safe Storage` item.
 The isolation flags apply only to browsers this tool starts and are deliberately not sent in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `CHROME_DEVTOOLS_AXI_BROWSER_URL`, and `wsEndpoint` modes, where the browser belongs to whoever launched it.
 
-Temporary headless browsers close after ten minutes without a completed browser operation. In-flight requests prevent idle shutdown; health probes and tool discovery do not renew the idle interval. Attached browsers, visible launches, and persistent profiles are excluded. Temporary browser state is discarded when the session closes.
+Sessions remain alive until `stop` by default. Set `CHROME_DEVTOOLS_AXI_IDLE_CLEANUP=1` to opt into closing temporary headless browsers after ten minutes without a successful browser operation. In-flight requests prevent idle shutdown; health probes and tool discovery do not renew the idle interval. Attached browsers, visible launches, and persistent profiles are excluded. Temporary browser state is discarded when the session closes.
 
 On macOS, default/stable temporary headless launches use the newest architecture-matching Chrome for Testing build under `~/.cache/puppeteer/chrome`, keeping automation separate from the everyday Chrome application. A missing installation fails explicitly and must be installed into that cache before retrying. Explicit beta/dev/canary channels retain their browser selection.
 

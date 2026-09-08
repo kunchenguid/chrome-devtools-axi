@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   createIdleLifecycle,
+  createTemporaryIdleLifecycle,
   ownsTemporaryHeadlessBrowser,
   testingChromePath,
 } from "../src/automation-lifecycle.js";
@@ -130,5 +131,52 @@ describe("temporary automation", () => {
     end();
     lifecycle.check();
     expect(idle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("idle cleanup opt-in", () => {
+  it("leaves sessions alive unless explicitly enabled", () => {
+    const idle = vi.fn();
+    for (const value of [undefined, "", "0", "true"]) {
+      expect(
+        createTemporaryIdleLifecycle(idle, {
+          CHROME_DEVTOOLS_AXI_IDLE_CLEANUP: value,
+        }),
+      ).toBeUndefined();
+    }
+    expect(idle).not.toHaveBeenCalled();
+  });
+
+  it("expires opted-in temporary sessions after ten idle minutes", () => {
+    let time = 0;
+    const idle = vi.fn();
+    const lifecycle = createTemporaryIdleLifecycle(
+      idle,
+      { CHROME_DEVTOOLS_AXI_IDLE_CLEANUP: "1" },
+      () => time,
+    );
+    expect(lifecycle).toBeDefined();
+    time = 599999;
+    lifecycle!.check();
+    expect(idle).not.toHaveBeenCalled();
+    time = 600000;
+    lifecycle!.check();
+    expect(idle).toHaveBeenCalledTimes(1);
+  });
+
+  it("excludes attached, visible and persistent browsers even when enabled", () => {
+    for (const key of [
+      "AUTO_CONNECT",
+      "BROWSER_URL",
+      "USER_DATA_DIR",
+      "HEADED",
+    ]) {
+      expect(
+        createTemporaryIdleLifecycle(vi.fn(), {
+          CHROME_DEVTOOLS_AXI_IDLE_CLEANUP: "1",
+          [`CHROME_DEVTOOLS_AXI_${key}`]: "1",
+        }),
+      ).toBeUndefined();
+    }
   });
 });

@@ -66,6 +66,8 @@ environment:
                                     attaches to, and which one is launched in the default and
                                     USER_DATA_DIR modes. Ignored with CHROME_DEVTOOLS_AXI_BROWSER_URL.
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
+  CHROME_DEVTOOLS_AXI_IDLE_CLEANUP  Set to 1 to close owned temporary headless sessions after
+                                    ten idle minutes. Off by default; otherwise use stop.
   CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
                                     (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"

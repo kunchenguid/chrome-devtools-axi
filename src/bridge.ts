@@ -2,6 +2,7 @@ import {
   ownsTemporaryHeadlessBrowser,
   testingChromePath,
   createIdleLifecycle,
+  createTemporaryIdleLifecycle,
 } from "./automation-lifecycle.js";
 /**
  * Persistent MCP bridge server for chrome-devtools-axi.
@@ -982,14 +983,12 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
-  const lifecycle = ownsTemporaryHeadlessBrowser()
-    ? createIdleLifecycle(10 * 60 * 1000, () => {
-        logBridgeMessage(
-          "Closing temporary headless session after ten idle minutes",
-        );
-        void shutdown();
-      })
-    : undefined;
+  const lifecycle = createTemporaryIdleLifecycle(() => {
+    logBridgeMessage(
+      "Closing temporary headless session after ten idle minutes",
+    );
+    void shutdown();
+  });
   const server = createBridgeServer(bridgeClient, sessionName, lifecycle);
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);

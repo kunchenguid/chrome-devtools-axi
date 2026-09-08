@@ -73,3 +73,16 @@ export function createIdleLifecycle(
     },
   };
 }
+
+export function createTemporaryIdleLifecycle(
+  onIdle: () => void,
+  env = process.env,
+  now = Date.now,
+) {
+  if (
+    env.CHROME_DEVTOOLS_AXI_IDLE_CLEANUP !== "1" ||
+    !ownsTemporaryHeadlessBrowser(env)
+  )
+    return undefined;
+  return createIdleLifecycle(10 * 60 * 1000, onIdle, now);
+}
