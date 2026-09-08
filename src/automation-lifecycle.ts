@@ -57,13 +57,12 @@ export function createIdleLifecycle(
     begin(req: Pick<IncomingMessage, "method" | "url">) {
       active++;
       const meaningful = req.method === "POST" && req.url === "/call";
-      if (meaningful) lastActivity = now();
       let ended = false;
-      return () => {
+      return (successful = false) => {
         if (ended) return;
         ended = true;
         active--;
-        if (meaningful) lastActivity = now();
+        if (meaningful && successful) lastActivity = now();
       };
     },
     check() {

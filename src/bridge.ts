@@ -456,7 +456,7 @@ async function handleCallRequest(
   req: IncomingMessage,
   res: ServerResponse,
   onPageIdentityChanged?: () => boolean | void,
-): Promise<void> {
+): Promise<boolean> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
   const result = await client.callTool(
@@ -484,15 +484,16 @@ async function handleCallRequest(
   // id space is exactly the silent retarget this branch exists to prevent.
   if (pageIdentityChanged && typeof payload.args.pageId === "number") {
     writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
-    return;
+    return false;
   }
   if (isToolResultError(result)) {
     // Surface the tool's own failure text as an error so the CLI throws and
     // exits non-zero instead of printing success (issue #96).
     writeJson(res, 200, { error: text || `Tool "${payload.name}" failed` });
-    return;
+    return false;
   }
   writeJson(res, 200, { result: text });
+  return true;
 }
 
 export async function handleBridgeRequest(
@@ -502,7 +503,7 @@ export async function handleBridgeRequest(
   sessionName?: string,
   logForbidden?: (message: string) => void,
   onPageIdentityChanged?: () => boolean | void,
-): Promise<void> {
+): Promise<boolean | undefined> {
   res.setHeader("Content-Type", "application/json");
 
   // Reject rebound requests before any routing - see isRequestAllowed and
@@ -518,7 +519,7 @@ export async function handleBridgeRequest(
         `origin=${origin ?? ""} ${req.method ?? ""} ${req.url ?? ""}`,
     );
     writeJson(res, 403, { error: "Forbidden host" });
-    return;
+    return false;
   }
 
   try {
@@ -528,7 +529,7 @@ export async function handleBridgeRequest(
     ) {
       if (!(await isBridgeClientConnected(client))) {
         writeJson(res, 503, { status: "error", error: "Not connected" });
-        return;
+        return false;
       }
       const deep = req.url.includes("deep=1");
       let droppedSelection = false;
@@ -540,7 +541,7 @@ export async function handleBridgeRequest(
             error: "CDP target unreachable",
             reason: probe.reason,
           });
-          return;
+          return false;
         }
         // The marker alone only says the browser reconnected. Reporting that
         // to a session with no routing would invent a loss, so the flag rides
@@ -557,24 +558,24 @@ export async function handleBridgeRequest(
         session: sessionName,
         ...(droppedSelection ? { pageIdentityChanged: true } : {}),
       });
-      return;
+      return true;
     }
 
     if (req.method === "GET" && req.url === "/tools") {
       await handleToolsRequest(client, res);
-      return;
+      return true;
     }
 
     if (req.method === "POST" && req.url === "/call") {
-      await handleCallRequest(client, req, res, onPageIdentityChanged);
-      return;
+      return handleCallRequest(client, req, res, onPageIdentityChanged);
     }
   } catch (error) {
     writeJson(res, 500, { error: getErrorMessage(error) });
-    return;
+    return undefined;
   }
 
   writeJson(res, 404, { error: "not found" });
+  return false;
 }
 
 export function createBridgeServer(
@@ -591,7 +592,10 @@ export function createBridgeServer(
       sessionName,
       logBridgeMessage,
       clearSelectedPageId,
-    ).finally(() => end?.());
+    ).then(
+      (successful) => end?.(successful === true),
+      () => end?.(false),
+    );
   });
 }
 

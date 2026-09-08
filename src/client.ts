@@ -328,7 +328,10 @@ export interface SpawnedBridge {
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): void;
   stderr?: {
-    on(event: "data", listener: (chunk: Buffer | string) => void): void;
+    on(
+      event: "data" | "close",
+      listener: ((chunk: Buffer | string) => void) | (() => void),
+    ): void;
   } | null;
 }
 
@@ -471,9 +474,15 @@ export async function ensureBridge(
   // Start a new bridge
   const child = spawnBridge(port, sessionName);
   let stderr = "";
+  let stderrClosed = Promise.resolve();
   child.stderr?.on("data", (chunk) => {
     stderr += chunk.toString();
   });
+  if (child.stderr) {
+    stderrClosed = new Promise<void>((resolve) => {
+      child.stderr?.on("close", resolve);
+    });
+  }
 
   // If the freshly spawned bridge dies before it reports healthy - an EADDRINUSE
   // port collision with another session, or a startup failure (npx/MCP launch,
@@ -517,6 +526,7 @@ export async function ensureBridge(
       ) {
         return port;
       }
+      await stderrClosed;
       throw buildBridgeEarlyExitError(
         sessionName,
         port,

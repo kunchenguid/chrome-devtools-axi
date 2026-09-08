@@ -96,13 +96,24 @@ describe("temporary automation", () => {
     time = 200;
     lifecycle.check();
     expect(idle).not.toHaveBeenCalled();
-    end();
+    end(true);
     end();
     time = 299;
     lifecycle.check();
     expect(idle).not.toHaveBeenCalled();
     time = 300;
     lifecycle.check();
+    lifecycle.check();
+    expect(idle).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not renew the idle interval after a failed call", () => {
+    let time = 0;
+    const idle = vi.fn();
+    const lifecycle = createIdleLifecycle(100, idle, () => time);
+    const end = lifecycle.begin({ method: "POST", url: "/call" });
+    time = 101;
+    end(false);
     lifecycle.check();
     expect(idle).toHaveBeenCalledTimes(1);
   });
