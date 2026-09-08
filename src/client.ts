@@ -327,6 +327,9 @@ export interface SpawnedBridge {
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): void;
+  stderr?: {
+    on(event: "data", listener: (chunk: Buffer | string) => void): void;
+  } | null;
 }
 
 /**
@@ -344,7 +347,7 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
     runner === "tsx" ? "npx" : "node",
     runner === "tsx" ? ["tsx", script] : [script],
     {
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       env: {
         ...process.env,
         CHROME_DEVTOOLS_AXI_PORT: String(port),
@@ -375,12 +378,18 @@ export function buildBridgeEarlyExitError(
   port: number,
   code: number | null,
   signal: NodeJS.Signals | null,
+  stderr = "",
 ): CdpError {
   const how =
     signal != null
       ? `was killed by ${signal}`
       : `exited with code ${code ?? "unknown"}`;
   const message = `Bridge for session "${sessionName}" ${how} before becoming ready on port ${port}`;
+
+  const fatal = stderr.match(/\[chrome-devtools-axi\] Fatal: ([^\r\n]*)/);
+  if (fatal?.[1]) {
+    return new CdpError(fatal[1].trim(), "BRIDGE_NOT_READY");
+  }
 
   if (code === BRIDGE_PORT_IN_USE_EXIT_CODE) {
     return new CdpError(message, "BRIDGE_NOT_READY", [
@@ -461,6 +470,10 @@ export async function ensureBridge(
 
   // Start a new bridge
   const child = spawnBridge(port, sessionName);
+  let stderr = "";
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
 
   // If the freshly spawned bridge dies before it reports healthy - an EADDRINUSE
   // port collision with another session, or a startup failure (npx/MCP launch,
@@ -504,7 +517,13 @@ export async function ensureBridge(
       ) {
         return port;
       }
-      throw buildBridgeEarlyExitError(sessionName, port, exitCode, exitSignal);
+      throw buildBridgeEarlyExitError(
+        sessionName,
+        port,
+        exitCode,
+        exitSignal,
+        stderr,
+      );
     }
     if (
       !sawShallowReady &&
