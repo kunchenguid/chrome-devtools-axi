@@ -19,7 +19,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
   createServer,
   type IncomingMessage,
@@ -790,31 +790,53 @@ export function detectGlobalMcpPath(
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
-): { command: string; args: string[]; env?: Record<string, string> } {
-  const mcpArgs = buildTransportArgs();
+): { command: string; args: string[] } {
   const explicit = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
-  const mcpPath =
-    explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
   const sharedServerUrl =
     process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
-  const env =
-    sharedServerUrl && sharedServerUrl.length > 0
-      ? { CHROME_DEVTOOLS_MCP_SERVER_URL: sharedServerUrl }
-      : undefined;
+  if (sharedServerUrl) {
+    if (!explicit?.trim()) {
+      throw new Error(
+        "CHROME_DEVTOOLS_AXI_MCP_SERVER_URL requires CHROME_DEVTOOLS_AXI_MCP_PATH pointing to a chrome-devtools-mcp build with --server-url proxy support",
+      );
+    }
+    let help: string;
+    try {
+      help = execFileSync(process.execPath, [explicit, "--help"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5_000,
+        killSignal: "SIGKILL",
+      });
+    } catch (error) {
+      throw new Error(
+        "Cannot verify --server-url proxy support: CHROME_DEVTOOLS_AXI_MCP_PATH must point to a runnable chrome-devtools-mcp build whose --help succeeds",
+        { cause: error },
+      );
+    }
+    if (!/^\s+--serverUrl\s/m.test(help)) {
+      throw new Error(
+        "CHROME_DEVTOOLS_AXI_MCP_PATH does not advertise --serverUrl in --help; select a chrome-devtools-mcp build with --server-url proxy support",
+      );
+    }
+    return {
+      command: process.execPath,
+      args: [explicit, `--server-url=${sharedServerUrl}`],
+    };
+  }
+
+  const mcpArgs = buildTransportArgs();
+  const mcpPath =
+    explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
   if (mcpPath) {
     // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
     // node spawn doesn't need it.
     return {
       command: process.execPath,
       args: [mcpPath, ...mcpArgs.slice(2)],
-      ...(env ? { env } : {}),
     };
   }
-  return {
-    command: "npx",
-    args: mcpArgs,
-    ...(env ? { env } : {}),
-  };
+  return { command: "npx", args: mcpArgs };
 }
 
 function createTransport(): StdioClientTransport {

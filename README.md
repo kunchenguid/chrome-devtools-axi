@@ -278,23 +278,30 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
-To share one long-lived Chrome DevTools MCP service across AXI sessions, point
-each AXI bridge at that service:
+To share one long-lived Chrome DevTools MCP service across AXI sessions on the
+same host, use a build with `--http-port` and `--server-url` support from
+[ChromeDevTools/chrome-devtools-mcp#2733](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/2733).
+Published `chrome-devtools-mcp` 1.9.0 does not support this mode. Build that
+revision and explicitly select its executable for AXI:
 
 ```sh
+export CHROME_DEVTOOLS_AXI_MCP_PATH=/absolute/path/to/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js
+node "$CHROME_DEVTOOLS_AXI_MCP_PATH" --http-port=9333 --isolated --headless \
+  --chrome-arg=--use-mock-keychain --chrome-arg=--password-store=basic &
 export CHROME_DEVTOOLS_AXI_MCP_SERVER_URL=http://127.0.0.1:9333/mcp
 CHROME_DEVTOOLS_AXI_SESSION=agent-a chrome-devtools-axi pages
 CHROME_DEVTOOLS_AXI_SESSION=agent-b chrome-devtools-axi pages
 ```
 
-This requires a `chrome-devtools-mcp` version with `--server-url` proxy support.
-AXI forwards the URL to its spawned MCP command, which becomes a lightweight
-stdio-to-HTTP proxy instead of launching or attaching to Chrome. Each named AXI
-bridge receives a separate remote MCP context and selected page, while the
-remote MCP service owns the one shared Chrome connection and shared pages.
+AXI checks the selected executable's `--help` for the `--serverUrl` option
+before starting the proxy and passes the URL with `--server-url`. Shared mode
+requires this explicit path; it does not auto-select a global install or `@latest`.
+Each named AXI bridge receives a separate remote MCP context and selected page,
+while the MCP service owns the one shared Chrome connection and shared pages.
 `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` takes precedence over AXI's local Chrome
-launch and attach settings. Keep the MCP endpoint loopback-only and use SSH
-port forwarding when it runs on another machine.
+launch and attach settings. Run the service on the same host and filesystem as
+AXI, keeping the endpoint loopback-only, so saved artifact paths refer to the
+same local files.
 
 Connect to an existing Chrome instance instead of launching one:
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import { IncomingMessage, ServerResponse, request } from "node:http";
 import { Socket, type AddressInfo } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -432,6 +433,8 @@ describe("resolveTransportSpec", () => {
       process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
     savedEnv.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
       process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL;
+    savedEnv.CHROME_DEVTOOLS_AXI_WS_HEADERS =
+      process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     savedEnv.CHROME_DEVTOOLS_AXI_HEADED =
       process.env.CHROME_DEVTOOLS_AXI_HEADED;
     savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL =
@@ -442,6 +445,7 @@ describe("resolveTransportSpec", () => {
       process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
     delete process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL;
+    delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
@@ -484,15 +488,89 @@ describe("resolveTransportSpec", () => {
     expect(spec.args).toContain("--isolated");
     expect(spec.args).toContain("--headless");
   });
-  it("forwards a shared MCP server URL to the spawned MCP proxy", () => {
-    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/opt/mcp.js";
-    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
-      " http://127.0.0.1:9333/mcp ";
 
-    const spec = resolveTransportSpec();
+  describe("shared MCP service", () => {
+    let dir: string;
 
-    expect(spec.env).toEqual({
-      CHROME_DEVTOOLS_MCP_SERVER_URL: "http://127.0.0.1:9333/mcp",
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "cdp-shared-mcp-"));
+      process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = join(dir, "mcp.cjs");
+      process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
+        " http://127.0.0.1:9333/mcp ";
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    function writeExecutable(help: string): void {
+      writeFileSync(
+        process.env.CHROME_DEVTOOLS_AXI_MCP_PATH!,
+        `if (process.argv.includes("--help")) {
+  process.stdout.write(${JSON.stringify(help)});
+} else {
+  process.stdout.write(JSON.stringify(process.argv.slice(2)));
+}`,
+      );
+    }
+
+    it("passes only the shared server URL to the selected executable", () => {
+      writeExecutable("Options:\n  --serverUrl  Use an HTTP server [string]\n");
+      process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL =
+        "ws://127.0.0.1:9222/devtools/browser/local";
+      process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = "invalid local setting";
+      process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/local/profile";
+
+      const spec = resolveTransportSpec();
+      const output = execFileSync(spec.command, spec.args, {
+        encoding: "utf8",
+      });
+
+      expect(JSON.parse(output)).toEqual([
+        "--server-url=http://127.0.0.1:9333/mcp",
+      ]);
+    });
+
+    it.each([undefined, "", "   "])(
+      "requires an explicit executable instead of auto-detection (%s)",
+      (path) => {
+        if (path === undefined) delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+        else process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = path;
+        const probe = {
+          existsSync: vi.fn(() => true),
+          getNpmPrefix: vi.fn(() => "/usr"),
+        };
+
+        expect(() => resolveTransportSpec(probe)).toThrow(
+          "requires CHROME_DEVTOOLS_AXI_MCP_PATH",
+        );
+        expect(probe.getNpmPrefix).not.toHaveBeenCalled();
+      },
+    );
+
+    it("rejects an executable whose help lacks proxy support", () => {
+      writeExecutable("Options:\n  --browserUrl  Connect to Chrome [string]\n");
+
+      expect(() => resolveTransportSpec()).toThrow(
+        "does not advertise --serverUrl",
+      );
+    });
+
+    it("rejects an executable whose help fails", () => {
+      writeFileSync(
+        process.env.CHROME_DEVTOOLS_AXI_MCP_PATH!,
+        'process.stdout.write("  --serverUrl  HTTP proxy\\n"); process.exit(1);',
+      );
+
+      expect(() => resolveTransportSpec()).toThrow(
+        "Cannot verify --server-url proxy support",
+      );
+    });
+
+    it("rejects a missing executable", () => {
+      expect(() => resolveTransportSpec()).toThrow(
+        "Cannot verify --server-url proxy support",
+      );
     });
   });
 
