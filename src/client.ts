@@ -388,6 +388,15 @@ export function buildBridgeEarlyExitError(
       "Set a distinct CHROME_DEVTOOLS_AXI_PORT for this session, unset a global CHROME_DEVTOOLS_AXI_PORT so every session derives its own, or free whatever is holding the port.",
     ]);
   }
+  const sharedServerUrl =
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
+  if (sharedServerUrl) {
+    return new CdpError(message, "BRIDGE_NOT_READY", [
+      "Shared MCP mode is enabled by CHROME_DEVTOOLS_AXI_MCP_SERVER_URL; this mode does not launch Chrome locally.",
+      "Set CHROME_DEVTOOLS_AXI_MCP_PATH to a runnable chrome-devtools-mcp build that advertises --serverUrl in --help.",
+      "Use the proxy-capable MCP build from the companion shared-server change, then restart this AXI session.",
+    ]);
+  }
 
   const suggestions = [
     "Check that chrome-devtools-mcp can start: npx chrome-devtools-mcp@latest --help",

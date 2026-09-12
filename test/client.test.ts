@@ -299,6 +299,7 @@ describe("checkBridgeHealth (deep probe)", () => {
 
 describe("buildBridgeEarlyExitError", () => {
   const savedMcpPath = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+  const savedMcpServerUrl = process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL;
 
   afterEach(() => {
     const restore = (key: string, value: string | undefined) => {
@@ -306,6 +307,7 @@ describe("buildBridgeEarlyExitError", () => {
       else process.env[key] = value;
     };
     restore("CHROME_DEVTOOLS_AXI_MCP_PATH", savedMcpPath);
+    restore("CHROME_DEVTOOLS_AXI_MCP_SERVER_URL", savedMcpServerUrl);
   });
 
   it("names the session, port, exit code, and the port-in-use remedy on the EADDRINUSE code", () => {
@@ -344,6 +346,20 @@ describe("buildBridgeEarlyExitError", () => {
     expect(suggestions).toContain("chrome-devtools-mcp");
     expect(suggestions).not.toContain("hashed-port collision");
     expect(suggestions).not.toContain("another session's bridge");
+  });
+  it("gives proxy-specific guidance for a shared MCP startup failure", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
+      "http://127.0.0.1:9333/mcp";
+    delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+
+    const err = buildBridgeEarlyExitError("worker-2", 9231, 1, null);
+
+    const suggestions = err.suggestions.join("\n");
+    expect(suggestions).toContain("CHROME_DEVTOOLS_AXI_MCP_SERVER_URL");
+    expect(suggestions).toContain("CHROME_DEVTOOLS_AXI_MCP_PATH");
+    expect(suggestions).toContain("--serverUrl");
+    expect(suggestions).not.toContain("Chrome failed to launch");
+    expect(suggestions).not.toContain("chrome-devtools-mcp@latest");
   });
 
   it("points at CHROME_DEVTOOLS_AXI_MCP_PATH when an explicit path is set", () => {
