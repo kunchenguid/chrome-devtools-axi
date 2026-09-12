@@ -116,7 +116,9 @@ pnpm link
 
 ## How It Works
 
-The default local mode uses the process chain below. See [Configuration](#configuration) for shared MCP service setup.
+The bridge keeps one persistent MCP session across CLI invocations. With no
+shared URL (or a blank one), standalone mode uses the local stdio process chain
+below. See [Configuration](#configuration) for the two shared-service choices.
 
 ```
 ┌───────────────────────┐
@@ -134,7 +136,25 @@ The default local mode uses the process chain below. See [Configuration](#config
 └───────────────────────┘
 ```
 
-- **Persistent bridge** — a detached process keeps the MCP session alive across commands, so Chrome doesn't restart every invocation
+In URL-only shared mode, the bridge uses Streamable HTTP directly instead:
+
+```
+┌───────────────────────┐
+│  chrome-devtools-axi  │  CLI — parse args, format output
+└──────────┬────────────┘
+           │ HTTP (localhost:9224)
+           ▼
+┌───────────────────────┐
+│     Bridge Server     │  Persistent per-session MCP client
+└──────────┬────────────┘
+           │ Streamable HTTP
+           ▼
+┌───────────────────────┐
+│ Shared MCP service     │  One remote MCP process + Chrome
+└───────────────────────┘
+```
+
+- **Persistent bridge** — a detached process keeps the selected MCP session alive across commands, so Chrome doesn't restart every invocation
 - **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, and reaps child processes on stop
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
@@ -281,35 +301,63 @@ export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
 To share one long-lived Chrome DevTools MCP service across AXI sessions on the
-same host, use a build with `--http-port` and `--server-url` support from
-[ChromeDevTools/chrome-devtools-mcp#2733](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/2733).
-Published `chrome-devtools-mcp` 1.9.0 does not support this mode. Build that
-revision and explicitly select its executable for AXI:
+same host, set `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` to the service's Streamable
+HTTP endpoint. The exact combination with `CHROME_DEVTOOLS_AXI_MCP_PATH` selects
+how AXI reaches it:
 
-```sh
-export CHROME_DEVTOOLS_AXI_MCP_PATH=/absolute/path/to/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js
-node "$CHROME_DEVTOOLS_AXI_MCP_PATH" --http-port=9333 --isolated --headless \
-  --chrome-arg=--use-mock-keychain --chrome-arg=--password-store=basic &
-export CHROME_DEVTOOLS_AXI_MCP_SERVER_URL=http://127.0.0.1:9333/mcp
-CHROME_DEVTOOLS_AXI_SESSION=agent-a chrome-devtools-axi pages
-CHROME_DEVTOOLS_AXI_SESSION=agent-b chrome-devtools-axi pages
-```
+1. **Direct (recommended, simplest):** the shared URL is nonblank and
+   `CHROME_DEVTOOLS_AXI_MCP_PATH` is absent or blank. AXI constructs a
+   `StreamableHTTPClientTransport` directly, starts no local MCP child, and
+   validates that the URL is an absolute `http://` or `https://` endpoint. The
+   shared service must already be running and reachable. This uses exactly one
+   MCP process for all named AXI bridges; each bridge still gets its own remote
+   MCP session/context and selected-page state.
 
-AXI checks the selected executable's `--help` for the `--serverUrl` option
-before starting the proxy and passes the URL with `--server-url`. Shared mode
-requires this explicit path; it does not auto-select a global install or `@latest`.
-Each named AXI bridge keeps a separate remote MCP context and selected-page state,
-while the MCP service owns the one shared Chrome connection and shared pages.
-Actions on the same page can still affect other sessions.
+   ```sh
+   MCP_BIN=/absolute/path/to/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js
+   node "$MCP_BIN" --http-port=9333 --isolated --headless \
+     --chrome-arg=--use-mock-keychain --chrome-arg=--password-store=basic &
+   unset CHROME_DEVTOOLS_AXI_MCP_PATH
+   export CHROME_DEVTOOLS_AXI_MCP_SERVER_URL=http://127.0.0.1:9333/mcp
+   CHROME_DEVTOOLS_AXI_SESSION=agent-a chrome-devtools-axi pages
+   CHROME_DEVTOOLS_AXI_SESSION=agent-b chrome-devtools-axi pages
+   ```
+
+2. **Stdio proxy:** the shared URL and `CHROME_DEVTOOLS_AXI_MCP_PATH` are both
+   nonblank. AXI checks that executable's `--help` advertises `--serverUrl`,
+   then starts it with only `--server-url=<URL>`. Use this when the selected
+   `chrome-devtools-mcp` build provides the verified proxy mode from
+   [ChromeDevTools/chrome-devtools-mcp#2733](https://github.com/ChromeDevTools/chrome-devtools-mcp/pull/2733).
+   The AXI bridge starts one proxy child per named bridge; manage the shared
+   service separately.
+
+   ```sh
+   export CHROME_DEVTOOLS_AXI_MCP_PATH=/absolute/path/to/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js
+   node "$CHROME_DEVTOOLS_AXI_MCP_PATH" --http-port=9333 --isolated --headless \
+     --chrome-arg=--use-mock-keychain --chrome-arg=--password-store=basic &
+   export CHROME_DEVTOOLS_AXI_MCP_SERVER_URL=http://127.0.0.1:9333/mcp
+   CHROME_DEVTOOLS_AXI_SESSION=agent-a chrome-devtools-axi pages
+   CHROME_DEVTOOLS_AXI_SESSION=agent-b chrome-devtools-axi pages
+   ```
+
+If `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` is absent or blank, AXI keeps its
+standalone stdio behavior: it starts the selected local
+`chrome-devtools-mcp` process (from `CHROME_DEVTOOLS_AXI_MCP_PATH`, a detected
+global install, or `npx -y chrome-devtools-mcp@latest`) and launches/attaches
+Chrome according to the local settings below. A nonblank MCP_PATH without a
+shared URL also remains this local stdio mode.
+
 `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` takes precedence over AXI's local Chrome
-launch and attach settings. Run the service on the same host and filesystem as
-AXI, keeping the endpoint loopback-only, so saved artifact paths refer to the
-same local files.
+launch and attach settings. Run the shared service on the same host and
+filesystem as AXI, keeping the endpoint loopback-only, so saved artifact paths
+refer to the same local files. Generic MCP stdio clients remain supported; the
+proxy choice above only changes how AXI's bridge reaches the shared service.
 
-Stop any existing bridges for those session names before switching to this
-configuration: a running bridge retains its original transport settings.
-`CHROME_DEVTOOLS_AXI_SESSION=<name> chrome-devtools-axi stop` stops that session's
-bridge and proxy; manage the shared service's lifecycle separately.
+Stop any existing bridges for those session names before switching between
+these configurations: a running bridge retains its original transport
+settings. `CHROME_DEVTOOLS_AXI_SESSION=<name> chrome-devtools-axi stop` stops
+that session's bridge and any AXI-owned proxy child; manage the shared service's
+lifecycle separately.
 
 Connect to an existing Chrome instance instead of launching one:
 

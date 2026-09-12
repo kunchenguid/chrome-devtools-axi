@@ -47,10 +47,25 @@ The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP to
 `ensureBridge` (`src/client.ts`) reads its session's `bridge.pid` (`~/.chrome-devtools-axi/bridge.pid` for the default session) and reuses a live bridge only after a **deep** health check (`/health?deep=1` drives one CDP-backed `list_pages` call), so a bridge whose attached browser died gets terminated and respawned instead of reused as a stale endpoint.
 Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/bridge.ts`) **detached** as a process group leader and polls health until the `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` deadline (default 30s).
 
-The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
-Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
+The bridge holds one persistent MCP session and exposes a localhost HTTP API on
+its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see
+Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`. Transport
+selection is deterministic: a nonblank `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL`
+with absent/blank `CHROME_DEVTOOLS_AXI_MCP_PATH` connects directly with
+Streamable HTTP (no MCP child); the same URL with a nonblank MCP_PATH uses the
+verified stdio proxy (`--help` must advertise `--serverUrl`, then AXI passes
+`--server-url=<URL>`); an absent/blank shared URL keeps standalone stdio
+behavior. Each named bridge owns one remote MCP session/context in direct mode.
+Teardown is careful about orphans: the bridge kills its own process group on
+exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so
+stdio-launched chrome-devtools-mcp and Chrome children get reaped (group kill
+only when `ps` confirms the PID is actually a bridge).
 
-`resolveTransportSpec` (`src/bridge.ts`) owns transport selection and proxy compatibility checks; `buildTransportArgs` owns local browser arguments. See `test/bridge.test.ts` for their regression coverage and README Configuration for dependency prerequisites.
+`resolveTransport` (`src/bridge.ts`) owns direct-vs-stdio selection and validates
+direct URLs; `resolveTransportSpec` owns stdio command resolution and proxy
+compatibility checks; `buildTransportArgs` owns local browser arguments. See
+`test/bridge.test.ts` for their regression coverage and README Configuration
+for dependency prerequisites.
 
 The launch modes (`--isolated`/`--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS` so browsers we start cannot reach the machine owner's password store; attach modes deliberately omit them because that browser's keychain policy belongs to whoever started it.
 `test/keychain-isolation.test.ts` owns the regression rationale and structural invariant; README.md documents the user-facing behavior.

@@ -356,6 +356,28 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
   child.unref();
   return child;
 }
+type SharedMcpMode = "direct" | "proxy" | null;
+
+function resolveSharedMcpMode(): SharedMcpMode {
+  const sharedServerUrl =
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
+  if (!sharedServerUrl) return null;
+  return process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim() ? "proxy" : "direct";
+}
+
+function sharedMcpSuggestions(mode: Exclude<SharedMcpMode, null>): string[] {
+  if (mode === "direct") {
+    return [
+      "Shared MCP direct mode is enabled by CHROME_DEVTOOLS_AXI_MCP_SERVER_URL; AXI connects directly to that Streamable HTTP endpoint without launching a local MCP process.",
+      "Verify CHROME_DEVTOOLS_AXI_MCP_SERVER_URL is an absolute http(s) MCP endpoint and that the service is running and reachable there.",
+    ];
+  }
+  return [
+    "Shared MCP proxy mode is enabled by CHROME_DEVTOOLS_AXI_MCP_SERVER_URL; this mode does not launch Chrome locally.",
+    "Set CHROME_DEVTOOLS_AXI_MCP_PATH to a runnable chrome-devtools-mcp build that advertises --serverUrl in --help.",
+    "Use the proxy-capable MCP build from the companion shared-server change, then restart this AXI session.",
+  ];
+}
 
 /**
  * Build the error thrown when a freshly spawned bridge exits before it ever
@@ -365,10 +387,11 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
  *
  * The guidance is attributed by exit code. Only {@link BRIDGE_PORT_IN_USE_EXIT_CODE}
  * (the bridge's EADDRINUSE sentinel) gets the port-in-use explanation; any
- * other early death is a startup failure. Shared-MCP configuration gets
- * proxy-specific guidance; local mode covers npx resolution, a broken
- * `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a Chrome launch failure. In either mode,
- * a single-session user with a broken install is not misdirected to port advice.
+ * other early death is a startup failure. Direct shared-MCP configuration gets
+ * endpoint-specific guidance; proxy configuration gets `MCP_PATH`/`--serverUrl`
+ * prerequisites; local mode covers npx resolution, a broken
+ * `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a Chrome launch failure. In either mode, a
+ * single-session user with a broken install is not misdirected to port advice.
  */
 export function buildBridgeEarlyExitError(
   sessionName: string,
@@ -388,20 +411,19 @@ export function buildBridgeEarlyExitError(
       "Set a distinct CHROME_DEVTOOLS_AXI_PORT for this session, unset a global CHROME_DEVTOOLS_AXI_PORT so every session derives its own, or free whatever is holding the port.",
     ]);
   }
-  const sharedServerUrl =
-    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
-  if (sharedServerUrl) {
-    return new CdpError(message, "BRIDGE_NOT_READY", [
-      "Shared MCP mode is enabled by CHROME_DEVTOOLS_AXI_MCP_SERVER_URL; this mode does not launch Chrome locally.",
-      "Set CHROME_DEVTOOLS_AXI_MCP_PATH to a runnable chrome-devtools-mcp build that advertises --serverUrl in --help.",
-      "Use the proxy-capable MCP build from the companion shared-server change, then restart this AXI session.",
-    ]);
+  const sharedMcpMode = resolveSharedMcpMode();
+  if (sharedMcpMode) {
+    return new CdpError(
+      message,
+      "BRIDGE_NOT_READY",
+      sharedMcpSuggestions(sharedMcpMode),
+    );
   }
 
   const suggestions = [
     "Check that chrome-devtools-mcp can start: npx chrome-devtools-mcp@latest --help",
   ];
-  if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH) {
+  if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim()) {
     suggestions.push(
       "Verify CHROME_DEVTOOLS_AXI_MCP_PATH points to a valid chrome-devtools-mcp build.",
     );
@@ -526,23 +548,35 @@ export async function ensureBridge(
 
   const seconds = Math.round(timeoutMs / 1000);
 
+  const sharedMcpMode = resolveSharedMcpMode();
   if (sawShallowReady) {
+    const suggestions =
+      sharedMcpMode === "direct"
+        ? [
+            ...sharedMcpSuggestions("direct"),
+            "The shared MCP service may be reachable while its attached Chrome target is unavailable.",
+          ]
+        : [
+            "The Chrome/Electron instance the bridge was attached to may have exited.",
+            "Verify the target is still listening on its remote-debugging port, then re-run the command.",
+            "If the target was restarted, the bridge has already been recycled — this run will succeed once the target is reachable.",
+          ];
     throw new CdpError(
       "Bridge is running but the attached CDP target appears to have gone away",
       "BRIDGE_NOT_READY",
-      [
-        "The Chrome/Electron instance the bridge was attached to may have exited.",
-        "Verify the target is still listening on its remote-debugging port, then re-run the command.",
-        "If the target was restarted, the bridge has already been recycled — this run will succeed once the target is reachable.",
-      ],
+      suggestions,
     );
   }
 
-  const usingNpx = !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
-  const suggestions = [
-    "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
-  ];
-  if (usingNpx) {
+  const suggestions =
+    sharedMcpMode === "direct"
+      ? sharedMcpSuggestions("direct")
+      : sharedMcpMode === "proxy"
+        ? sharedMcpSuggestions("proxy")
+        : [
+            "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
+          ];
+  if (!sharedMcpMode && !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim()) {
     suggestions.push(
       "If `npx -y chrome-devtools-mcp@latest` is slow on this machine, install mcp globally and set:",
       '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',

@@ -1,8 +1,8 @@
 /**
  * Persistent MCP bridge server for chrome-devtools-axi.
  *
- * Spawns chrome-devtools-mcp as a child process and maintains a single
- * persistent MCP session. Exposes a simple HTTP API:
+ * Selects either a local/proxy stdio session or a direct Streamable HTTP
+ * session and maintains it persistently. Exposes a simple HTTP API:
  *   POST /call  { name, args }  → { result }
  *   GET  /tools                 → [{ name, description }]
  *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
@@ -18,7 +18,9 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { execFileSync, execSync } from "node:child_process";
 import {
   createServer,
@@ -733,6 +735,38 @@ export interface McpPathProbe {
   existsSync: (path: string) => boolean;
   getNpmPrefix: () => string | null;
 }
+/**
+ * The command and arguments for a stdio-launched chrome-devtools-mcp process.
+ * This stays separate from direct Streamable HTTP selection so callers cannot
+ * accidentally spawn a local MCP process when only a shared URL is configured.
+ */
+export interface TransportSpec {
+  command: string;
+  args: string[];
+}
+
+export interface SessionTerminatingTransport extends Transport {
+  terminateSession(): Promise<void>;
+}
+
+export type ResolvedTransport =
+  | { kind: "http"; url: URL }
+  | { kind: "stdio"; spec: TransportSpec };
+
+/**
+ * A selected MCP transport plus the lifecycle operation that is unique to a
+ * Streamable HTTP session. Stdio transports intentionally omit
+ * `terminateSession`; closing them only tears down their local child process.
+ */
+export interface BridgeTransport {
+  transport: Transport;
+  terminateSession?: () => Promise<void>;
+}
+
+export interface BridgeTransportFactories {
+  createStdio: (spec: TransportSpec) => Transport;
+  createHttp: (url: URL) => SessionTerminatingTransport;
+}
 
 const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
   existsSync: (path) => existsSync(path),
@@ -777,29 +811,31 @@ export function detectGlobalMcpPath(
 /**
  * Resolve the command + args used to spawn the chrome-devtools-mcp transport.
  *
- * Shared mode must verify proxy support before spawning: an incompatible MCP
- * executable could otherwise start a separate local browser. Local browser
- * arguments are deliberately excluded because the service owns Chrome's policy.
- * See README Configuration for the supported dependency and setup.
+ * This resolver intentionally handles only stdio paths. Shared URL + executable
+ * mode is the stdio proxy path and must verify proxy support before spawning:
+ * an incompatible MCP executable could otherwise start a separate local
+ * browser. Local browser arguments are deliberately excluded because the
+ * service owns Chrome's policy. See README Configuration for the supported
+ * dependency and setup.
  *
  * For local mode, detecting a global install avoids npx bootstrap overhead,
  * which can exceed the bridge's readiness deadline on a slow or cold system.
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
-): { command: string; args: string[] } {
-  const explicit = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+): TransportSpec {
+  const explicitPath = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim();
   const sharedServerUrl =
     process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
   if (sharedServerUrl) {
-    if (!explicit?.trim()) {
+    if (!explicitPath) {
       throw new Error(
         "CHROME_DEVTOOLS_AXI_MCP_SERVER_URL requires CHROME_DEVTOOLS_AXI_MCP_PATH pointing to a chrome-devtools-mcp build with --server-url proxy support",
       );
     }
     let help: string;
     try {
-      help = execFileSync(process.execPath, [explicit, "--help"], {
+      help = execFileSync(process.execPath, [explicitPath, "--help"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 5_000,
@@ -818,13 +854,12 @@ export function resolveTransportSpec(
     }
     return {
       command: process.execPath,
-      args: [explicit, `--server-url=${sharedServerUrl}`],
+      args: [explicitPath, `--server-url=${sharedServerUrl}`],
     };
   }
 
   const mcpArgs = buildTransportArgs();
-  const mcpPath =
-    explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
+  const mcpPath = explicitPath || detectGlobalMcpPath(probe);
   if (mcpPath) {
     // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
     // node spawn doesn't need it.
@@ -836,8 +871,77 @@ export function resolveTransportSpec(
   return { command: "npx", args: mcpArgs };
 }
 
-function createTransport(): StdioClientTransport {
-  return new StdioClientTransport(resolveTransportSpec());
+function parseSharedServerUrl(value: string): URL {
+  if (!/^https?:\/\//i.test(value)) {
+    throw new Error(
+      "CHROME_DEVTOOLS_AXI_MCP_SERVER_URL must be an absolute http(s) URL",
+    );
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+    return url;
+  } catch (error) {
+    throw new Error(
+      "CHROME_DEVTOOLS_AXI_MCP_SERVER_URL must be an absolute http(s) URL",
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * Select direct Streamable HTTP when only a shared URL is configured.
+ * Supplying MCP_PATH opts into the verified stdio proxy path instead.
+ */
+export function resolveTransport(
+  probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
+): ResolvedTransport {
+  const sharedServerUrl =
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
+  if (sharedServerUrl && !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim()) {
+    return { kind: "http", url: parseSharedServerUrl(sharedServerUrl) };
+  }
+  return { kind: "stdio", spec: resolveTransportSpec(probe) };
+}
+
+const DEFAULT_BRIDGE_TRANSPORT_FACTORIES: BridgeTransportFactories = {
+  createStdio: (spec) => new StdioClientTransport(spec),
+  createHttp: (url) => new StreamableHTTPClientTransport(url),
+};
+
+/**
+ * Construct the selected transport. Direct HTTP gets a session terminator;
+ * stdio deliberately does not, so shutdown cannot issue a second termination.
+ */
+export function createTransport(
+  selection: ResolvedTransport = resolveTransport(),
+  factories: BridgeTransportFactories = DEFAULT_BRIDGE_TRANSPORT_FACTORIES,
+): BridgeTransport {
+  if (selection.kind === "http") {
+    const transport = factories.createHttp(selection.url);
+    return {
+      transport,
+      terminateSession: () => transport.terminateSession(),
+    };
+  }
+  return { transport: factories.createStdio(selection.spec) };
+}
+
+/**
+ * Close a bridge transport, terminating a direct remote MCP session first.
+ * `Client.close()` delegates to its transport, so this helper closes the
+ * transport exactly once without separately closing the Client.
+ */
+export async function closeBridgeTransport(
+  bridgeTransport: BridgeTransport,
+): Promise<void> {
+  try {
+    await bridgeTransport.terminateSession?.();
+  } finally {
+    await bridgeTransport.transport.close();
+  }
 }
 
 function createBridgeClient(): Client {
@@ -973,16 +1077,17 @@ async function closeServer(server: Server): Promise<void> {
 }
 
 export async function runBridge(port = resolveSessionPort()): Promise<void> {
-  // Connect the MCP transport (which spawns chrome-devtools-mcp and launches
-  // Chrome) before binding the port. A same-session bind race then self-heals:
-  // both racers finish booting before listen(), so the loser's EADDRINUSE exit
-  // finds the winner already deep-healthy and reuses it instead of failing. The
-  // trade-off is one wasted Chrome launch on a genuine cross-session collision,
-  // a rare and self-correcting path.
-  const transport = createTransport();
+  // Connect the selected MCP transport before binding the port. In local and
+  // proxy modes this may spawn chrome-devtools-mcp; URL-only shared mode
+  // connects directly to the existing Streamable HTTP endpoint. A same-session
+  // bind race then self-heals: both racers finish booting before listen(), so
+  // the loser's EADDRINUSE exit finds the winner already deep-healthy and
+  // reuses it instead of failing. The trade-off is one wasted startup on a
+  // genuine cross-session collision, a rare and self-correcting path.
+  const bridgeTransport = createTransport();
   const client = createBridgeClient();
   const bridgeClient = createRootsAwareBridgeClient(client);
-  await client.connect(transport);
+  await client.connect(bridgeTransport.transport);
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
@@ -1002,8 +1107,7 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
     shuttingDown = true;
     removePidFile();
     await closeServer(server);
-    await client.close();
-    await transport.close();
+    await closeBridgeTransport(bridgeTransport);
     process.exit(0);
   };
 

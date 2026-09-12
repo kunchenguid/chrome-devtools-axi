@@ -41,6 +41,16 @@ describe("main CLI runtime", () => {
     expect(TOP_HELP).toContain("--help");
     expect(TOP_HELP).toContain("-v/-V/--version");
   });
+  it("documents the direct, proxy, and standalone shared transport choices", () => {
+    expect(TOP_HELP).toContain("With MCP_PATH, starts a verified");
+    expect(TOP_HELP).toContain("connects directly over Streamable HTTP (no");
+    expect(TOP_HELP).toContain(
+      "If unset or blank, the bridge uses standalone stdio mode.",
+    );
+    expect(TOP_HELP).not.toContain(
+      "Shared MCP service URL. Requires an explicit MCP_PATH",
+    );
+  });
 
   it("documents explicit hook setup in help output", () => {
     expect(TOP_HELP).toContain("setup hooks");

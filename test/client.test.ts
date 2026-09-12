@@ -347,7 +347,7 @@ describe("buildBridgeEarlyExitError", () => {
     expect(suggestions).not.toContain("hashed-port collision");
     expect(suggestions).not.toContain("another session's bridge");
   });
-  it("gives proxy-specific guidance for a shared MCP startup failure", () => {
+  it("gives direct endpoint guidance for a shared MCP startup failure", () => {
     process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
       "http://127.0.0.1:9333/mcp";
     delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
@@ -356,8 +356,25 @@ describe("buildBridgeEarlyExitError", () => {
 
     const suggestions = err.suggestions.join("\n");
     expect(suggestions).toContain("CHROME_DEVTOOLS_AXI_MCP_SERVER_URL");
+    expect(suggestions).toContain("absolute http(s)");
+    expect(suggestions).toContain("reachable");
+    expect(suggestions).not.toContain("CHROME_DEVTOOLS_AXI_MCP_PATH");
+    expect(suggestions).not.toContain("--serverUrl");
+    expect(suggestions).not.toContain("chrome-devtools-mcp@latest");
+  });
+
+  it("gives proxy prerequisites for a shared MCP startup failure", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
+      "http://127.0.0.1:9333/mcp";
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/opt/mcp.js";
+
+    const err = buildBridgeEarlyExitError("worker-2", 9231, 1, null);
+
+    const suggestions = err.suggestions.join("\n");
+    expect(suggestions).toContain("CHROME_DEVTOOLS_AXI_MCP_SERVER_URL");
     expect(suggestions).toContain("CHROME_DEVTOOLS_AXI_MCP_PATH");
     expect(suggestions).toContain("--serverUrl");
+    expect(suggestions).not.toContain("absolute http(s)");
     expect(suggestions).not.toContain("Chrome failed to launch");
     expect(suggestions).not.toContain("chrome-devtools-mcp@latest");
   });
