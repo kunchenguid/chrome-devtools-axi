@@ -550,17 +550,16 @@ export async function ensureBridge(
 
   const sharedMcpMode = resolveSharedMcpMode();
   if (sawShallowReady) {
-    const suggestions =
-      sharedMcpMode
-        ? [
-            ...sharedMcpSuggestions(sharedMcpMode),
-            "The shared MCP service may be reachable while its attached Chrome target is unavailable.",
-          ]
-        : [
-            "The Chrome/Electron instance the bridge was attached to may have exited.",
-            "Verify the target is still listening on its remote-debugging port, then re-run the command.",
-            "If the target was restarted, the bridge has already been recycled — this run will succeed once the target is reachable.",
-          ];
+    const suggestions = sharedMcpMode
+      ? [
+          ...sharedMcpSuggestions(sharedMcpMode),
+          "The shared MCP service may be reachable while its attached Chrome target is unavailable.",
+        ]
+      : [
+          "The Chrome/Electron instance the bridge was attached to may have exited.",
+          "Verify the target is still listening on its remote-debugging port, then re-run the command.",
+          "If the target was restarted, the bridge has already been recycled — this run will succeed once the target is reachable.",
+        ];
     throw new CdpError(
       "Bridge is running but the attached CDP target appears to have gone away",
       "BRIDGE_NOT_READY",
