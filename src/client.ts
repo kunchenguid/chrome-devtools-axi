@@ -365,10 +365,10 @@ function spawnBridgeProcess(port: number, sessionName: string): SpawnedBridge {
  *
  * The guidance is attributed by exit code. Only {@link BRIDGE_PORT_IN_USE_EXIT_CODE}
  * (the bridge's EADDRINUSE sentinel) gets the port-in-use explanation; any
- * other early death is a startup failure (npx could not resolve/download
- * chrome-devtools-mcp, a broken `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a
- * Chrome launch failure) and gets the generic startup guidance, so a
- * single-session user with a broken install is not misdirected to port advice.
+ * other early death is a startup failure. Shared-MCP configuration gets
+ * proxy-specific guidance; local mode covers npx resolution, a broken
+ * `CHROME_DEVTOOLS_AXI_MCP_PATH`, or a Chrome launch failure. In either mode,
+ * a single-session user with a broken install is not misdirected to port advice.
  */
 export function buildBridgeEarlyExitError(
   sessionName: string,

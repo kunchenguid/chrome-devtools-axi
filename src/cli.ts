@@ -87,9 +87,15 @@ environment:
   CHROME_DEVTOOLS_AXI_MCP_PATH      Absolute path to a chrome-devtools-mcp script. When set, the
                                     bridge spawns 'node \$MCP_PATH' directly instead of
                                     'npx -y chrome-devtools-mcp@latest'. Avoids ~30s npx bootstrap
-                                    on slow/cold systems. Recommended:
+                                    on slow/cold systems. For shared MCP mode, this must point to
+                                    a proxy-capable build that advertises --serverUrl in --help.
+                                    Local-mode recommendation:
                                       npm install -g chrome-devtools-mcp
                                       export CHROME_DEVTOOLS_AXI_MCP_PATH="\$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+  CHROME_DEVTOOLS_AXI_MCP_SERVER_URL
+                                    Shared MCP service URL. Requires an explicit MCP_PATH pointing
+                                    to a proxy-capable build; takes precedence over local Chrome
+                                    launch and attach settings.
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
 
