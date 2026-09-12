@@ -430,6 +430,8 @@ describe("resolveTransportSpec", () => {
   beforeEach(() => {
     savedEnv.CHROME_DEVTOOLS_AXI_MCP_PATH =
       process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+    savedEnv.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
+      process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL;
     savedEnv.CHROME_DEVTOOLS_AXI_HEADED =
       process.env.CHROME_DEVTOOLS_AXI_HEADED;
     savedEnv.CHROME_DEVTOOLS_AXI_BROWSER_URL =
@@ -439,6 +441,7 @@ describe("resolveTransportSpec", () => {
     savedEnv.CHROME_DEVTOOLS_AXI_AUTO_CONNECT =
       process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     delete process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
+    delete process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
     delete process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
@@ -480,6 +483,17 @@ describe("resolveTransportSpec", () => {
     // Preserves the mcp-specific args
     expect(spec.args).toContain("--isolated");
     expect(spec.args).toContain("--headless");
+  });
+  it("forwards a shared MCP server URL to the spawned MCP proxy", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/opt/mcp.js";
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
+      " http://127.0.0.1:9333/mcp ";
+
+    const spec = resolveTransportSpec();
+
+    expect(spec.env).toEqual({
+      CHROME_DEVTOOLS_MCP_SERVER_URL: "http://127.0.0.1:9333/mcp",
+    });
   });
 
   it("preserves --browserUrl when MCP_PATH and BROWSER_URL are both set", () => {

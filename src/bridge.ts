@@ -790,20 +790,31 @@ export function detectGlobalMcpPath(
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
-): { command: string; args: string[] } {
+): { command: string; args: string[]; env?: Record<string, string> } {
   const mcpArgs = buildTransportArgs();
   const explicit = process.env.CHROME_DEVTOOLS_AXI_MCP_PATH;
   const mcpPath =
     explicit && explicit.length > 0 ? explicit : detectGlobalMcpPath(probe);
+  const sharedServerUrl =
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim();
+  const env =
+    sharedServerUrl && sharedServerUrl.length > 0
+      ? { CHROME_DEVTOOLS_MCP_SERVER_URL: sharedServerUrl }
+      : undefined;
   if (mcpPath) {
     // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
     // node spawn doesn't need it.
     return {
       command: process.execPath,
       args: [mcpPath, ...mcpArgs.slice(2)],
+      ...(env ? { env } : {}),
     };
   }
-  return { command: "npx", args: mcpArgs };
+  return {
+    command: "npx",
+    args: mcpArgs,
+    ...(env ? { env } : {}),
+  };
 }
 
 function createTransport(): StdioClientTransport {

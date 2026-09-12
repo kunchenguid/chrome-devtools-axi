@@ -278,6 +278,24 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
+To share one long-lived Chrome DevTools MCP service across AXI sessions, point
+each AXI bridge at that service:
+
+```sh
+export CHROME_DEVTOOLS_AXI_MCP_SERVER_URL=http://127.0.0.1:9333/mcp
+CHROME_DEVTOOLS_AXI_SESSION=agent-a chrome-devtools-axi pages
+CHROME_DEVTOOLS_AXI_SESSION=agent-b chrome-devtools-axi pages
+```
+
+This requires a `chrome-devtools-mcp` version with `--server-url` proxy support.
+AXI forwards the URL to its spawned MCP command, which becomes a lightweight
+stdio-to-HTTP proxy instead of launching or attaching to Chrome. Each named AXI
+bridge receives a separate remote MCP context and selected page, while the
+remote MCP service owns the one shared Chrome connection and shared pages.
+`CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` takes precedence over AXI's local Chrome
+launch and attach settings. Keep the MCP endpoint loopback-only and use SSH
+port forwarding when it runs on another machine.
+
 Connect to an existing Chrome instance instead of launching one:
 
 ```sh
