@@ -551,9 +551,9 @@ export async function ensureBridge(
   const sharedMcpMode = resolveSharedMcpMode();
   if (sawShallowReady) {
     const suggestions =
-      sharedMcpMode === "direct"
+      sharedMcpMode
         ? [
-            ...sharedMcpSuggestions("direct"),
+            ...sharedMcpSuggestions(sharedMcpMode),
             "The shared MCP service may be reachable while its attached Chrome target is unavailable.",
           ]
         : [
