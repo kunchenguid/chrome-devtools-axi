@@ -37,7 +37,7 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 ## Repo conventions
 
 - Node 20+, TypeScript, ESM-only.
-- Unit tests use Vitest and are co-located as `*.test.ts`.
+- See [AGENTS.md](AGENTS.md#commands) for test and formatting commands.
 - Use pnpm for package scripts.
 - Run `pnpm run build` and `pnpm test` before pushing.
 - The pipeline will run them again, but a fast local pass saves rounds.

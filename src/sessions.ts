@@ -10,9 +10,8 @@
  *   CHROME_DEVTOOLS_AXI_SESSION=worker-1 chrome-devtools-axi open ...
  *   CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open ...
  *
- * A session only isolates the bridge itself; the connection mode and profile
- * (AUTO_CONNECT / BROWSER_URL / USER_DATA_DIR / --isolated) are unchanged. For
- * a persistent per-session profile, combine with CHROME_DEVTOOLS_AXI_USER_DATA_DIR.
+ * Session identity does not choose a transport or browser profile. See README
+ * Configuration for local browser and shared MCP service setup.
  *
  * Precedence:
  *   port      - CHROME_DEVTOOLS_AXI_PORT > deterministic hash of the session name

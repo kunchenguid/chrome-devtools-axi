@@ -116,6 +116,8 @@ pnpm link
 
 ## How It Works
 
+The default local mode uses the process chain below. See [Configuration](#configuration) for shared MCP service setup.
+
 ```
 ┌───────────────────────┐
 │  chrome-devtools-axi  │  CLI — parse args, format output
@@ -296,12 +298,18 @@ CHROME_DEVTOOLS_AXI_SESSION=agent-b chrome-devtools-axi pages
 AXI checks the selected executable's `--help` for the `--serverUrl` option
 before starting the proxy and passes the URL with `--server-url`. Shared mode
 requires this explicit path; it does not auto-select a global install or `@latest`.
-Each named AXI bridge receives a separate remote MCP context and selected page,
+Each named AXI bridge keeps a separate remote MCP context and selected-page state,
 while the MCP service owns the one shared Chrome connection and shared pages.
+Actions on the same page can still affect other sessions.
 `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` takes precedence over AXI's local Chrome
 launch and attach settings. Run the service on the same host and filesystem as
 AXI, keeping the endpoint loopback-only, so saved artifact paths refer to the
 same local files.
+
+Stop any existing bridges for those session names before switching to this
+configuration: a running bridge retains its original transport settings.
+`CHROME_DEVTOOLS_AXI_SESSION=<name> chrome-devtools-axi stop` stops that session's
+bridge and proxy; manage the shared service's lifecycle separately.
 
 Connect to an existing Chrome instance instead of launching one:
 
@@ -340,6 +348,7 @@ On macOS this also means the browser can never raise the system "Keychain Not Fo
 
 Your own externally launched Chrome is unaffected: its saved passwords remain available and untouched because this tool does not read, write, move, or reset the login keychain or its `Chrome Safe Storage` item.
 The isolation flags apply only to browsers this tool starts and are deliberately not sent in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `CHROME_DEVTOOLS_AXI_BROWSER_URL`, and `wsEndpoint` modes, where the browser belongs to whoever launched it.
+The shared MCP service is also externally launched; its operator owns Chrome's keychain policy, as illustrated by the service launch example above.
 
 Run multiple isolated bridges at once with `CHROME_DEVTOOLS_AXI_SESSION` - one per agent session, worktree, or test worker:
 
@@ -349,9 +358,9 @@ CHROME_DEVTOOLS_AXI_SESSION=worker-2 chrome-devtools-axi open https://example.or
 ```
 
 Each session name gets its own bridge process, port (auto-derived from the name, or pinned with `CHROME_DEVTOOLS_AXI_PORT`), and on-disk state.
-In the default `--isolated` and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` launch modes each bridge also launches its own Chrome, so concurrent sessions share neither browser state nor each other's stale-ref tracking.
+Outside shared-service mode, the default `--isolated` and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` launch modes each launch a Chrome per bridge, so concurrent sessions share neither browser state nor each other's stale-ref tracking.
 Sessions that attach to the same external browser - multiple `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1` sessions on one running Chrome, or the same `CHROME_DEVTOOLS_AXI_BROWSER_URL`/`wsEndpoint` - drive that shared browser and are isolated only at the bridge level, where the per-session generation counter does not prevent cross-talk.
-A session only isolates the bridge - the connection mode and profile are unchanged; combine with `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` for a persistent per-session profile.
+A session name does not choose a connection mode or profile; for a locally launched persistent browser, give each session its own `CHROME_DEVTOOLS_AXI_USER_DATA_DIR`.
 The default (unset) session keeps port 9224 and the legacy state paths below.
 
 Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.

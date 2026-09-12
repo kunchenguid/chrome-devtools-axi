@@ -753,8 +753,8 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
  * `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
  *
  * Returns the resolved path on success, or null if npm is unavailable or the
- * package isn't installed. Used as the auto-fallback in
- * {@link resolveTransportSpec} when `CHROME_DEVTOOLS_AXI_MCP_PATH` isn't set.
+ * package isn't installed. Used by {@link resolveTransportSpec} only for local
+ * mode when no explicit executable is configured.
  */
 export function detectGlobalMcpPath(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -777,16 +777,13 @@ export function detectGlobalMcpPath(
 /**
  * Resolve the command + args used to spawn the chrome-devtools-mcp transport.
  *
- * Resolution order (most → least specific):
- *   1. `CHROME_DEVTOOLS_AXI_MCP_PATH` env var — explicit override, always wins.
- *   2. Auto-detect: probe a globally-installed `chrome-devtools-mcp` via
- *      `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
- *      If found, spawn `node <path>` directly — starts in ~1-2s vs. the
- *      30s+ npx-bootstrap path.
- *   3. Fall back to `npx -y chrome-devtools-mcp@latest`. On systems with a
- *      slow link or large global cache this can race the bridge's readiness
- *      deadline; install the package globally to skip it:
- *        npm install -g chrome-devtools-mcp
+ * Shared mode must verify proxy support before spawning: an incompatible MCP
+ * executable could otherwise start a separate local browser. Local browser
+ * arguments are deliberately excluded because the service owns Chrome's policy.
+ * See README Configuration for the supported dependency and setup.
+ *
+ * For local mode, detecting a global install avoids npx bootstrap overhead,
+ * which can exceed the bridge's readiness deadline on a slow or cold system.
  */
 export function resolveTransportSpec(
   probe: McpPathProbe = DEFAULT_MCP_PATH_PROBE,
@@ -855,8 +852,7 @@ function createBridgeClient(): Client {
 
 /** How long {@link RootsAwareClient.applyRoots} waits for chrome-devtools-mcp to
  * re-read our roots after a `list_changed` notification before proceeding. The
- * round-trip is local stdio (sub-millisecond); this cap only stops a server
- * that never re-reads from wedging the call. */
+ * cap stops a server that never re-reads from wedging the call. */
 const ROOTS_FETCH_WAIT_MS = 2_000;
 
 function toRoots(dirs: string[]): Array<{ uri: string; name: string }> {

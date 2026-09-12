@@ -41,7 +41,7 @@ Every invocation is a short-lived process, so anything that must survive across 
 
 ### Process model
 
-Three processes: CLI -> bridge -> chrome-devtools-mcp (which drives headless Chrome over CDP).
+See [README.md](README.md#how-it-works) for the process overview and [Configuration](README.md#configuration) for local and shared-service setup.
 
 The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP tools through the bridge, and formats output.
 `ensureBridge` (`src/client.ts`) reads its session's `bridge.pid` (`~/.chrome-devtools-axi/bridge.pid` for the default session) and reuses a live bridge only after a **deep** health check (`/health?deep=1` drives one CDP-backed `list_pages` call), so a bridge whose attached browser died gets terminated and respawned instead of reused as a stale endpoint.
@@ -50,8 +50,7 @@ Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/brid
 The bridge holds one persistent MCP stdio session and exposes a localhost HTTP API on its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`.
 Teardown is careful about orphans: the bridge kills its own process group on exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so chrome-devtools-mcp and Chrome children get reaped (group kill only when `ps` confirms the PID is actually a bridge).
 
-`resolveTransportSpec` (`src/bridge.ts`) picks how chrome-devtools-mcp is spawned: explicit `CHROME_DEVTOOLS_AXI_MCP_PATH`, else an auto-detected global npm install (fast), else `npx -y chrome-devtools-mcp@latest` (slow first run).
-`CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` selects stdio-to-Streamable-HTTP proxy mode and requires an explicit `CHROME_DEVTOOLS_AXI_MCP_PATH` whose `--help` advertises `--serverUrl`; shared mode bypasses global/npx resolution and local browser arguments. The URL is passed with `--server-url`. Each named bridge keeps a separate remote MCP context while sharing the same-host service's Chrome and filesystem. See README.md for the dependency prerequisite. Without it, connection modes are env-driven through `buildTransportArgs`: `AUTO_CONNECT` (Chrome 144+ remote debugging), `BROWSER_URL` (http(s) -> `--browserUrl`, ws(s) -> `--wsEndpoint` + `WS_HEADERS`), `USER_DATA_DIR` (persistent profile) vs the default `--isolated`, `CHANNEL` (`--channel` to pick which installed Chrome release channel is attached to or launched, omitted in `BROWSER_URL`/`wsEndpoint` mode), and `HEADED`.
+`resolveTransportSpec` (`src/bridge.ts`) owns transport selection and proxy compatibility checks; `buildTransportArgs` owns local browser arguments. See `test/bridge.test.ts` for their regression coverage and README Configuration for dependency prerequisites.
 
 The launch modes (`--isolated`/`--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS` so browsers we start cannot reach the machine owner's password store; attach modes deliberately omit them because that browser's keychain policy belongs to whoever started it.
 `test/keychain-isolation.test.ts` owns the regression rationale and structural invariant; README.md documents the user-facing behavior.
