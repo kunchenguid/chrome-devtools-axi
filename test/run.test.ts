@@ -270,7 +270,7 @@ describe("createPageHelper", () => {
     await page.wait(500);
 
     expect(callTool).toHaveBeenCalledWith("evaluate_script", {
-      function: "new Promise(r => setTimeout(r, 500))",
+      function: "() => (new Promise(r => setTimeout(r, 500)))",
     });
   });
 
@@ -454,7 +454,7 @@ describe("createPageHelper", () => {
         },
       });
       current = element;
-      new Function(fn)();
+      new Function(`return (${fn})`)()();
       expect(element.currentValue).toBe("query");
       expect(element.events).toEqual(["input", "change"]);
       expect(element.observedExternalValues).toEqual([true]);
