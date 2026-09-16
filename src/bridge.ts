@@ -784,7 +784,8 @@ const DEFAULT_MCP_PATH_PROBE: McpPathProbe = {
 
 /**
  * Auto-detect a globally-installed chrome-devtools-mcp by probing
- * `$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`.
+ * both npm global package layouts: `<prefix>/node_modules/...` (Windows) and
+ * `<prefix>/lib/node_modules/...` (POSIX).
  *
  * Returns the resolved path on success, or null if npm is unavailable or the
  * package isn't installed. Used by {@link resolveTransportSpec} only for local
@@ -795,17 +796,22 @@ export function detectGlobalMcpPath(
 ): string | null {
   const prefix = probe.getNpmPrefix();
   if (!prefix || prefix.length === 0) return null;
-  const candidate = join(
-    prefix,
-    "lib",
+  const packagePath = [
     "node_modules",
     "chrome-devtools-mcp",
     "build",
     "src",
     "bin",
     "chrome-devtools-mcp.js",
-  );
-  return probe.existsSync(candidate) ? candidate : null;
+  ];
+  const candidates = [
+    join(prefix, "lib", ...packagePath),
+    join(prefix, ...packagePath),
+  ];
+  for (const candidate of candidates) {
+    if (probe.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**
