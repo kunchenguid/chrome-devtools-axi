@@ -1,3 +1,9 @@
+import {
+  ownsTemporaryHeadlessBrowser,
+  testingChromePath,
+  createIdleLifecycle,
+  createTemporaryIdleLifecycle,
+} from "./automation-lifecycle.js";
 /**
  * Persistent MCP bridge server for chrome-devtools-axi.
  *
@@ -453,7 +459,7 @@ async function handleCallRequest(
   req: IncomingMessage,
   res: ServerResponse,
   onPageIdentityChanged?: () => boolean | void,
-): Promise<void> {
+): Promise<boolean> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
   const result = await client.callTool(
@@ -481,15 +487,16 @@ async function handleCallRequest(
   // id space is exactly the silent retarget this branch exists to prevent.
   if (pageIdentityChanged && typeof payload.args.pageId === "number") {
     writeJson(res, 200, { error: PAGE_IDENTITY_CHANGED_ERROR });
-    return;
+    return false;
   }
   if (isToolResultError(result)) {
     // Surface the tool's own failure text as an error so the CLI throws and
     // exits non-zero instead of printing success (issue #96).
     writeJson(res, 200, { error: text || `Tool "${payload.name}" failed` });
-    return;
+    return false;
   }
   writeJson(res, 200, { result: text });
+  return true;
 }
 
 export async function handleBridgeRequest(
@@ -499,7 +506,7 @@ export async function handleBridgeRequest(
   sessionName?: string,
   logForbidden?: (message: string) => void,
   onPageIdentityChanged?: () => boolean | void,
-): Promise<void> {
+): Promise<boolean | undefined> {
   res.setHeader("Content-Type", "application/json");
 
   // Reject rebound requests before any routing - see isRequestAllowed and
@@ -515,7 +522,7 @@ export async function handleBridgeRequest(
         `origin=${origin ?? ""} ${req.method ?? ""} ${req.url ?? ""}`,
     );
     writeJson(res, 403, { error: "Forbidden host" });
-    return;
+    return false;
   }
 
   try {
@@ -525,7 +532,7 @@ export async function handleBridgeRequest(
     ) {
       if (!(await isBridgeClientConnected(client))) {
         writeJson(res, 503, { status: "error", error: "Not connected" });
-        return;
+        return false;
       }
       const deep = req.url.includes("deep=1");
       let droppedSelection = false;
@@ -537,7 +544,7 @@ export async function handleBridgeRequest(
             error: "CDP target unreachable",
             reason: probe.reason,
           });
-          return;
+          return false;
         }
         // The marker alone only says the browser reconnected. Reporting that
         // to a session with no routing would invent a loss, so the flag rides
@@ -554,31 +561,33 @@ export async function handleBridgeRequest(
         session: sessionName,
         ...(droppedSelection ? { pageIdentityChanged: true } : {}),
       });
-      return;
+      return true;
     }
 
     if (req.method === "GET" && req.url === "/tools") {
       await handleToolsRequest(client, res);
-      return;
+      return true;
     }
 
     if (req.method === "POST" && req.url === "/call") {
-      await handleCallRequest(client, req, res, onPageIdentityChanged);
-      return;
+      return handleCallRequest(client, req, res, onPageIdentityChanged);
     }
   } catch (error) {
     writeJson(res, 500, { error: getErrorMessage(error) });
-    return;
+    return undefined;
   }
 
   writeJson(res, 404, { error: "not found" });
+  return false;
 }
 
 export function createBridgeServer(
   client: BridgeClient,
   sessionName?: string,
+  lifecycle?: ReturnType<typeof createIdleLifecycle>,
 ): Server {
   return createServer((req, res) => {
+    const end = lifecycle?.begin(req);
     void handleBridgeRequest(
       client,
       req,
@@ -586,6 +595,9 @@ export function createBridgeServer(
       sessionName,
       logBridgeMessage,
       clearSelectedPageId,
+    ).then(
+      (successful) => end?.(successful === true),
+      () => end?.(false),
     );
   });
 }
@@ -649,7 +661,10 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
   "--password-store=basic",
 ] as const;
 
-export function buildTransportArgs(): string[] {
+export function buildTransportArgs(
+  platform: NodeJS.Platform = process.platform,
+  findTestingChrome: () => string = testingChromePath,
+): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest"];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
@@ -700,6 +715,13 @@ export function buildTransportArgs(): string[] {
     }
     if (process.env.CHROME_DEVTOOLS_AXI_HEADED !== "1") {
       args.push("--headless");
+      if (
+        platform === "darwin" &&
+        (!channel || channel === "stable") &&
+        ownsTemporaryHeadlessBrowser()
+      ) {
+        args.push(`--executablePath=${findTestingChrome()}`);
+      }
     }
     // Launch modes only: `--chrome-arg` is ignored when chrome-devtools-mcp
     // attaches to a browser somebody else started, and that browser's keychain
@@ -713,7 +735,11 @@ export function buildTransportArgs(): string[] {
   // targets: the running instance --autoConnect attaches to, or the one launched
   // by default. It is irrelevant when attaching to an explicit endpoint, so it is
   // omitted in BROWSER_URL/wsEndpoint mode. Validation is left to chrome-devtools-mcp.
-  if (channel && !browserUrl) {
+  if (
+    channel &&
+    !browserUrl &&
+    !args.some((arg) => arg.startsWith("--executablePath="))
+  ) {
     args.push(`--channel=${channel}`);
   }
 
@@ -1091,7 +1117,13 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   logBridgeMessage("Connected to chrome-devtools-mcp");
 
   const sessionName = resolveSessionName();
-  const server = createBridgeServer(bridgeClient, sessionName);
+  const lifecycle = createTemporaryIdleLifecycle(() => {
+    logBridgeMessage(
+      "Closing temporary headless session after ten idle minutes",
+    );
+    void shutdown();
+  });
+  const server = createBridgeServer(bridgeClient, sessionName, lifecycle);
   server.on("error", (error: NodeJS.ErrnoException) => {
     handleBridgeServerError(error, port);
   });
@@ -1105,11 +1137,17 @@ export async function runBridge(port = resolveSessionPort()): Promise<void> {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (idleTimer) clearInterval(idleTimer);
     removePidFile();
     await closeServer(server);
     await closeBridgeTransport(bridgeTransport);
     process.exit(0);
   };
+
+  const idleTimer = lifecycle
+    ? setInterval(() => lifecycle.check(), 1000)
+    : undefined;
+  idleTimer?.unref();
 
   // Kill our entire process group on exit so chrome-devtools-mcp children
   // don't survive as orphans. The bridge is spawned with detached:true,

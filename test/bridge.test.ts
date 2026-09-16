@@ -201,7 +201,7 @@ describe("buildTransportArgs", () => {
   });
 
   it("defaults to headless and isolated", () => {
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toEqual([
       "-y",
       "chrome-devtools-mcp@latest",
@@ -214,7 +214,7 @@ describe("buildTransportArgs", () => {
 
   it("omits --headless when CHROME_DEVTOOLS_AXI_HEADED=1", () => {
     process.env.CHROME_DEVTOOLS_AXI_HEADED = "1";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toEqual([
       "-y",
       "chrome-devtools-mcp@latest",
@@ -227,7 +227,7 @@ describe("buildTransportArgs", () => {
   it("forwards chrome args via --chrome-arg=", () => {
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
       "--enable-gpu --ignore-gpu-blocklist";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--chrome-arg=--enable-gpu");
     expect(args).toContain("--chrome-arg=--ignore-gpu-blocklist");
   });
@@ -235,7 +235,7 @@ describe("buildTransportArgs", () => {
   it("handles tabs, newlines, and extra whitespace in chrome args", () => {
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
       "  --flag-a\t--flag-b\n--flag-c  ";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--chrome-arg=--flag-a");
     expect(args).toContain("--chrome-arg=--flag-b");
     expect(args).toContain("--chrome-arg=--flag-c");
@@ -250,14 +250,14 @@ describe("buildTransportArgs", () => {
   it("combines headed mode with chrome args", () => {
     process.env.CHROME_DEVTOOLS_AXI_HEADED = "1";
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = "--enable-unsafe-webgpu";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).not.toContain("--headless");
     expect(args).toContain("--chrome-arg=--enable-unsafe-webgpu");
   });
 
   it("uses --browserUrl when CHROME_DEVTOOLS_AXI_BROWSER_URL is set", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).not.toContain("--isolated");
     expect(args).not.toContain("--headless");
@@ -266,14 +266,14 @@ describe("buildTransportArgs", () => {
   it("passes chrome args alongside --browserUrl", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS = "--some-flag";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).toContain("--chrome-arg=--some-flag");
   });
 
   it("uses --userDataDir when CHROME_DEVTOOLS_AXI_USER_DATA_DIR is set", () => {
     process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
     expect(args).not.toContain("--isolated");
     expect(args).toContain("--headless");
@@ -282,7 +282,7 @@ describe("buildTransportArgs", () => {
   it("respects headed mode with --userDataDir", () => {
     process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
     process.env.CHROME_DEVTOOLS_AXI_HEADED = "1";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
     expect(args).not.toContain("--headless");
   });
@@ -290,14 +290,14 @@ describe("buildTransportArgs", () => {
   it("--browserUrl takes precedence over --userDataDir", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).not.toContain("--userDataDir=/path/to/.chrome-profile");
   });
 
   it("uses --autoConnect when CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1", () => {
     process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--autoConnect");
     expect(args).not.toContain("--isolated");
     expect(args).not.toContain("--headless");
@@ -307,7 +307,7 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--autoConnect");
     expect(args).not.toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args).not.toContain("--userDataDir=/path/to/.chrome-profile");
@@ -315,27 +315,27 @@ describe("buildTransportArgs", () => {
 
   it("ignores AUTO_CONNECT when not set to '1'", () => {
     process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "true";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).not.toContain("--autoConnect");
     expect(args).toContain("--isolated");
   });
 
   it("omits --channel by default", () => {
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args.some((a) => a.startsWith("--channel"))).toBe(false);
   });
 
   it("appends --channel to --autoConnect", () => {
     process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--autoConnect");
     expect(args).toContain("--channel=beta");
   });
 
   it("appends --channel in the default launch mode", () => {
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--channel=beta");
     expect(args).toContain("--isolated");
     expect(args).toContain("--headless");
@@ -344,7 +344,7 @@ describe("buildTransportArgs", () => {
   it("appends --channel alongside --userDataDir", () => {
     process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR = "/path/to/.chrome-profile";
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "canary";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--userDataDir=/path/to/.chrome-profile");
     expect(args).toContain("--channel=canary");
   });
@@ -352,27 +352,27 @@ describe("buildTransportArgs", () => {
   it("ignores --channel when connecting via --browserUrl", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "beta";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--channel"))).toBe(false);
   });
 
   it("trims surrounding whitespace from the channel", () => {
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "  beta  ";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--channel=beta");
   });
 
   it("ignores a blank channel", () => {
     process.env.CHROME_DEVTOOLS_AXI_CHANNEL = "   ";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args.some((a) => a.startsWith("--channel"))).toBe(false);
   });
 
   it("routes ws:// BROWSER_URL to --wsEndpoint", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL =
       "ws://127.0.0.1:9222/devtools/browser/abc123";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain(
       "--wsEndpoint=ws://127.0.0.1:9222/devtools/browser/abc123",
     );
@@ -385,7 +385,7 @@ describe("buildTransportArgs", () => {
 
   it("routes wss:// BROWSER_URL to --wsEndpoint", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--wsEndpoint=wss://our.cluster.io/launch");
     expect(args).not.toContain("--browserUrl=wss://our.cluster.io/launch");
   });
@@ -394,7 +394,7 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
       '{"Authorization":"Bearer token"}';
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--wsEndpoint=wss://our.cluster.io/launch");
     expect(args).toContain('--wsHeaders={"Authorization":"Bearer token"}');
   });
@@ -403,7 +403,7 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "wss://our.cluster.io/launch";
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS = "{";
 
-    expect(() => buildTransportArgs()).toThrow(
+    expect(() => buildTransportArgs("linux")).toThrow(
       "CHROME_DEVTOOLS_AXI_WS_HEADERS must be valid JSON",
     );
   });
@@ -413,7 +413,7 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
       '["Authorization: Bearer token"]';
 
-    expect(() => buildTransportArgs()).toThrow(
+    expect(() => buildTransportArgs("linux")).toThrow(
       "CHROME_DEVTOOLS_AXI_WS_HEADERS must be a JSON object",
     );
   });
@@ -422,7 +422,7 @@ describe("buildTransportArgs", () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
     process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS =
       '{"Authorization":"Bearer token"}';
-    const args = buildTransportArgs();
+    const args = buildTransportArgs("linux");
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
   });
