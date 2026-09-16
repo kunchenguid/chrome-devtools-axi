@@ -377,14 +377,14 @@ export CHROME_DEVTOOLS_AXI_BROWSER_URL=wss://cluster.example/launch
 export CHROME_DEVTOOLS_AXI_WS_HEADERS='{"Authorization":"Bearer token"}'
 ```
 
-Pick which installed Chrome release channel to target with `CHROME_DEVTOOLS_AXI_CHANNEL` - `stable` (the default), `beta`, `canary`, or `dev`:
+Pick which Chrome release channel to target with `CHROME_DEVTOOLS_AXI_CHANNEL` - `stable` (the default), `beta`, `canary`, or `dev`:
 
 ```sh
 export CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1
 export CHROME_DEVTOOLS_AXI_CHANNEL=beta
 ```
 
-This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
+For beta, canary, and dev, this selects which installed Chrome `--autoConnect` attaches to and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes. On macOS, stable/default temporary headless launches use Chrome for Testing as described below.
 It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
 
 ### Keychain isolation
@@ -397,6 +397,10 @@ On macOS this also means the browser can never raise the system "Keychain Not Fo
 Your own externally launched Chrome is unaffected: its saved passwords remain available and untouched because this tool does not read, write, move, or reset the login keychain or its `Chrome Safe Storage` item.
 The isolation flags apply only to browsers this tool starts and are deliberately not sent in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `CHROME_DEVTOOLS_AXI_BROWSER_URL`, and `wsEndpoint` modes, where the browser belongs to whoever launched it.
 The shared MCP service is also externally launched; its operator owns Chrome's keychain policy, as illustrated by the service launch example above.
+
+Sessions remain alive until `stop` by default. Set `CHROME_DEVTOOLS_AXI_IDLE_CLEANUP=1` to opt into closing temporary headless browsers after ten minutes without a successful browser operation. In-flight requests prevent idle shutdown; health probes and tool discovery do not renew the idle interval. Attached browsers, visible launches, and persistent profiles are excluded. Temporary browser state is discarded when the session closes.
+
+On macOS, default/stable temporary headless launches use the newest architecture-matching Chrome for Testing build under `~/.cache/puppeteer/chrome`, keeping automation separate from the everyday Chrome application. A missing installation fails explicitly and must be installed into that cache before retrying. Explicit beta/dev/canary channels retain their browser selection.
 
 Run multiple isolated bridges at once with `CHROME_DEVTOOLS_AXI_SESSION` - one per agent session, worktree, or test worker:
 

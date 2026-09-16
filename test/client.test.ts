@@ -393,6 +393,19 @@ describe("buildBridgeEarlyExitError", () => {
 
     expect(err.message).toContain("was killed by SIGKILL");
   });
+
+  it("surfaces a bridge fatal startup message", () => {
+    const err = buildBridgeEarlyExitError(
+      "worker-2",
+      9231,
+      1,
+      null,
+      "[chrome-devtools-axi] Fatal: Install Chrome for Testing before retrying",
+    );
+
+    expect(err.code).toBe("BRIDGE_NOT_READY");
+    expect(err.message).toBe("Install Chrome for Testing before retrying");
+  });
 });
 
 describe("ensureBridge early-exit fast-fail", () => {
