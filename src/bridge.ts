@@ -140,6 +140,10 @@ export async function isBridgeTargetReachable(
       name: "list_pages",
       arguments: {},
     });
+    if (isToolResultError(result)) {
+      const reason = extractToolText(getToolContent(result));
+      return { ok: false, reason: reason || 'Tool "list_pages" failed' };
+    }
     return {
       ok: true,
       pageIdentityChanged: didMcpPageIdentityChange(result),

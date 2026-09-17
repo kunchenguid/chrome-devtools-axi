@@ -1043,6 +1043,20 @@ describe("isBridgeTargetReachable", () => {
     expect(result).toEqual({ ok: true, pageIdentityChanged: false });
   });
 
+  it("returns ok=false with the MCP tool error when list_pages reports isError", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({
+        isError: true,
+        content: [{ type: "text", text: "Network.enable timed out" }],
+      }),
+      close: async () => {},
+    };
+
+    const result = await isBridgeTargetReachable(client);
+    expect(result).toEqual({ ok: false, reason: "Network.enable timed out" });
+  });
+
   it("returns ok=false with reason when the CDP target is gone", async () => {
     const client: BridgeClient = {
       listTools: async () => ({ tools: [] }),
@@ -1185,6 +1199,31 @@ describe("handleBridgeRequest /health", () => {
     expect(body.status).toBe("error");
     expect(body.error).toContain("CDP target unreachable");
     expect(body.reason).toContain("Target closed");
+  });
+
+  it("returns 503 from /health?deep=1 when list_pages reports an MCP tool error", async () => {
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({
+        isError: true,
+        content: [{ type: "text", text: "Network.enable timed out" }],
+      }),
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+
+    await handleBridgeRequest(
+      client,
+      makeRequest("GET", "/health?deep=1"),
+      res,
+    );
+
+    expect(captured.statusCode).toBe(503);
+    expect(JSON.parse(captured.body)).toEqual({
+      status: "error",
+      error: "CDP target unreachable",
+      reason: "Network.enable timed out",
+    });
   });
 
   it("invalidates a named session's persisted routing when a deep probe reconnects the browser", async () => {
