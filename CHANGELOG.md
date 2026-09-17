@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.35](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.34...chrome-devtools-axi-v0.1.35) (2026-09-17)
+
+
+### Features
+
+* **bridge:** add shared MCP server transport modes ([#139](https://github.com/kunchenguid/chrome-devtools-axi/issues/139)) ([a970109](https://github.com/kunchenguid/chrome-devtools-axi/commit/a970109ced6a91e13f817581a7f05f07ad57f22d))
+
+
+### Bug Fixes
+
+* **bridge:** detect Windows global MCP installs ([#141](https://github.com/kunchenguid/chrome-devtools-axi/issues/141)) ([7b8844f](https://github.com/kunchenguid/chrome-devtools-axi/commit/7b8844f2dec6f318f1f3a8053c492fa16a4a72dc))
+* **bridge:** treat MCP tool errors as unhealthy ([#143](https://github.com/kunchenguid/chrome-devtools-axi/issues/143)) ([cbc313e](https://github.com/kunchenguid/chrome-devtools-axi/commit/cbc313e871c82c917db4e43349c67206162c0980))
+* **cli:** report resolved screenshot output paths ([#140](https://github.com/kunchenguid/chrome-devtools-axi/issues/140)) ([d0834b6](https://github.com/kunchenguid/chrome-devtools-axi/commit/d0834b68d9b75ee196f76adccb05484e8bdc77db))
+* **cli:** restore controlled fills and stale ref safety ([#134](https://github.com/kunchenguid/chrome-devtools-axi/issues/134)) ([03bc156](https://github.com/kunchenguid/chrome-devtools-axi/commit/03bc156f0f71a9d8c25332f94f23f8f1ee4d81a7))
+
 ## [0.1.34](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.33...chrome-devtools-axi-v0.1.34) (2026-09-03)
 
 
