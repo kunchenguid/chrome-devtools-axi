@@ -203,6 +203,10 @@ export function createPageHelper(callTool: CallTool): PageHelper {
       jsOrFn: string | ((...args: unknown[]) => unknown),
     ): Promise<unknown> {
       if (typeof jsOrFn === "function") {
+        // A real function is already callable; send its source verbatim.
+        // wrapJsExpression's head regex cannot recognize every function
+        // source (method shorthand, multiline parameter lists) and would
+        // wrap it so MCP returns the function instead of calling it.
         return parseEvalOutput(
           await callTool("evaluate_script", { function: String(jsOrFn) }),
         );
