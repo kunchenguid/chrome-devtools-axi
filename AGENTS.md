@@ -115,6 +115,7 @@ Errors are `CdpError` (extends `AxiError`) with an `ErrorCode` and suggestions; 
 `chrome-devtools-axi run` (`src/run.ts`) reads a JavaScript script from stdin and executes it with a `page` helper global (`open`, `eval`, `wait`, `click`, `fill`, `snapshot`, ...) that maps to MCP tool calls.
 Only the script's own `console.log` output reaches stdout: handlers return text prefixed with `RAW_STDOUT_MARKER`, and `wrapStdout` (`src/cli.ts`) strips the marker and bypasses the usual formatting for the `run` command.
 `eval` and `page.eval` wrap plain expressions as `() => (<expr>)` via `wrapJsExpression`, passing function sources through unchanged and unwrapping no-arg IIFEs.
+chrome-devtools-mcp `evaluate_script` invokes its `function` payload rather than evaluating it, so every payload must be callable: `scroll`, numeric `wait`, and the selector-based `run` helpers send arrow functions (`callFunction` in `src/run.ts`), and `test/main.test.ts` / `test/run.test.ts` execute the sent source to enforce it.
 
 ## Things to know when editing
 

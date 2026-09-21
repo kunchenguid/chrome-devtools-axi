@@ -1040,11 +1040,12 @@ async function callWithSnapshot(
   return stampFresh();
 }
 
+// evaluate_script invokes its payload, so each entry must be a callable.
 const SCROLL_FUNCTIONS: Record<string, string> = {
-  up: "window.scrollBy(0, -500)",
-  down: "window.scrollBy(0, 500)",
-  top: "window.scrollTo(0, 0)",
-  bottom: "window.scrollTo(0, document.body.scrollHeight)",
+  up: "() => window.scrollBy(0, -500)",
+  down: "() => window.scrollBy(0, 500)",
+  top: "() => window.scrollTo(0, 0)",
+  bottom: "() => window.scrollTo(0, document.body.scrollHeight)",
 };
 
 async function handleOpen(args: string[], full: boolean): Promise<string> {
@@ -1186,7 +1187,7 @@ async function handleWait(args: string[]): Promise<string> {
   const isNumeric = /^\d+$/.test(target);
   if (isNumeric) {
     await callTool("evaluate_script", {
-      function: `new Promise(r => setTimeout(r, ${target}))`,
+      function: wrapJsExpression(`new Promise(r => setTimeout(r, ${target}))`),
     });
   } else {
     await callTool("wait_for", { text: [target] });

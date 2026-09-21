@@ -166,10 +166,14 @@ export interface PageHelper {
 }
 
 export function createPageHelper(callTool: CallTool): PageHelper {
+  // evaluate_script requires a callable, not its result.
+  function callFunction(code: string): Promise<string> {
+    return callTool("evaluate_script", { function: wrapJsExpression(code) });
+  }
+
   /** Run JS in the page and return the parsed value. */
   async function evalJs(code: string): Promise<unknown> {
-    const output = await callTool("evaluate_script", { function: code });
-    return parseEvalOutput(output);
+    return parseEvalOutput(await callFunction(code));
   }
 
   return {
@@ -198,23 +202,25 @@ export function createPageHelper(callTool: CallTool): PageHelper {
     async eval(
       jsOrFn: string | ((...args: unknown[]) => unknown),
     ): Promise<unknown> {
-      const fn =
-        typeof jsOrFn === "function"
-          ? String(jsOrFn)
-          : wrapJsExpression(jsOrFn);
-      return evalJs(fn);
+      if (typeof jsOrFn === "function") {
+        // A real function is already callable; send its source verbatim.
+        // wrapJsExpression's head regex cannot recognize every function
+        // source (method shorthand, multiline parameter lists) and would
+        // wrap it so MCP returns the function instead of calling it.
+        return parseEvalOutput(
+          await callTool("evaluate_script", { function: String(jsOrFn) }),
+        );
+      }
+      return evalJs(jsOrFn);
     },
 
     async wait(msOrSelector: number | string, timeout?: number): Promise<void> {
       if (typeof msOrSelector === "number") {
-        await callTool("evaluate_script", {
-          function: `new Promise(r => setTimeout(r, ${msOrSelector}))`,
-        });
+        await callFunction(`new Promise(r => setTimeout(r, ${msOrSelector}))`);
       } else {
         const ms = timeout ?? DEFAULT_WAIT_TIMEOUT;
         const sel = JSON.stringify(msOrSelector);
-        await callTool("evaluate_script", {
-          function: `new Promise((resolve, reject) => {
+        await callFunction(`new Promise((resolve, reject) => {
   const sel = ${sel};
   if (document.querySelector(sel)) { resolve(); return; }
   const observer = new MutationObserver(() => {
@@ -229,8 +235,7 @@ export function createPageHelper(callTool: CallTool): PageHelper {
     reject(new Error('Timeout waiting for: ' + sel));
   }, ${ms});
   observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-})`,
-        });
+})`);
       }
     },
 
@@ -247,14 +252,12 @@ export function createPageHelper(callTool: CallTool): PageHelper {
         });
       } else {
         const sel = JSON.stringify(refOrSelector);
-        await callTool("evaluate_script", {
-          function: `(() => {
+        await callFunction(`() => {
   const el = document.querySelector(${sel});
   if (!el) throw new Error('Element not found: ' + ${sel});
   el.scrollIntoView({ block: 'center' });
   el.click();
-})()`,
-        });
+}`);
       }
     },
 
@@ -267,8 +270,7 @@ export function createPageHelper(callTool: CallTool): PageHelper {
       } else {
         const sel = JSON.stringify(refOrSelector);
         const val = JSON.stringify(text);
-        await callTool("evaluate_script", {
-          function: `(() => {
+        await callFunction(`() => {
   const el = document.querySelector(${sel});
   if (!el) throw new Error('Element not found: ' + ${sel});
   el.focus();
@@ -278,8 +280,7 @@ export function createPageHelper(callTool: CallTool): PageHelper {
   Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${val});
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
-})()`,
-        });
+}`);
       }
     },
 

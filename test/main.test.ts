@@ -58,6 +58,7 @@ describe("main", () => {
     callTool.mockReset();
     process.exitCode = undefined;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("shows bin and description in the no-args home view", async () => {
@@ -274,6 +275,70 @@ describe("main", () => {
     await main(argv);
 
     expect(callTool).toHaveBeenCalledWith(tool, args);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.each([
+    { dir: "down", method: "scrollBy", coords: [0, 500] },
+    { dir: "up", method: "scrollBy", coords: [0, -500] },
+    { dir: "top", method: "scrollTo", coords: [0, 0] },
+    { dir: "bottom", method: "scrollTo", coords: [0, 1234] },
+  ])(
+    "scroll $dir sends a callable that scrolls the window exactly once",
+    async ({ dir, method, coords }) => {
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      callTool.mockResolvedValue("");
+
+      await main(["scroll", dir]);
+
+      expect(callTool.mock.calls.map(([tool]) => tool)).toEqual([
+        "evaluate_script",
+        "evaluate_script",
+        "take_snapshot",
+        "evaluate_script",
+      ]);
+      const scrolls: Array<[string, number, number]> = [];
+      vi.stubGlobal("window", {
+        scrollBy: (x: number, y: number) => scrolls.push(["scrollBy", x, y]),
+        scrollTo: (x: number, y: number) => scrolls.push(["scrollTo", x, y]),
+      });
+      vi.stubGlobal("document", { body: { scrollHeight: 1234 } });
+
+      const compiled = new Function(
+        `return (${callTool.mock.calls[0][1].function})`,
+      )();
+      expect(typeof compiled).toBe("function");
+      compiled();
+      expect(scrolls).toEqual([[method, ...coords]]);
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it("wait <ms> sends a callable whose promise settles after the delay", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    callTool.mockResolvedValue("");
+
+    await main(["wait", "500"]);
+
+    expect(callTool.mock.calls.map(([tool]) => tool)).toEqual([
+      "evaluate_script",
+    ]);
+    const timers: Array<{ fire: () => void; ms: number }> = [];
+    vi.stubGlobal("setTimeout", (fire: () => void, ms: number) => {
+      timers.push({ fire, ms });
+      return timers.length;
+    });
+
+    const compiled = new Function(
+      `return (${callTool.mock.calls[0][1].function})`,
+    )();
+    expect(typeof compiled).toBe("function");
+    const pending = compiled();
+    vi.unstubAllGlobals();
+    expect(pending).toBeInstanceOf(Promise);
+    expect(timers.map((t) => t.ms)).toEqual([500]);
+    timers[0].fire();
+    await expect(pending).resolves.toBeUndefined();
     expect(process.exitCode).toBeUndefined();
   });
 
