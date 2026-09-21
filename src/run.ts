@@ -202,8 +202,12 @@ export function createPageHelper(callTool: CallTool): PageHelper {
     async eval(
       jsOrFn: string | ((...args: unknown[]) => unknown),
     ): Promise<unknown> {
-      const fn = typeof jsOrFn === "function" ? String(jsOrFn) : jsOrFn;
-      return evalJs(fn);
+      if (typeof jsOrFn === "function") {
+        return parseEvalOutput(
+          await callTool("evaluate_script", { function: String(jsOrFn) }),
+        );
+      }
+      return evalJs(jsOrFn);
     },
 
     async wait(msOrSelector: number | string, timeout?: number): Promise<void> {

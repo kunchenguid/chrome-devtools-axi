@@ -274,28 +274,116 @@ describe("createPageHelper", () => {
     });
   });
 
-  it("page.wait with string waits for CSS selector via evaluate_script", async () => {
+  it("page.wait with string sends a callable that resolves once the selector matches", async () => {
     callTool.mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.wait(".results");
 
-    expect(callTool).toHaveBeenCalledWith("evaluate_script", {
-      function: expect.stringContaining(".results"),
+    const [tool, args] = callTool.mock.calls[0];
+    expect(tool).toBe("evaluate_script");
+    let present = false;
+    const observers: Array<{ callback: () => void; observing: unknown[] }> = [];
+    class TestMutationObserver {
+      observing: unknown[] = [];
+      constructor(public readonly callback: () => void) {
+        observers.push(this);
+      }
+      observe(target: unknown, options: unknown) {
+        this.observing.push([target, options]);
+      }
+      disconnect() {
+        this.observing = [];
+      }
+    }
+    const timers: number[] = [];
+    vi.stubGlobal("document", {
+      body: "body",
+      querySelector: (selector: string) =>
+        selector === ".results" && present ? {} : null,
     });
-    // Default 30s timeout
-    expect(callTool.mock.calls[0][1].function).toContain("30000");
+    vi.stubGlobal("MutationObserver", TestMutationObserver);
+    vi.stubGlobal("setTimeout", (_fn: () => void, ms: number) => {
+      timers.push(ms);
+      return timers.length;
+    });
+    vi.stubGlobal("clearTimeout", () => {});
+
+    const pending = new Function(`return (${args.function})`)()();
+    expect(pending).toBeInstanceOf(Promise);
+    expect(observers).toHaveLength(1);
+    expect(observers[0].observing).toEqual([
+      ["body", { childList: true, subtree: true, attributes: true }],
+    ]);
+    expect(timers).toEqual([30000]);
+
+    present = true;
+    observers[0].callback();
+    await expect(pending).resolves.toBeUndefined();
+    expect(observers[0].observing).toEqual([]);
   });
 
-  it("page.wait with selector and custom timeout", async () => {
+  it("page.wait with selector resolves immediately when it already matches", async () => {
     callTool.mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.wait("#loaded", 5000);
 
-    const fn = callTool.mock.calls[0][1].function;
-    expect(fn).toContain("#loaded");
-    expect(fn).toContain("5000");
+    const [tool, args] = callTool.mock.calls[0];
+    expect(tool).toBe("evaluate_script");
+    const observed: unknown[] = [];
+    vi.stubGlobal("document", {
+      body: "body",
+      querySelector: (selector: string) => (selector === "#loaded" ? {} : null),
+    });
+    vi.stubGlobal(
+      "MutationObserver",
+      class {
+        observe(...rest: unknown[]) {
+          observed.push(rest);
+        }
+      },
+    );
+    const timers: number[] = [];
+    vi.stubGlobal("setTimeout", (_fn: () => void, ms: number) => {
+      timers.push(ms);
+      return 1;
+    });
+
+    await expect(
+      new Function(`return (${args.function})`)()(),
+    ).resolves.toBeUndefined();
+    expect(observed).toEqual([]);
+    expect(timers).toEqual([]);
+  });
+
+  it("page.wait with selector rejects with the timeout error", async () => {
+    callTool.mockResolvedValueOnce("");
+
+    const page = createPageHelper(callTool);
+    await page.wait("#never", 5000);
+
+    const [, args] = callTool.mock.calls[0];
+    let fire: (() => void) | undefined;
+    const timers: number[] = [];
+    vi.stubGlobal("document", { body: "body", querySelector: () => null });
+    vi.stubGlobal(
+      "MutationObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal("setTimeout", (fn: () => void, ms: number) => {
+      fire = fn;
+      timers.push(ms);
+      return 1;
+    });
+
+    const pending = new Function(`return (${args.function})`)()();
+    expect(timers).toEqual([5000]);
+    fire!();
+    await expect(pending).rejects.toThrow("Timeout waiting for: #never");
   });
 
   it("page.click calls click with a fresh uid", async () => {
@@ -338,28 +426,45 @@ describe("createPageHelper", () => {
     expect(callTool).toHaveBeenCalledWith("click", { uid: "12_3" });
   });
 
-  it("page.click with CSS selector uses evaluate_script", async () => {
+  it("page.click with CSS selector sends a callable that clicks the element once", async () => {
     callTool.mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.click("a[href='/wiki/Charles_Babbage']");
 
-    expect(callTool).toHaveBeenCalledWith("evaluate_script", {
-      function: expect.stringContaining("a[href='/wiki/Charles_Babbage']"),
-    });
     expect(callTool).not.toHaveBeenCalledWith("click", expect.anything());
+    const [tool, args] = callTool.mock.calls[0];
+    expect(tool).toBe("evaluate_script");
+    const calls: string[] = [];
+    vi.stubGlobal("document", {
+      querySelector: (selector: string) =>
+        selector === "a[href='/wiki/Charles_Babbage']"
+          ? {
+              scrollIntoView: (options: unknown) =>
+                calls.push(`scrollIntoView:${JSON.stringify(options)}`),
+              click: () => calls.push("click"),
+            }
+          : null,
+    });
+
+    const compiled = new Function(`return (${args.function})`)();
+    expect(typeof compiled).toBe("function");
+    compiled();
+    expect(calls).toEqual(['scrollIntoView:{"block":"center"}', "click"]);
   });
 
-  it("page.click with CSS class selector uses evaluate_script", async () => {
+  it("page.click with CSS selector throws when nothing matches", async () => {
     callTool.mockResolvedValueOnce("");
 
     const page = createPageHelper(callTool);
     await page.click(".submit-btn");
 
-    const fn = callTool.mock.calls[0][1].function;
-    expect(fn).toContain(".submit-btn");
-    expect(fn).toContain("scrollIntoView");
-    expect(fn).toContain(".click()");
+    const [, args] = callTool.mock.calls[0];
+    vi.stubGlobal("document", { querySelector: () => null });
+
+    expect(() => new Function(`return (${args.function})`)()()).toThrow(
+      "Element not found: .submit-btn",
+    );
   });
 
   it("page.fill calls fill with a fresh uid and value", async () => {
@@ -666,6 +771,23 @@ describe("page.eval variants", () => {
 
     const fn = callTool.mock.calls[0][1].function;
     expect(fn).toContain("() => []");
+  });
+
+  it("sends a function value verbatim even when its parameter list spans lines", async () => {
+    callTool.mockResolvedValueOnce(
+      "Script ran on page and returned:\n```json\n3\n```",
+    );
+    const fn = new Function("return (\n  a,\n  b,\n) => a + b")() as (
+      ...args: unknown[]
+    ) => unknown;
+
+    const page = createPageHelper(callTool);
+    const result = await page.eval(fn);
+
+    const sent = callTool.mock.calls[0][1].function;
+    expect(sent).toBe(String(fn));
+    expect(new Function(`return (${sent})`)()(1, 2)).toBe(3);
+    expect(result).toBe(3);
   });
 
   it("unwraps an arrow IIFE so MCP receives a function (not a value)", async () => {
