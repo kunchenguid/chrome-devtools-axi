@@ -1040,6 +1040,7 @@ async function callWithSnapshot(
   return stampFresh();
 }
 
+// evaluate_script invokes its payload, so each entry must be a callable.
 const SCROLL_FUNCTIONS: Record<string, string> = {
   up: "() => window.scrollBy(0, -500)",
   down: "() => window.scrollBy(0, 500)",
