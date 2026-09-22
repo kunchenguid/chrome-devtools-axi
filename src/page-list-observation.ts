@@ -4,12 +4,13 @@
  *
  * Page ids from chrome-devtools-mcp are positional and can be reissued after a
  * tab closes or the browser reconnects. A short-lived CLI process cannot keep
- * an in-memory identity, so `pages` records a digest of the complete id/url
- * list in the active session directory. `closepage` atomically consumes that
- * observation, re-lists the pages, and closes only when the whole list still
- * matches. One observation authorizes at most one close.
+ * an in-memory identity, so `pages` records each listed id with a digest of
+ * its URL in the active session directory. `closepage` atomically consumes
+ * that observation, re-lists the pages, and closes only when the target id
+ * still shows the URL it had in that listing; unrelated tabs may change. One
+ * observation authorizes at most one close.
  *
- * Only a SHA-256 digest is persisted: page URLs can contain credentials or
+ * Only SHA-256 digests are persisted: page URLs can contain credentials or
  * other private fragments and must not be written to the state directory.
  */
 
@@ -29,20 +30,16 @@ import { resolveSessionStateDir } from "./sessions.js";
 export type PageListObservation = {
   version: 1;
   token: string;
-  count: number;
-  digest: string;
+  /** Page id -> SHA-256 digest of the URL listed for that id. */
+  pages: Record<string, string>;
 };
 
 function observationFile(): string {
   return join(resolveSessionStateDir(), "page-list-observation.json");
 }
 
-function canonicalPageList(pages: readonly PageListEntry[]): string {
-  return JSON.stringify(pages.map(({ id, url }) => [id, url]));
-}
-
-export function pageListDigest(pages: readonly PageListEntry[]): string {
-  return createHash("sha256").update(canonicalPageList(pages)).digest("hex");
+function pageUrlDigest(url: string): string {
+  return createHash("sha256").update(url).digest("hex");
 }
 
 export function createPageListObservation(
@@ -52,8 +49,9 @@ export function createPageListObservation(
   return {
     version: 1,
     token,
-    count: pages.length,
-    digest: pageListDigest(pages),
+    pages: Object.fromEntries(
+      pages.map(({ id, url }) => [String(id), pageUrlDigest(url)]),
+    ),
   };
 }
 
@@ -64,10 +62,15 @@ function parseObservation(raw: string): PageListObservation | null {
       value.version !== 1 ||
       typeof value.token !== "string" ||
       !/^[a-f0-9-]{36}$/.test(value.token) ||
-      !Number.isInteger(value.count) ||
-      (value.count ?? -1) < 0 ||
-      typeof value.digest !== "string" ||
-      !/^[a-f0-9]{64}$/.test(value.digest)
+      typeof value.pages !== "object" ||
+      value.pages === null ||
+      Array.isArray(value.pages) ||
+      !Object.entries(value.pages).every(
+        ([id, digest]) =>
+          /^\d+$/.test(id) &&
+          typeof digest === "string" &&
+          /^[a-f0-9]{64}$/.test(digest),
+      )
     ) {
       return null;
     }
@@ -127,13 +130,24 @@ export function consumePageListObservation(): PageListObservation | null {
   }
 }
 
-export function pageListMatchesObservation(
+/** True when `pageId` was part of the observed listing. */
+export function observationListsPage(
+  observation: PageListObservation,
+  pageId: number,
+): boolean {
+  return Object.hasOwn(observation.pages, String(pageId));
+}
+
+/** True when `pageId` still shows the URL it had in the observed listing. */
+export function pageMatchesObservation(
   pages: readonly PageListEntry[],
   observation: PageListObservation,
+  pageId: number,
 ): boolean {
-  return (
-    pages.length === observation.count &&
-    pageListDigest(pages) === observation.digest
+  return pages.some(
+    (page) =>
+      page.id === pageId &&
+      pageUrlDigest(page.url) === observation.pages[String(pageId)],
   );
 }
 

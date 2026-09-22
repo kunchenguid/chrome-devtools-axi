@@ -689,6 +689,18 @@ describe("closepage observation gate", () => {
     "2: Notes (https://example.com/notes)",
   ].join("\n");
 
+  it("names the observation flag when the page id is missing", async () => {
+    const write = captureOutput();
+
+    await main(["closepage"]);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "closepage <id> --observation <token>",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
   it("requires the observation token", async () => {
     const write = captureOutput();
 
@@ -733,6 +745,51 @@ describe("closepage observation gate", () => {
       ["list_pages"],
       ["list_pages"],
       ["close_page", { pageId: 1 }],
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("accepts the observation flag before the page id", async () => {
+    const write = captureOutput();
+    callTool
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce("");
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "--observation", token, "1"]);
+
+    expect(callTool.mock.calls).toEqual([
+      ["list_pages"],
+      ["list_pages"],
+      ["close_page", { pageId: 1 }],
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("closes the target while an unrelated tab changes URL", async () => {
+    const write = captureOutput();
+    const churned = [
+      "## Pages",
+      "0: User work (https://example.com/work#sent)",
+      "1: Smoke (https://example.com/smoke) [selected]",
+      "2: Notes (https://example.com/notes)",
+      "3: Popup (https://example.com/popup)",
+    ].join("\n");
+    callTool
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce(churned)
+      .mockResolvedValueOnce("");
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "2", "--observation", token]);
+
+    expect(callTool.mock.calls).toEqual([
+      ["list_pages"],
+      ["list_pages"],
+      ["close_page", { pageId: 2 }],
     ]);
     expect(process.exitCode).toBeUndefined();
   });
@@ -790,20 +847,20 @@ describe("closepage observation gate", () => {
 
     expect(callTool.mock.calls).toEqual([["list_pages"], ["list_pages"]]);
     expect(String(write.mock.calls.at(-1)?.[0])).toContain(
-      "The page list changed since `pages`; nothing was closed",
+      "Page ID 1 no longer shows the URL listed by `pages`; nothing was closed",
     );
     expect(process.exitCode).toBe(1);
   });
 
   it("does not authorize an id absent from the exact observed list", async () => {
     const write = captureOutput();
-    callTool.mockResolvedValueOnce(listed).mockResolvedValueOnce(listed);
+    callTool.mockResolvedValueOnce(listed);
 
     await main(["pages"]);
     const token = closeObservation(write);
     await main(["closepage", "9", "--observation", token]);
 
-    expect(callTool.mock.calls).toEqual([["list_pages"], ["list_pages"]]);
+    expect(callTool.mock.calls).toEqual([["list_pages"]]);
     expect(String(write.mock.calls.at(-1)?.[0])).toContain(
       "Page ID 9 was not present",
     );

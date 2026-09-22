@@ -6,7 +6,8 @@ import {
   clearPageListObservation,
   consumePageListObservation,
   createPageListObservation,
-  pageListMatchesObservation,
+  observationListsPage,
+  pageMatchesObservation,
   recordPageListObservation,
 } from "../src/page-list-observation.js";
 import type { PageListEntry } from "../src/pages.js";
@@ -59,33 +60,38 @@ describe("page-list close observation", () => {
     const second = consumePageListObservation();
 
     expect(first).not.toBeNull();
-    expect(pageListMatchesObservation(PAGES, first!)).toBe(true);
+    expect(pageMatchesObservation(PAGES, first!, 1)).toBe(true);
     expect(second).toBeNull();
   });
 
-  it("detects any id, URL, order or count change", () => {
+  it("binds only the target id to its observed URL", () => {
     const observed = createPageListObservation(PAGES);
 
-    expect(pageListMatchesObservation(PAGES, observed)).toBe(true);
+    expect(observationListsPage(observed, 1)).toBe(true);
+    expect(observationListsPage(observed, 2)).toBe(false);
+    expect(pageMatchesObservation(PAGES, observed, 1)).toBe(true);
     expect(
-      pageListMatchesObservation(
+      pageMatchesObservation(
         [
-          { ...PAGES[0], id: 1 },
-          { ...PAGES[1], id: 0 },
+          { ...PAGES[0], url: "https://changed.example/" },
+          PAGES[1],
+          { id: 2, url: "https://new.example/", selected: false },
         ],
         observed,
+        1,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
-      pageListMatchesObservation(
-        [{ ...PAGES[0], url: "https://changed.example/" }, PAGES[1]],
+      pageMatchesObservation(
+        [PAGES[0], { ...PAGES[1], url: "https://changed.example/" }],
         observed,
+        1,
       ),
     ).toBe(false);
-    expect(pageListMatchesObservation([...PAGES].reverse(), observed)).toBe(
+    expect(pageMatchesObservation([{ ...PAGES[1], id: 0 }], observed, 0)).toBe(
       false,
     );
-    expect(pageListMatchesObservation(PAGES.slice(1), observed)).toBe(false);
+    expect(pageMatchesObservation(PAGES.slice(0, 1), observed, 1)).toBe(false);
   });
 
   it("consumes malformed state without authorizing a close", () => {
@@ -96,8 +102,7 @@ describe("page-list close observation", () => {
       JSON.stringify({
         version: 1,
         token: "00000000-0000-0000-0000-000000000000",
-        count: 2,
-        digest: "not-a-digest",
+        pages: { "0": "not-a-digest" },
       }),
     );
 

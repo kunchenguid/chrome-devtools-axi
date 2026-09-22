@@ -24,7 +24,8 @@ import { parsePagesList } from "./pages.js";
 import {
   clearPageListObservation,
   consumePageListObservation,
-  pageListMatchesObservation,
+  observationListsPage,
+  pageMatchesObservation,
   recordPageListObservation,
 } from "./page-list-observation.js";
 import { overlaySessionSelected } from "./selected-page.js";
@@ -359,9 +360,9 @@ examples:
   chrome-devtools-axi selectpage 1`,
 
   closepage: `usage: chrome-devtools-axi closepage <id> --observation <token>
-Close one tab from the most recent \`pages\` listing. The complete page list
-must still match, and each \`pages\` listing authorizes at most one close.
-The last open page cannot be closed.
+Close one tab from the most recent \`pages\` listing. The target id must still
+show the URL it had in that listing, and each \`pages\` listing authorizes at
+most one close. The last open page cannot be closed.
 
 args:
   <id>  Page ID from the pages command (required)
@@ -1332,10 +1333,14 @@ async function handleSelectPage(
 }
 
 async function handleClosePage(args: string[]): Promise<string> {
-  const id = args[0];
+  const positional = [...args];
+  const observationFlag = positional.indexOf("--observation");
+  const [, observationToken] =
+    observationFlag === -1 ? [] : positional.splice(observationFlag, 2);
+  const id = positional[0];
   if (!id) {
     throw new CdpError("Missing page ID", "VALIDATION_ERROR", [
-      "Run `chrome-devtools-axi closepage <id>` — get ID from `pages` command",
+      "Run `chrome-devtools-axi pages` for an id and token, then `chrome-devtools-axi closepage <id> --observation <token>`",
     ]);
   }
   const pageId = parseInt(id, 10);
@@ -1344,9 +1349,6 @@ async function handleClosePage(args: string[]): Promise<string> {
       "Run `chrome-devtools-axi pages` to list available page IDs",
     ]);
   }
-  const observationFlag = args.indexOf("--observation");
-  const observationToken =
-    observationFlag === -1 ? undefined : args[observationFlag + 1];
   if (!observationToken || observationToken.startsWith("--")) {
     throw new CdpError(
       "Missing page-list observation token; nothing was closed",
@@ -1375,26 +1377,27 @@ async function handleClosePage(args: string[]): Promise<string> {
     );
   }
 
-  // Re-list after atomically consuming the observation. Any tab addition,
-  // removal, navigation or page-id remap makes the entire digest differ, so a
-  // stale numeric id cannot silently retarget another page.
+  if (!observationListsPage(observed, pageId)) {
+    throw new CdpError(
+      `Page ID ${pageId} was not present in the observed page list; nothing was closed`,
+      "VALIDATION_ERROR",
+      ["Run `chrome-devtools-axi pages` and choose a listed id"],
+    );
+  }
+
+  // Re-list after atomically consuming the observation. A close, reconnect or
+  // navigation that moves another URL onto the target id makes its digest
+  // differ, so a stale numeric id cannot silently retarget another page.
   const beforeResult = await callTool("list_pages");
   const pagesBefore = parsePagesList(beforeResult);
-  if (!pageListMatchesObservation(pagesBefore, observed)) {
+  if (!pageMatchesObservation(pagesBefore, observed, pageId)) {
     throw new CdpError(
-      "The page list changed since `pages`; nothing was closed",
+      `Page ID ${pageId} no longer shows the URL listed by \`pages\`; nothing was closed`,
       "BROWSER_ERROR",
       [
         "Run `chrome-devtools-axi pages` again and re-check the target id",
         "Close only one tab per fresh `pages` listing",
       ],
-    );
-  }
-  if (!pagesBefore.some((page) => page.id === pageId)) {
-    throw new CdpError(
-      `Page ID ${pageId} was not present in the observed page list; nothing was closed`,
-      "VALIDATION_ERROR",
-      ["Run `chrome-devtools-axi pages` and choose a listed id"],
     );
   }
   if (pagesBefore.length <= 1) {
