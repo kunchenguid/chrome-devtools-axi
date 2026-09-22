@@ -43,14 +43,15 @@ function pageUrlDigest(url: string): string {
 }
 
 /**
- * Revoke the previous token before a replacement write starts.
+ * Revoke an unconsumed token even when its directory cannot be changed.
  *
  * Removing the directory entry is preferred. If the directory itself is
  * temporarily read-only, the owner-writable 0600 file can still be truncated,
  * which makes the old token unparsable. This prevents a failed `pages` write
- * from leaving an earlier close authorization usable.
+ * from leaving an earlier close authorization usable and gives every clear
+ * path the same fail-closed behavior.
  */
-function invalidateObservationBeforeRecord(file: string): boolean {
+function invalidateObservationFile(file: string): boolean {
   if (!existsSync(file)) return true;
   try {
     rmSync(file);
@@ -112,7 +113,7 @@ export function recordPageListObservation(
   const observation = createPageListObservation(pages);
   try {
     mkdirSync(dirname(file), { recursive: true });
-    if (!invalidateObservationBeforeRecord(file)) return null;
+    if (!invalidateObservationFile(file)) return null;
     writeFileSync(temp, JSON.stringify(observation), {
       mode: 0o600,
     });
@@ -124,7 +125,6 @@ export function recordPageListObservation(
     } catch {
       // Best effort only; the null return keeps closepage fail-closed.
     }
-    invalidateObservationBeforeRecord(file);
     return null;
   }
 }
@@ -178,11 +178,5 @@ export function pageMatchesObservation(
 
 /** Invalidate any unconsumed observation after a browser/page mutation. */
 export function clearPageListObservation(): boolean {
-  const file = observationFile();
-  try {
-    if (existsSync(file)) rmSync(file);
-  } catch {
-    return false;
-  }
-  return !existsSync(file);
+  return invalidateObservationFile(observationFile());
 }

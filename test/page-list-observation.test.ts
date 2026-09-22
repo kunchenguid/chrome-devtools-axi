@@ -141,4 +141,18 @@ describe("page-list close observation", () => {
     expect(clearPageListObservation()).toBe(true);
     expect(consumePageListObservation()).toBeNull();
   });
+
+  it("invalidates an unconsumed token when its directory is read-only", () => {
+    const stateDir = resolveSessionStateDir();
+    recordPageListObservation(PAGES);
+
+    chmodSync(stateDir, 0o500);
+    try {
+      expect(clearPageListObservation()).toBe(true);
+    } finally {
+      chmodSync(stateDir, 0o700);
+    }
+
+    expect(consumePageListObservation()).toBeNull();
+  });
 });
