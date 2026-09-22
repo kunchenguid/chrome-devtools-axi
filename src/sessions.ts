@@ -3,7 +3,8 @@
  *
  * Setting `CHROME_DEVTOOLS_AXI_SESSION` to a non-default name binds the
  * bridge's port and on-disk state (PID file, snapshot-generation counter,
- * selected-page-id) to that name, so multiple bridges can run concurrently -
+ * selected-page-id, page-list observation) to that name, so multiple bridges
+ * can run concurrently -
  * one per agent session, worktree, or test worker - without sharing a single
  * bridge or stepping on each other's stale-ref tracking.
  *
