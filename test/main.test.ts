@@ -832,14 +832,14 @@ describe("closepage observation gate", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("rejects a stale id when a prior close reindexed the pages", async () => {
+  it("rejects a stale id when it now resolves to another URL", async () => {
     const write = captureOutput();
-    const reindexed = [
+    const changedTarget = [
       "## Pages",
       "0: Smoke (https://example.com/smoke) [selected]",
       "1: Notes (https://example.com/notes)",
     ].join("\n");
-    callTool.mockResolvedValueOnce(listed).mockResolvedValueOnce(reindexed);
+    callTool.mockResolvedValueOnce(listed).mockResolvedValueOnce(changedTarget);
 
     await main(["pages"]);
     const token = closeObservation(write);

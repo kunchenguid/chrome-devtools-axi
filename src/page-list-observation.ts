@@ -2,13 +2,13 @@
  * One-shot proof that `closepage <id>` still refers to the page list the
  * caller most recently inspected with `pages`.
  *
- * Page ids from chrome-devtools-mcp are positional and can be reissued after a
- * tab closes or the browser reconnects. A short-lived CLI process cannot keep
- * an in-memory identity, so `pages` records each listed id with a digest of
- * its URL in the active session directory. `closepage` atomically consumes
- * that observation, re-lists the pages, and closes only when the target id
- * still shows the URL it had in that listing; unrelated tabs may change. One
- * observation authorizes at most one close.
+ * Page ids can be reissued after a browser reconnect or by another compatible
+ * MCP implementation. A short-lived CLI process cannot keep an in-memory
+ * identity, so `pages` records each listed id with a digest of its URL in the
+ * active session directory. `closepage` atomically consumes that observation,
+ * re-lists the pages, and closes only when the target id still shows the URL it
+ * had in that listing; unrelated tabs may change. One observation authorizes
+ * at most one close.
  *
  * Only SHA-256 digests are persisted: page URLs can contain credentials or
  * other private fragments and must not be written to the state directory.
@@ -40,6 +40,29 @@ function observationFile(): string {
 
 function pageUrlDigest(url: string): string {
   return createHash("sha256").update(url).digest("hex");
+}
+
+/**
+ * Revoke the previous token before a replacement write starts.
+ *
+ * Removing the directory entry is preferred. If the directory itself is
+ * temporarily read-only, the owner-writable 0600 file can still be truncated,
+ * which makes the old token unparsable. This prevents a failed `pages` write
+ * from leaving an earlier close authorization usable.
+ */
+function invalidateObservationBeforeRecord(file: string): boolean {
+  if (!existsSync(file)) return true;
+  try {
+    rmSync(file);
+    return true;
+  } catch {
+    try {
+      writeFileSync(file, "", { flag: "w", mode: 0o600 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function createPageListObservation(
@@ -89,6 +112,7 @@ export function recordPageListObservation(
   const observation = createPageListObservation(pages);
   try {
     mkdirSync(dirname(file), { recursive: true });
+    if (!invalidateObservationBeforeRecord(file)) return null;
     writeFileSync(temp, JSON.stringify(observation), {
       mode: 0o600,
     });
@@ -100,6 +124,7 @@ export function recordPageListObservation(
     } catch {
       // Best effort only; the null return keeps closepage fail-closed.
     }
+    invalidateObservationBeforeRecord(file);
     return null;
   }
 }

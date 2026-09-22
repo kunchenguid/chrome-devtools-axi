@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -62,6 +68,26 @@ describe("page-list close observation", () => {
     expect(first).not.toBeNull();
     expect(pageMatchesObservation(PAGES, first!, 1)).toBe(true);
     expect(second).toBeNull();
+  });
+
+  it("revokes the previous token when its replacement cannot be written", () => {
+    const stateDir = resolveSessionStateDir();
+    const firstToken = recordPageListObservation(PAGES);
+    expect(firstToken).not.toBeNull();
+
+    chmodSync(stateDir, 0o500);
+    try {
+      expect(
+        recordPageListObservation([
+          ...PAGES,
+          { id: 2, url: "https://new.example/", selected: false },
+        ]),
+      ).toBeNull();
+    } finally {
+      chmodSync(stateDir, 0o700);
+    }
+
+    expect(consumePageListObservation()).toBeNull();
   });
 
   it("binds only the target id to its observed URL", () => {
