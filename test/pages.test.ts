@@ -29,6 +29,7 @@ describe("getCommandHelp", () => {
     const help = getCommandHelp("closepage");
     expect(help).not.toBeNull();
     expect(help).toContain("closepage");
+    expect(help).toContain("--observation");
   });
 
   it("returns help for resize command", () => {

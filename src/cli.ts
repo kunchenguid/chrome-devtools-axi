@@ -21,6 +21,12 @@ import {
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
 import { parsePagesList } from "./pages.js";
+import {
+  clearPageListObservation,
+  consumePageListObservation,
+  pageListMatchesObservation,
+  recordPageListObservation,
+} from "./page-list-observation.js";
 import { overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
@@ -49,7 +55,7 @@ commands[35]:
   type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
   run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
-  upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
+  upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id> --observation <token>,
   resize <w> <h>, emulate, console, console-get <id>, network,
   network-get [id], lighthouse, perf-start, perf-stop,
   perf-insight <set> <name>, heap <path>, start, stop, setup hooks
@@ -352,14 +358,20 @@ flags:
 examples:
   chrome-devtools-axi selectpage 1`,
 
-  closepage: `usage: chrome-devtools-axi closepage <id>
-Close a tab by page ID. The last open page cannot be closed.
+  closepage: `usage: chrome-devtools-axi closepage <id> --observation <token>
+Close one tab from the most recent \`pages\` listing. The complete page list
+must still match, and each \`pages\` listing authorizes at most one close.
+The last open page cannot be closed.
 
 args:
   <id>  Page ID from the pages command (required)
 
+flags:
+  --observation  One-time token returned by that pages command (required)
+
 examples:
-  chrome-devtools-axi closepage 2`,
+  chrome-devtools-axi pages
+  chrome-devtools-axi closepage 2 --observation <token>`,
 
   resize: `usage: chrome-devtools-axi resize <width> <height>
 Resize the browser viewport.
@@ -1260,15 +1272,23 @@ async function handlePages(): Promise<string> {
   const result = await callTool("list_pages");
   const pages = overlaySessionSelected(parsePagesList(result));
   if (pages.length === 0) {
+    clearPageListObservation();
     return "pages: 0 pages open";
   }
+  const observation = recordPageListObservation(pages);
   const blocks: string[] = [];
   const header = `pages[${pages.length}]{id,url,selected}:`;
   const rows = pages.map((p) => `  ${p.id},${p.url},${p.selected}`);
   blocks.push(`${header}\n${rows.join("\n")}`);
+  if (observation !== null) {
+    blocks.push(encode({ closeObservation: observation }));
+  }
   blocks.push(
     renderHelp([
       "Run `chrome-devtools-axi selectpage <id>` to switch tabs",
+      observation !== null
+        ? `Run \`chrome-devtools-axi closepage <id> --observation ${observation}\` to close one tab from this exact listing`
+        : "Tab closing is disabled because this page listing could not be recorded safely",
       "Run `chrome-devtools-axi newpage <url>` to open a new tab",
     ]),
   );
@@ -1324,9 +1344,59 @@ async function handleClosePage(args: string[]): Promise<string> {
       "Run `chrome-devtools-axi pages` to list available page IDs",
     ]);
   }
-  // Check page count before closing — last page can't be closed
+  const observationFlag = args.indexOf("--observation");
+  const observationToken =
+    observationFlag === -1 ? undefined : args[observationFlag + 1];
+  if (!observationToken || observationToken.startsWith("--")) {
+    throw new CdpError(
+      "Missing page-list observation token; nothing was closed",
+      "VALIDATION_ERROR",
+      [
+        "Run `chrome-devtools-axi pages` and pass its closeObservation token with `--observation`",
+      ],
+    );
+  }
+  const observed = consumePageListObservation();
+  if (observed === null) {
+    throw new CdpError(
+      "No unconsumed page-list observation; nothing was closed",
+      "VALIDATION_ERROR",
+      [
+        "Run `chrome-devtools-axi pages`, verify the target, then close exactly one tab",
+        "Run `chrome-devtools-axi pages` again before every additional close",
+      ],
+    );
+  }
+  if (observed.token !== observationToken) {
+    throw new CdpError(
+      "The page-list observation token is stale or belongs to another listing; nothing was closed",
+      "BROWSER_ERROR",
+      ["Run `chrome-devtools-axi pages` again and use its new token"],
+    );
+  }
+
+  // Re-list after atomically consuming the observation. Any tab addition,
+  // removal, navigation or page-id remap makes the entire digest differ, so a
+  // stale numeric id cannot silently retarget another page.
   const beforeResult = await callTool("list_pages");
   const pagesBefore = parsePagesList(beforeResult);
+  if (!pageListMatchesObservation(pagesBefore, observed)) {
+    throw new CdpError(
+      "The page list changed since `pages`; nothing was closed",
+      "BROWSER_ERROR",
+      [
+        "Run `chrome-devtools-axi pages` again and re-check the target id",
+        "Close only one tab per fresh `pages` listing",
+      ],
+    );
+  }
+  if (!pagesBefore.some((page) => page.id === pageId)) {
+    throw new CdpError(
+      `Page ID ${pageId} was not present in the observed page list; nothing was closed`,
+      "VALIDATION_ERROR",
+      ["Run `chrome-devtools-axi pages` and choose a listed id"],
+    );
+  }
   if (pagesBefore.length <= 1) {
     const blocks = [
       encode({ status: "cannot close the last open page (no-op)" }),
@@ -1721,7 +1791,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   pages: [],
   newpage: ["--background", "--full"],
   selectpage: ["--full"],
-  closepage: [],
+  closepage: ["--observation"],
   resize: [],
   emulate: [
     "--viewport",
@@ -1754,6 +1824,7 @@ const COMMAND_VALUE_FLAGS: Partial<Record<string, readonly string[]>> = {
   lighthouse: COMMAND_FLAGS.lighthouse,
   "perf-start": ["--file"],
   "perf-stop": COMMAND_FLAGS["perf-stop"],
+  closepage: COMMAND_FLAGS.closepage,
 };
 
 const COMMAND_POSITIONAL_TEXT_START: Partial<Record<string, number>> = {

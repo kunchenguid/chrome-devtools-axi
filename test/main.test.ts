@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AxiError } from "axi-sdk-js";
 import { decode } from "@toon-format/toon";
 
@@ -642,5 +642,192 @@ describe("pages selected overlay", () => {
     const output = String(write.mock.calls[0]?.[0]);
     expect(output).toContain("1,https://example.com/,false");
     expect(output).toContain("2,https://other.example/,true");
+  });
+});
+
+describe("closepage observation gate", () => {
+  const savedHome = process.env.HOME;
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  let tmpHome = "";
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-safe-close-"));
+    process.env.HOME = tmpHome;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "safe-close";
+  });
+
+  afterEach(() => {
+    callTool.mockReset();
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    if (savedSession === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
+    }
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function captureOutput() {
+    return vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  }
+
+  function closeObservation(write: ReturnType<typeof captureOutput>): string {
+    const output = write.mock.calls.map(([value]) => String(value)).join("\n");
+    const token = output.match(/closeObservation:\s*([^\s]+)/)?.[1];
+    if (!token)
+      throw new Error("pages output did not contain closeObservation");
+    return token;
+  }
+
+  const listed = [
+    "## Pages",
+    "0: User work (https://example.com/work)",
+    "1: Smoke (https://example.com/smoke) [selected]",
+    "2: Notes (https://example.com/notes)",
+  ].join("\n");
+
+  it("requires the observation token", async () => {
+    const write = captureOutput();
+
+    await main(["closepage", "1"]);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "Missing page-list observation token",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("refuses to close when pages was not run first", async () => {
+    const write = captureOutput();
+
+    await main([
+      "closepage",
+      "1",
+      "--observation",
+      "00000000-0000-0000-0000-000000000000",
+    ]);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "No unconsumed page-list observation",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("closes one target when the complete page list is unchanged", async () => {
+    const write = captureOutput();
+    callTool
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce("");
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "1", "--observation", token]);
+
+    expect(callTool.mock.calls).toEqual([
+      ["list_pages"],
+      ["list_pages"],
+      ["close_page", { pageId: 1 }],
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("forces a new pages listing before a second close", async () => {
+    const write = captureOutput();
+    callTool
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce(listed)
+      .mockResolvedValueOnce("");
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "1", "--observation", token]);
+    await main(["closepage", "2", "--observation", token]);
+
+    expect(callTool).toHaveBeenCalledTimes(3);
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "No unconsumed page-list observation",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("rejects a token from an older pages listing", async () => {
+    const write = captureOutput();
+    callTool.mockResolvedValueOnce(listed).mockResolvedValueOnce(listed);
+
+    await main(["pages"]);
+    const firstToken = closeObservation(write);
+    write.mockClear();
+    await main(["pages"]);
+    const secondToken = closeObservation(write);
+    expect(secondToken).not.toBe(firstToken);
+    await main(["closepage", "1", "--observation", firstToken]);
+
+    expect(callTool.mock.calls).toEqual([["list_pages"], ["list_pages"]]);
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "observation token is stale or belongs to another listing",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("rejects a stale id when a prior close reindexed the pages", async () => {
+    const write = captureOutput();
+    const reindexed = [
+      "## Pages",
+      "0: Smoke (https://example.com/smoke) [selected]",
+      "1: Notes (https://example.com/notes)",
+    ].join("\n");
+    callTool.mockResolvedValueOnce(listed).mockResolvedValueOnce(reindexed);
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "1", "--observation", token]);
+
+    expect(callTool.mock.calls).toEqual([["list_pages"], ["list_pages"]]);
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "The page list changed since `pages`; nothing was closed",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("does not authorize an id absent from the exact observed list", async () => {
+    const write = captureOutput();
+    callTool.mockResolvedValueOnce(listed).mockResolvedValueOnce(listed);
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "9", "--observation", token]);
+
+    expect(callTool.mock.calls).toEqual([["list_pages"], ["list_pages"]]);
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "Page ID 9 was not present",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("keeps the last-page no-op and still consumes the listing", async () => {
+    const write = captureOutput();
+    const one = "## Pages\n0: https://example.com/ [selected]";
+    callTool.mockResolvedValueOnce(one).mockResolvedValueOnce(one);
+
+    await main(["pages"]);
+    const token = closeObservation(write);
+    await main(["closepage", "0", "--observation", token]);
+    await main(["closepage", "0", "--observation", token]);
+
+    expect(callTool.mock.calls).toEqual([["list_pages"], ["list_pages"]]);
+    expect(
+      write.mock.calls.some(([value]) =>
+        String(value).includes("cannot close the last open page"),
+      ),
+    ).toBe(true);
+    expect(String(write.mock.calls.at(-1)?.[0])).toContain(
+      "No unconsumed page-list observation",
+    );
   });
 });

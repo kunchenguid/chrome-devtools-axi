@@ -43,6 +43,7 @@ import {
   resolveBridgeScript,
 } from "./bridge-script.js";
 import { clearSelectedPageId } from "./selected-page.js";
+import { clearPageListObservation } from "./page-list-observation.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -582,6 +583,13 @@ export function createBridgeServer(
   client: BridgeClient,
   sessionName?: string,
 ): Server {
+  const clearPageIdentityState = (): boolean => {
+    // A reconnect reissues every numeric page id even when this session had no
+    // selected page. Always invalidate the one-time close observation; the
+    // return value remains the existing "selection was dropped" health signal.
+    clearPageListObservation();
+    return clearSelectedPageId();
+  };
   return createServer((req, res) => {
     void handleBridgeRequest(
       client,
@@ -589,7 +597,7 @@ export function createBridgeServer(
       res,
       sessionName,
       logBridgeMessage,
-      clearSelectedPageId,
+      clearPageIdentityState,
     );
   });
 }

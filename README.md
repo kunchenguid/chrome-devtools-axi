@@ -197,13 +197,13 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 
 ### Page Management
 
-| Command           | Description                 |
-| ----------------- | --------------------------- |
-| `pages`           | List all open tabs          |
-| `newpage <url>`   | Open a new tab              |
-| `selectpage <id>` | Switch to a tab by ID       |
-| `closepage <id>`  | Close a tab by ID           |
-| `resize <w> <h>`  | Resize the browser viewport |
+| Command                                | Description                                   |
+| -------------------------------------- | --------------------------------------------- |
+| `pages`                                | List all open tabs                            |
+| `newpage <url>`                        | Open a new tab                                |
+| `selectpage <id>`                      | Switch to a tab by ID                         |
+| `closepage <id> --observation <token>` | Close one tab from the latest `pages` listing |
+| `resize <w> <h>`                       | Resize the browser viewport                   |
 
 ### Emulation
 

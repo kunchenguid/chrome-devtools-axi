@@ -18,6 +18,7 @@ import {
   getSelectedPageId,
   rememberToolRouting,
 } from "./selected-page.js";
+import { clearPageListObservation } from "./page-list-observation.js";
 import {
   resolveSessionName,
   resolveSessionPidFile,
@@ -476,6 +477,7 @@ export async function ensureBridge(
         notice,
       })
     ) {
+      if (notice?.pageIdentityChanged) clearPageListObservation();
       return pidInfo.port;
     }
     await terminateBridgeProcess(pidInfo.pid, {
@@ -489,6 +491,7 @@ export async function ensureBridge(
   // bridge's first deep probe finds no selection left to drop, so its 200
   // omits `pageIdentityChanged` and the poll loop below records no notice.
   clearSelectedPageId();
+  clearPageListObservation();
 
   // Start a new bridge
   const child = spawnBridge(port, sessionName);
@@ -724,11 +727,15 @@ export async function callTool(
       roots: collectRootDirs(name, resolved),
     });
     rememberToolRouting(name, resolved, result);
+    if (name === "new_page" || name === "close_page") {
+      clearPageListObservation();
+    }
     return result;
   } catch (err) {
     if (err instanceof CdpError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     if (isMissingPageError(message)) {
+      clearPageListObservation();
       const pageId =
         typeof resolved.pageId === "number" ? resolved.pageId : null;
       if (pageId !== null && getSelectedPageId() === pageId) {
@@ -931,5 +938,6 @@ export async function stopBridge(): Promise<boolean> {
     killProcessGroup: isBridgeProcess(pidInfo.pid),
   });
   clearSelectedPageId();
+  clearPageListObservation();
   return true;
 }
