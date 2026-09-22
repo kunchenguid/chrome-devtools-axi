@@ -416,10 +416,11 @@ Rely on the per-session default ports instead, or set `CHROME_DEVTOOLS_AXI_PORT`
 
 State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `sessions/<name>/`):
 
-| File                  | Purpose                               |
-| --------------------- | ------------------------------------- |
-| `bridge.pid`          | PID and port of the running bridge    |
-| `snapshot-generation` | Counter used to detect stale uid refs |
+| File                         | Purpose                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| `bridge.pid`                 | PID and port of the running bridge                                          |
+| `snapshot-generation`        | Counter used to detect stale uid refs                                       |
+| `page-list-observation.json` | One-time `closepage` token from the last `pages` listing (URL digests only) |
 
 ## Development
 

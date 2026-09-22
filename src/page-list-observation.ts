@@ -98,7 +98,7 @@ export function recordPageListObservation(
     try {
       rmSync(temp, { force: true });
     } catch {
-      // Best effort only; the false return keeps closepage fail-closed.
+      // Best effort only; the null return keeps closepage fail-closed.
     }
     return null;
   }
