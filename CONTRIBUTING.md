@@ -50,8 +50,6 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 - Generated files are listed in `.prettierignore`; validate them with their generator checks instead of formatting them directly.
 - Every `pull_request` workflow (`ci.yml`, `guard-generated-files.yml`, `no-mistakes-required.yml`) `paths-ignore`s the release-please output set (`.release-please-manifest.json`, `CHANGELOG.md`, `package.json`) so release PRs create zero runs. Job-level bot `if`s stay as defense in depth. `test/release-ci-exclusions.test.ts` derives that set from `release-please-config.json` and fails if a workflow drifts; update the ignore lists when adding `extra-files` or changing `release-type`.
 - `.github/workflows/no-mistakes-required.yml` is a thin caller of the shared `kunchenguid/no-mistakes/.github/actions/require-no-mistakes` composite action, pinned to an immutable commit SHA and never `@main`. Enforcement and its tests live upstream; change them there, and bump this repo's pin in a separate PR. This repo still owns its `on:`, `paths-ignore`, `concurrency`, `permissions`, job name, and author-exemption `if:`.
-- `pnpm-workspace.yaml` enforces a minimum release age for dependency updates. `axi-sdk-js` and `chrome-devtools-axi` are exempt.
-- `.airlock/lint.sh` must use pnpm, never `npm install` or `npx`. `test/airlock-lint.test.ts` enforces this.
 
 ## Questions
 
