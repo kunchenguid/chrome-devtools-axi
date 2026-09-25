@@ -207,7 +207,7 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 
 Page-scoped tools require a selected page. `pages` only lists tabs and never changes the selection. `selectpage` sets it. `newpage` selects the new tab only when its own listing contains exactly one complete row whose URL matches the requested URL (`about:blank` plus that URL counts); a title continuation, no match, or two matches leaves the selection unset, and the next page-scoped command fails until `selectpage`. The selected column in `pages` is AXI's selection, not the MCP `[selected]` marker. Closing the selected tab clears it. There is no automatic retarget onto another tab.
 
-If the browser reconnects in process, every page id is reissued and the selection is dropped. A command that named a page fails instead of running against a new id. `open` then creates a new tab rather than restoring the previous one. A tab that is already gone fails the same way and clears only that selected id.
+If the browser reconnects in process, every page id is reissued and the selection is dropped. A command that named a page fails instead of running against a new id. `open` then creates a new tab rather than restoring the previous one. If a selected tab is already gone, the command instead fails with a page-unavailable error and clears that selection.
 
 ### Emulation
 
