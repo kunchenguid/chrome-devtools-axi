@@ -155,7 +155,7 @@ In URL-only shared mode, the bridge uses Streamable HTTP directly instead:
 ```
 
 - **Persistent bridge** — a detached process keeps the selected MCP session alive across commands, so Chrome doesn't restart every invocation
-- **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, recycles stale CDP targets after a deep health check, and reaps child processes on stop
+- **Auto-lifecycle** — the bridge starts on first command, writes a PID file to `~/.chrome-devtools-axi/bridge.pid`, and is reused only after a deep health check (`/health?deep=1`, one CDP `list_pages`). A bridge whose browser has died is terminated and respawned. Startup waits until `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` (default 30s). On stop, the bridge kills its process group; teardown escalates SIGTERM to SIGKILL, and only when `ps` confirms that PID is a bridge, so stdio-launched chrome-devtools-mcp and Chrome children are reaped.
 - **Snapshot parsing** — accessibility tree snapshots are extracted and analyzed for interactive elements (`uid=` refs)
 - **TOON encoding** — structured metadata uses [TOON format](https://www.npmjs.com/package/@toon-format/toon) for compact, token-efficient output
 
@@ -204,6 +204,10 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | `selectpage <id>` | Switch to a tab by ID       |
 | `closepage <id>`  | Close a tab by ID           |
 | `resize <w> <h>`  | Resize the browser viewport |
+
+Page-scoped tools require a selected page. `pages` only lists tabs and never changes the selection. `selectpage` sets it. `newpage` selects the new tab only when its own listing contains exactly one complete row whose URL matches the requested URL (`about:blank` plus that URL counts); a title continuation, no match, or two matches leaves the selection unset, and the next page-scoped command fails until `selectpage`. The selected column in `pages` is AXI's selection, not the MCP `[selected]` marker. Closing the selected tab clears it. There is no automatic retarget onto another tab.
+
+If the browser reconnects in process, every page id is reissued and the selection is dropped. A command that named a page fails instead of running against a new id. `open` then creates a new tab rather than restoring the previous one. A tab that is already gone fails the same way and clears only that selected id.
 
 ### Emulation
 
@@ -287,6 +291,8 @@ are command-specific; the CLI rejects a flag that is not listed by
 
 Local output paths for `screenshot`, `heap`, `network-get --response-file`/`--request-file`, `lighthouse --output-dir`, and `perf-start`/`perf-stop --file` resolve against the directory where you invoke the CLI.
 Saved-path output uses the resolved absolute path.
+A denied or failed write exits non-zero with the tool error instead of printing success.
+Snapshots truncate at about 16k characters unless `--full` is set. `eval` output keeps its head and tail when truncated.
 
 `console --type` accepts `log`, `debug`, `info`, `error`, `warn`, `dir`, `dirxml`, `table`, `trace`, `clear`, `startGroup`, `startGroupCollapsed`, `endGroup`, `assert`, `profile`, `profileEnd`, `count`, `timeEnd`, `verbose`, `issue`, and `all`.
 `network --type` accepts `document`, `stylesheet`, `image`, `media`, `font`, `script`, `texttrack`, `xhr`, `fetch`, `prefetch`, `eventsource`, `websocket`, `manifest`, `signedexchange`, `ping`, `cspviolationreport`, `preflight`, `fedcm`, `other`, and `all`.

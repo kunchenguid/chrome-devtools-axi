@@ -2,130 +2,44 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
+chrome-devtools-axi is an agent-ergonomic CLI wrapper around [chrome-devtools-mcp](https://www.npmjs.com/package/chrome-devtools-mcp). Every invocation is short-lived; state that must survive lives in a detached bridge or under `~/.chrome-devtools-axi/`. [README How It Works](README.md#how-it-works) owns the process model. [README Configuration](README.md#configuration) owns transport selection, named sessions, and keychain isolation. [README Page Management](README.md#page-management) owns page selection.
+
+## Invariants
+
+- Node 20+, TypeScript, ESM-only (`"type": "module"`, module resolution `Node16`). Relative imports use `.js` extensions even from `.ts` files.
+- `ensureBridge` (`src/client.ts`) reuses a bridge only after `/health?deep=1`. A dead browser is terminated and respawned, never reused as a stale endpoint.
+- Launch modes (`--isolated` / `--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS`; attach modes omit them. `test/keychain-isolation.test.ts` owns that split.
+- `resolveSessionName` (`src/sessions.ts`) rejects path-traversal, unsafe, and all-dot names. A session isolates only the bridge. Two sessions forced onto one port fail loudly (`BRIDGE_PORT_IN_USE_EXIT_CODE`, 48); do not export `CHROME_DEVTOOLS_AXI_PORT` globally across sessions.
+- Page identity is never self-healed. `callTool` injects the last AXI `select_page` id (`src/selected-page.ts`); `list_pages` never sets it. Missing selection fails with "No page is currently selected". After a reconnect, `open` creates a new tab.
+- `didMcpPageIdentityChange` (`src/bridge.ts`) and `isMissingPageError` (`src/client.ts`) own the positional reconnect and missing-page matchers. Read them before changing either. The page-identity notice holder is per `callTool`, never module state. `clearSelectedPageId` reports a drop only when the read-back shows the id is gone.
+- File-writing commands go through `callTool` / `handleCallRequest`: MCP roots for the cwd and output path, and an MCP `isError` is a failure, not printed success. `resolveOutputPath` (`src/paths.ts`) is the chokepoint for any new caller-supplied output file or directory.
+- UID actions fail loud with `STALE_REF` unless `parseUidFresh` (`src/uid-freshness.ts`) sees the persisted generation and zero mutations. Generation and selected-page writes are best-effort (`src/generation.ts`, `src/selected-page.ts`): a failed write misses one detection or fails the next call loud, and never hangs.
+- `getSessionSnapshotIfRunning` never starts the bridge and degrades an invalid session name to null. `ensureBridge` / `stopBridge` still fail loud on an invalid name.
+- `src/version.ts` is a leaf (node builtins only). The CLI graph stays free of `@modelcontextprotocol/sdk`; only the bridge constructs an MCP client, so `resolveBridgeScript` and `BRIDGE_PORT_IN_USE_EXIT_CODE` live in `src/bridge-script.ts`. `test/version-path.test.ts` enforces this and must stay free of wall-clock assertions. `resolveBridgeScript` prefers a sibling `.ts` and falls back to the built `.js`.
+- chrome-devtools-mcp `evaluate_script` invokes its function payload, so every payload must be callable (`callFunction` in `src/run.ts`). `test/main.test.ts` and `test/run.test.ts` execute the sent source. `run` prints only the script's `console.log` (`RAW_STDOUT_MARKER` / `wrapStdout` in `src/cli.ts`).
+- `src/skill.ts` renders a discovery stub. CLI help is the source of truth; do not copy CLI instructions into the skill. `shouldInstallHooksForExecPath` (`src/hooks.ts`) blocks dev entrypoints such as `pnpm run dev` from installing hooks.
+- Transport selection is `resolveTransport`, `resolveTransportSpec`, and `buildTransportArgs` in `src/bridge.ts`. `test/bridge.test.ts` covers them.
+- `pnpm-workspace.yaml` enforces a minimum release age; `axi-sdk-js` and `chrome-devtools-axi` are exempt.
+- `.airlock/lint.sh` must use pnpm (never `npm install` or `npx`). `test/airlock-lint.test.ts` enforces this.
+- Some `test/client.test.ts` cases take a couple of seconds on real SIGTERM/SIGKILL escalation. That is expected.
+
 ## Commands
 
 ```sh
 pnpm run build       # tsc to dist/ + chmod the CLI entrypoint
-pnpm run build:skill # Regenerate the minimal skills/chrome-devtools-axi/SKILL.md stub from src/skill.ts
+pnpm run build:skill # Regenerate skills/chrome-devtools-axi/SKILL.md from src/skill.ts
 pnpm run dev         # Run the CLI from source with tsx
 pnpm test            # vitest run (test/*.test.ts)
 pnpm run test:watch  # vitest watch mode
 ```
 
-Run a single test file: `pnpm test test/cli.test.ts`.
-Filter by test name: `pnpm test -- -t "formatStopOutput"`.
-Check formatting with `pnpm exec prettier --check .`.
+Run one file: `pnpm test test/cli.test.ts`. Filter by name: `pnpm test -- -t "formatStopOutput"`. Check formatting: `pnpm exec prettier --check .`.
+Run `pnpm run build` and `pnpm test` before pushing.
+Do not hand-edit `CHANGELOG.md`, `.release-please-manifest.json`, or `skills/chrome-devtools-axi/SKILL.md`. Update `src/skill.ts` and run `pnpm run build:skill`. Generated files are listed in `.prettierignore`; validate them with their generator checks. Keep `skills/chrome-devtools-axi/` in the npm `files` list.
 
-The committed `skills/chrome-devtools-axi/SKILL.md` is generated by `pnpm run build:skill`; `pnpm test` fails if it drifts from `createSkillMarkdown()`.
-Its body and frontmatter are owned by `src/skill.ts`; update the generator instead of hand-editing `SKILL.md`.
+## Release and the contribution gate
 
-## Project Conventions
-
-- Node 20+, TypeScript, ESM-only (`"type": "module"`, module resolution `Node16` - relative imports use `.js` extensions even from `.ts` files).
-- Tests live in `test/*.test.ts` and run with Vitest.
-- Run `pnpm run build` and `pnpm test` before pushing.
-- Do not hand-edit generated files: `CHANGELOG.md` and `.release-please-manifest.json` (owned by release-please) or `skills/chrome-devtools-axi/SKILL.md` (owned by `build:skill`).
-- Every `pull_request` workflow (`ci.yml`, `guard-generated-files.yml`, `no-mistakes-required.yml`) uses `paths-ignore` for the release-please output set (`.release-please-manifest.json`, `CHANGELOG.md`, `package.json`) so release PRs create zero runs. Job-level bot `if`s stay as defense in depth. `test/release-ci-exclusions.test.ts` derives that set from `release-please-config.json` and fails if a workflow drifts; update the ignore lists when adding `extra-files` or changing `release-type`.
-- Generated files are listed in `.prettierignore`; validate them with their generator checks instead of formatting them directly.
-- Keep `skills/chrome-devtools-axi/` in the npm `files` list when changing package contents; the skill-first install path depends on it shipping with the package.
-- `pnpm-workspace.yaml` enforces a minimum release age for dependency updates as a supply-chain guard; `axi-sdk-js` and `chrome-devtools-axi` are exempt.
-- `.airlock/lint.sh` must use pnpm (never `npm install` or `npx`); `test/airlock-lint.test.ts` enforces this.
-- Human-authored PRs to `main` must go through [`no-mistakes`](https://github.com/kunchenguid/no-mistakes) (>= 1.46.0); the gate in `no-mistakes-required.yml` requires the body signature, the `no-mistakes-pipeline-attestation:v1` comment (review/test/document all `completed`), and the attested `head_sha` to equal the PR's current head. See CONTRIBUTING.md.
-- `.github/workflows/no-mistakes-required.yml` is a thin caller of the shared `kunchenguid/no-mistakes/.github/actions/require-no-mistakes` composite action, pinned to an immutable commit SHA and never `@main`. Enforcement logic and its tests live upstream in the no-mistakes repository; change enforcement there rather than copying it back here, and bump this repository's pin in a deliberate separate PR. This repo still owns its `on:`, `paths-ignore`, `concurrency`, `permissions`, job name, and author-exemption `if:`.
-- The gate runs on opened, edited, synchronize, and reopened events, including pushed commits. Since no-mistakes #994 the pipeline writes the attestation before it pushes, so synchronize judges a pipeline-pushed head. Head binding still rejects a body that no-mistakes did not rewrite for the current head: push through `git push no-mistakes` so the body is refreshed.
-
-## Architecture
-
-chrome-devtools-axi is an agent-ergonomic CLI wrapper around [chrome-devtools-mcp](https://www.npmjs.com/package/chrome-devtools-mcp).
-Every invocation is a short-lived process, so anything that must survive across commands lives in a detached bridge process or under `~/.chrome-devtools-axi/`.
-
-### Process model
-
-See [README.md](README.md#how-it-works) for the process overview and [Configuration](README.md#configuration) for local and shared-service setup.
-
-The CLI (`bin/chrome-devtools-axi.ts` -> `src/cli.ts`) parses args, calls MCP tools through the bridge, and formats output.
-`ensureBridge` (`src/client.ts`) reads its session's `bridge.pid` (`~/.chrome-devtools-axi/bridge.pid` for the default session) and reuses a live bridge only after a **deep** health check (`/health?deep=1` drives one CDP-backed `list_pages` call), so a bridge whose attached browser died gets terminated and respawned instead of reused as a stale endpoint.
-Otherwise it spawns the bridge (`bin/chrome-devtools-axi-bridge.ts` -> `src/bridge.ts`) **detached** as a process group leader and polls health until the `CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS` deadline (default 30s).
-
-The bridge holds one persistent MCP session and exposes a localhost HTTP API on
-its session port (9224 by default; `CHROME_DEVTOOLS_AXI_PORT` overrides - see
-Named sessions): `POST /call`, `GET /tools`, `GET /health[?deep=1]`. Transport
-selection is deterministic: a nonblank `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL`
-with absent/blank `CHROME_DEVTOOLS_AXI_MCP_PATH` connects directly with
-Streamable HTTP (no MCP child); the same URL with a nonblank MCP_PATH uses the
-verified stdio proxy (`--help` must advertise `--serverUrl`, then AXI passes
-`--server-url=<URL>`); an absent/blank shared URL keeps standalone stdio
-behavior. Each named bridge owns one remote MCP session/context in direct mode.
-Teardown is careful about orphans: the bridge kills its own process group on
-exit, and `terminateBridgeProcess` escalates SIGTERM -> SIGKILL on the group so
-stdio-launched chrome-devtools-mcp and Chrome children get reaped (group kill
-only when `ps` confirms the PID is actually a bridge).
-
-`resolveTransport` (`src/bridge.ts`) owns direct-vs-stdio selection and validates
-direct URLs; `resolveTransportSpec` owns stdio command resolution and proxy
-compatibility checks; `buildTransportArgs` owns local browser arguments. See
-`test/bridge.test.ts` for their regression coverage and README Configuration
-for dependency prerequisites.
-
-The launch modes (`--isolated`/`--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS` so browsers we start cannot reach the machine owner's password store; attach modes deliberately omit them because that browser's keychain policy belongs to whoever started it.
-`test/keychain-isolation.test.ts` owns the regression rationale and structural invariant; README.md documents the user-facing behavior.
-
-Named sessions (`CHROME_DEVTOOLS_AXI_SESSION`, `src/sessions.ts`) give each name its own bridge - its own port (explicit `CHROME_DEVTOOLS_AXI_PORT`, else a deterministic FNV-1a hash of the name) and its own state dir under `~/.chrome-devtools-axi/sessions/<name>/` (PID file + generation counter) - so concurrent sessions don't share a bridge or each other's stale-ref tracking.
-The default (unset) session keeps port 9224 and the legacy `~/.chrome-devtools-axi/` paths, so existing behavior is unchanged.
-`resolveSessionName` validates the name (rejecting path-traversal/unsafe and all-dot names) and is the single chokepoint every entry point resolves through; a session isolates only the bridge, so the connection mode and profile compose unchanged.
-`/health` reports the bridge's `session`, and `checkBridgeHealth`/`ensureBridge` reject a mismatched session so two sessions forced onto one port (a globally-exported `CHROME_DEVTOOLS_AXI_PORT`) fail loudly instead of silently sharing; the bridge exits with `BRIDGE_PORT_IN_USE_EXIT_CODE` (48) on an EADDRINUSE bind so the early-exit error attributes the collision (`buildBridgeEarlyExitError`).
-
-chrome-devtools-mcp 1.8+ requires `pageId` on page-scoped tools by default. `callTool` (`src/client.ts`) injects the session's last AXI `select_page` id (`src/selected-page.ts`); `list_pages` is display-only and never sets routing. `new_page` records the unique complete row in its own dump whose URL matches `args.url` (`about:blank` plus the requested URL is fine); title continuations, zero matches, and two matching URLs leave the id unset so the next page-scoped call fails loud until `select_page`. The `pages` selected column overlays `getSelectedPageId()`, not MCP `[selected]`. Missing selection fails loudly with "No page is currently selected". `close_page` of the selected id clears it. Page identity is never self-healed: nothing retargets another tab, and every failure is loud and actionable.
-chrome-devtools-mcp reissues all page ids after an in-process browser reconnect, so `didMcpPageIdentityChange` (`src/bridge.ts`) observes its one-shot marker on the raw MCP result - on `/call` responses and on the deep health probe - before the output is flattened, and clears the persisted selection; a `/call` that carried an explicit `pageId` then fails with `PAGE_IDENTITY_CHANGED_ERROR` (`src/bridge-script.ts`) ahead of the tool-error branch, while a call that named no page (`list_pages`, `new_page`) still renders. The home view probe sends the persisted `pageId`, so it takes the failing branch and `getSessionSnapshotIfRunning` degrades to no page - intentionally, since rendering a snapshot resolved in a reissued id space is the silent retarget this prevents.
-Because `ensureBridge` deep-probes first, that probe usually consumes the marker instead, so `/health?deep=1` relays it as `pageIdentityChanged` - only when the clear actually removed an id, so a never-selected session is never told it lost routing - and `checkBridgeHealth` writes it into the `PageIdentityNotice` holder its caller passed down (`src/client.ts`); the same `callTool` that owns that holder then names the reconnect instead of the plain no-selection error, while a call that resolves no selection just drops it - `pages` only calls `list_pages`, and the home view probe carries no holder at all because its own health check is shallow.
-The holder is per `callTool`, never module state, so concurrent `run`-script calls cannot overwrite or consume each other's attribution; it is discarded with its call, and a respawn stays plain because `ensureBridge` clears the selection before spawning, leaving the new bridge's first probe nothing to drop.
-`clearSelectedPageId` answers with the read-back post-condition, so an unlink that fails reports no drop and the surviving id fails loud on its next use instead of being explained away as a reconnect.
-After a reconnect `open` recovers by creating a NEW tab rather than restoring the previous one, since the cleared selection matches `isRecoverableOpenError` and the old id no longer exists.
-A race or ordinary target close reaching MCP as `No page found` becomes an actionable `BROWSER_ERROR` and clears only that same selected id.
-Both dependency-owned sentences are matched positionally: the reconnect notice only on the first line of the flattened body, `No page found` / `The selected page has been closed.` only on its last non-empty line.
-`didMcpPageIdentityChange` (`src/bridge.ts`) and `isMissingPageError` (`src/client.ts`) carry the dependency contract those positions assume and its residuals; read them before changing either matcher.
-
-MCP tool failures and file-write roots (issue #96): the bridge declares the MCP `roots` capability (`createRootsAwareBridgeClient`), so chrome-devtools-mcp's `validatePath` no longer restricts file writes to `os.tmpdir()`.
-`callTool` sends the roots each call needs: the invoking cwd plus the nearest existing ancestor of any output path (`collectRootDirs`, keyed by `FILE_OUTPUT_ARGS_BY_TOOL`/`DIR_OUTPUT_ARGS_BY_TOOL`).
-The bridge negotiates them via `applyRoots` (a `roots/list_changed` round-trip) before the tool runs.
-The bridge also surfaces an MCP `isError` result as a `{ error }` response (`isToolResultError` in `handleCallRequest`) rather than the tool text, so a denied or failed write throws a `CdpError` and exits non-zero instead of printing false success.
-Both fixes live at the single `callTool`/`handleCallRequest` chokepoint, so every file-writing command inherits them.
-
-### Snapshot generations and STALE_REF
-
-Snapshots are accessibility trees whose interactive elements carry `uid=` refs.
-Because CLI processes are short-lived, a generation counter persists in the active session's state dir as `snapshot-generation` (`~/.chrome-devtools-axi/snapshot-generation` by default; `src/generation.ts`). `captureFreshSnapshot` (`src/uid-freshness.ts`) starts its page MutationObserver before capture, recaptures once if a mutation occurs during capture, and stamps the resulting tree from `uid=X` to `uid=g<N>:X`.
-Action commands and `run` UID actions parse refs through `parseUidFresh` (`src/uid-freshness.ts`), which requires the observer state to match the persisted snapshot generation with zero mutations. Missing or unusable observer state, a generation mismatch, or a mutation fails loudly with `STALE_REF` instead of letting upstream MCP silently no-op against a stale tree.
-
-### CLI output and AXI integration
-
-`bin/chrome-devtools-axi.ts` answers a bare `-v`/`-V`/`--version` through `tryFastPath` (`axi-sdk-js/fast-path`) and only then dynamically imports `src/cli.js`, so the version path stays at the node floor (~20ms).
-That makes `src/version.ts` a LEAF module: it may import node builtins only, and nothing on the version path may pull in the heavy command graph. `test/version-path.test.ts` enforces this with a module-resolution trace plus a negative control; keep it free of wall-clock assertions (flaky on CI).
-
-The CLI is built on `axi-sdk-js` (`runAxiCli`): `HOME_DESCRIPTION` and `TOP_HELP` are the shared static guidance, SDK built-ins such as `update` and `update --check` are appended by the runner at runtime, and the `home()` callback returns the live page snapshot when a bridge session is active.
-This is the same output that lands in the agent's optional `SessionStart` hook after `chrome-devtools-axi setup hooks` (`src/hooks.ts`, Claude Code + Codex + OpenCode); `shouldInstallHooksForExecPath` guards dev entrypoints like `pnpm run dev` from self-registering hooks.
-`src/skill.ts` renders the installable Agent Skill (`skills/chrome-devtools-axi/SKILL.md`) as a minimal discovery stub: what chrome-devtools-axi is, when to reach for it, and pointers at `npx -y chrome-devtools-axi --help` / `<command> --help`. CLI output is the single source of truth; never re-duplicate CLI-owned instructions into the skill.
-
-Output format per command: TOON-encoded metadata block (`encode` from `@toon-format/toon`), then raw snapshot text, then a `help[N]:` block of contextual next-step suggestions (`src/suggestions.ts`).
-Snapshots are truncated at ~16k chars (`--full` disables); `eval` output keeps head and tail (`truncateText`).
-Errors are `CdpError` (extends `AxiError`) with an `ErrorCode` and suggestions; `mapErrorMessage` (`src/client.ts`) classifies raw bridge/upstream failures into `BRIDGE_NOT_READY`, `REF_NOT_FOUND`, `STALE_REF`, `TIMEOUT`, `BROWSER_ERROR`.
-
-### The `run` script runner
-
-`chrome-devtools-axi run` (`src/run.ts`) reads a JavaScript script from stdin and executes it with a `page` helper global (`open`, `eval`, `wait`, `click`, `fill`, `snapshot`, ...) that maps to MCP tool calls.
-Only the script's own `console.log` output reaches stdout: handlers return text prefixed with `RAW_STDOUT_MARKER`, and `wrapStdout` (`src/cli.ts`) strips the marker and bypasses the usual formatting for the `run` command.
-`eval` and `page.eval` wrap plain expressions as `() => (<expr>)` via `wrapJsExpression`, passing function sources through unchanged and unwrapping no-arg IIFEs.
-chrome-devtools-mcp `evaluate_script` invokes its `function` payload rather than evaluating it, so every payload must be callable: `scroll`, numeric `wait`, and the selector-based `run` helpers send arrow functions (`callFunction` in `src/run.ts`), and `test/main.test.ts` / `test/run.test.ts` execute the sent source to enforce it.
-
-## Things to know when editing
-
-- The bridge resolves its own script path at runtime (`resolveBridgeScript`): it prefers a sibling `.ts` (dev mode, run via tsx) and falls back to the built `.js`, so dev and dist behave the same without flags.
-- The CLI module graph must stay free of `@modelcontextprotocol/sdk` (~45ms); only the bridge subprocess constructs an MCP client. That is why `resolveBridgeScript`/`BRIDGE_PORT_IN_USE_EXIT_CODE` live in the node-builtins-only `src/bridge-script.ts` (re-exported from `src/bridge.ts`) rather than beside the SDK imports. `test/version-path.test.ts` enforces it by tracing the loaded module graph.
-- `resolveOutputPath` (`src/paths.ts`) is the chokepoint for local output artifacts sent to the bridge.
-  Use it for any new command or flag that asks the bridge/MCP to write a caller-supplied output file or directory, so relative paths resolve against the invoking CLI's `process.cwd()` and output can report the absolute path.
-- `getSessionSnapshotIfRunning` deliberately never starts the bridge - the home view and SessionStart hook must stay cheap and side-effect free when no session exists; it also degrades an invalid `CHROME_DEVTOOLS_AXI_SESSION` to null here, while action commands (`ensureBridge`/`stopBridge`) still fail loudly.
-- Generation-counter writes are best-effort; a failed write degrades to one missed stale-ref detection, never a hang (`src/generation.ts`). Selected-page-id writes are the same (`src/selected-page.ts`): a failed write means the next page-scoped call fails loud instead of guessing from `list_pages`.
-- Some `test/client.test.ts` cases exercise real SIGTERM/SIGKILL escalation timing and take a couple of seconds each; that is expected, not flakiness.
+[CONTRIBUTING.md](CONTRIBUTING.md) owns the no-mistakes workflow, the pinned `no-mistakes-required.yml` caller, and `paths-ignore` for the release-please output set. Human-authored PRs to `main` go through [no-mistakes](https://github.com/kunchenguid/no-mistakes) (>= 1.46.0). Push through `git push no-mistakes` so the attestation matches the current head.
 
 ## Maintaining this file
 
