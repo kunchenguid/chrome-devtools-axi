@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.36](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.35...chrome-devtools-axi-v0.1.36) (2026-09-29)
+
+
+### Bug Fixes
+
+* restore single-file uploads ([#152](https://github.com/kunchenguid/chrome-devtools-axi/issues/152)) ([069a753](https://github.com/kunchenguid/chrome-devtools-axi/commit/069a753515c131d7be61a57d21854eeffb9fed27))
+
 ## [0.1.35](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.34...chrome-devtools-axi-v0.1.35) (2026-09-21)
 
 
