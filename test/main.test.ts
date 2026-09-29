@@ -208,7 +208,7 @@ describe("main", () => {
     {
       argv: ["upload", "@1", "-file"],
       tool: "upload_file",
-      args: { uid: "1", filePath: "-file" },
+      args: { uid: "1", filePaths: ["-file"] },
       preflight: true,
     },
     {

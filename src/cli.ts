@@ -1437,7 +1437,7 @@ async function handleUpload(args: string[], full: boolean): Promise<string> {
   }
   const snapshot = await callWithSnapshot("upload_file", {
     uid: await parseUidFresh(uid),
-    filePath,
+    filePaths: [filePath],
   });
   return formatPageOutput(snapshot, "upload", undefined, full);
 }

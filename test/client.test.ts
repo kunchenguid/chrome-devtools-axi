@@ -1478,7 +1478,7 @@ describe("collectRootDirs", () => {
       expect(networkRoots).toEqual([process.cwd(), outputRoot]);
       expect(
         collectRootDirs("upload_file", {
-          filePath: "/home/user/.ssh/id_rsa",
+          filePaths: ["/home/user/.ssh/id_rsa"],
         }),
       ).toEqual([process.cwd()]);
     } finally {
