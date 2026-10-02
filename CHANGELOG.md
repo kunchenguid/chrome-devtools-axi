@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.38](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.37...chrome-devtools-axi-v0.1.38) (2026-10-02)
+
+
+### Bug Fixes
+
+* **cli:** report screenshots saved after emulate ([#162](https://github.com/kunchenguid/chrome-devtools-axi/issues/162)) ([0e464eb](https://github.com/kunchenguid/chrome-devtools-axi/commit/0e464eb6c1b9f8a621ad9cb86a6a30943b94ef41))
+
 ## [0.1.37](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.36...chrome-devtools-axi-v0.1.37) (2026-10-01)
 
 
