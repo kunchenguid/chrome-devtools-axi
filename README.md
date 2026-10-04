@@ -348,8 +348,9 @@ how AXI reaches it:
 
 If `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` is absent or blank, AXI keeps its
 standalone stdio behavior: it starts the selected local
-`chrome-devtools-mcp` process (from `CHROME_DEVTOOLS_AXI_MCP_PATH`, a detected
-global install, or `npx -y chrome-devtools-mcp@latest`) and launches/attaches
+`chrome-devtools-mcp` process (in order: `CHROME_DEVTOOLS_AXI_MCP_PATH`, a
+`chrome-devtools-mcp` executable on `PATH`, a detected global install, or
+`npx -y chrome-devtools-mcp@latest`) and launches/attaches
 Chrome according to the local settings below. A nonblank MCP_PATH without a
 shared URL also remains this local stdio mode.
 

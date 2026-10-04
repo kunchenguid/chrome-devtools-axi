@@ -795,11 +795,10 @@ const MCP_CLOSED_PAGE_LINE_PREFIX = "The selected page has been closed.";
  * UNVERIFIED DEPENDENCY CONTRACT: this assumes chrome-devtools-mcp appends
  * `Error: <message>` LAST, after every page-derived block (and, for the
  * sibling reconnect matcher in `src/bridge.ts`, emits its notice FIRST).
- * Nothing in the test suite pins that order - chrome-devtools-mcp is spawned
- * via npx, not installed as a devDependency, so there is no build to assert
- * against. If upstream reorders, a genuine missing page falls through to
- * `mapErrorMessage` and surfaces as a less specific error rather than
- * retargeting anything; upstream hands out page ids from a process-wide
+ * See `didMcpPageIdentityChange` in `src/bridge.ts` for why this dependency
+ * ordering is unverified. If upstream reorders, a genuine missing page falls
+ * through to `mapErrorMessage` and surfaces as a less specific error rather
+ * than retargeting anything; upstream hands out page ids from a process-wide
  * monotonic counter, so a stale id fails to resolve instead of landing on an
  * unrelated page.
  */

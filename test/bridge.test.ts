@@ -2,9 +2,15 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { IncomingMessage, ServerResponse, request } from "node:http";
 import { Socket, type AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
   buildTransportArgs,
@@ -600,12 +606,13 @@ describe("resolveTransportSpec", () => {
     expect(spec.command).toBe("npx");
   });
 
-  it("auto-detects a globally-installed chrome-devtools-mcp when MCP_PATH is unset", () => {
+  it("auto-detects a globally-installed chrome-devtools-mcp when MCP_PATH and PATH are unavailable", () => {
     const probe = {
       existsSync: (path: string) =>
         path ===
         "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
-      getNpmPrefix: () => "/usr",
+      getNpmPrefix: vi.fn(() => "/usr"),
+      findOnPath: vi.fn(() => null),
     };
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe(process.execPath);
@@ -615,6 +622,10 @@ describe("resolveTransportSpec", () => {
     expect(spec.args).not.toContain("-y");
     expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
     expect(spec.args).toContain("--isolated");
+    expect(probe.findOnPath).toHaveBeenCalledWith("chrome-devtools-mcp");
+    expect(probe.findOnPath.mock.invocationCallOrder[0]).toBeLessThan(
+      probe.getNpmPrefix.mock.invocationCallOrder[0],
+    );
   });
 
   it("falls back to npx when auto-detection finds nothing", () => {
@@ -634,6 +645,197 @@ describe("resolveTransportSpec", () => {
     };
     const spec = resolveTransportSpec(probe);
     expect(spec.command).toBe("npx");
+  });
+
+  describe("PATH scanner", () => {
+    let dir: string;
+    const executableName =
+      process.platform === "win32"
+        ? "chrome-devtools-mcp.exe"
+        : "chrome-devtools-mcp";
+    const bridgeUrl = new URL("../src/bridge.ts", import.meta.url).href;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(process.cwd(), ".mcp-path-test-"));
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    function resolveWithPath(
+      path: string | undefined,
+      platform: NodeJS.Platform = process.platform,
+    ) {
+      const env = { ...process.env };
+      if (path === undefined) delete env.PATH;
+      else env.PATH = path;
+      const output = execFileSync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `import { resolveTransportSpec } from ${JSON.stringify(bridgeUrl)};
+Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });
+process.stdout.write(JSON.stringify(resolveTransportSpec()));`,
+        ],
+        {
+          cwd: dir,
+          env,
+          encoding: "utf8",
+        },
+      );
+      return JSON.parse(output);
+    }
+
+    it.each(["cmd", "bat"])(
+      "skips a Windows .%s shim on PATH and falls back to npx",
+      (extension) => {
+        writeFileSync(
+          join(dir, `chrome-devtools-mcp.${extension}`),
+          "@echo off\r\nexit /b 0\r\n",
+        );
+
+        const spec = resolveWithPath(dir, "win32");
+
+        expect(spec.command).toBe("npx");
+        expect(spec.args.slice(0, 2)).toEqual([
+          "-y",
+          "chrome-devtools-mcp@latest",
+        ]);
+      },
+    );
+
+    it("does not resolve a cwd executable when PATH is unset", () => {
+      const executable = join(dir, executableName);
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const spec = resolveWithPath(undefined);
+
+      expect(spec.command).not.toBe(executable);
+      expect(spec.args).not.toContain(executable);
+      expect(spec.args).toContain("--isolated");
+    });
+
+    it
+      .skipIf(process.platform === "win32")
+      .each(["", ":missing", "missing::other", "missing:"])(
+      "resolves empty POSIX PATH components from cwd: %s",
+      (path) => {
+        const executable = join(dir, executableName);
+        writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+        const spec = resolveWithPath(path);
+
+        expect(spec.command).toBe(executable);
+        expect(spec.args).toContain("--isolated");
+        expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+      },
+    );
+
+    it("skips a directory named like the executable for a later regular file", () => {
+      const first = join(dir, "first");
+      const later = join(dir, "later");
+      mkdirSync(join(first, executableName), { recursive: true });
+      mkdirSync(later);
+      const executable = join(later, executableName);
+      writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+      const spec = resolveWithPath([first, later].join(delimiter));
+
+      expect(spec.command).toBe(executable);
+      expect(spec.args).toContain("--isolated");
+      expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    });
+  });
+
+  it("uses a chrome-devtools-mcp executable on PATH when no global install is found", () => {
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => "/usr",
+      findOnPath: (name: string) =>
+        name === "chrome-devtools-mcp" ? "/opt/bin/chrome-devtools-mcp" : null,
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe("/opt/bin/chrome-devtools-mcp");
+    expect(spec.args).not.toContain("-y");
+    expect(spec.args).not.toContain("chrome-devtools-mcp@latest");
+    expect(spec.args).toContain("--isolated");
+    expect(spec.args).toContain("--headless");
+  });
+
+  it("uses a PATH executable when npm prefix is unavailable", () => {
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => null,
+      findOnPath: () => "/opt/bin/chrome-devtools-mcp",
+    };
+    expect(resolveTransportSpec(probe).command).toBe(
+      "/opt/bin/chrome-devtools-mcp",
+    );
+  });
+
+  it("prefers a PATH executable over the npm global install without invoking npm", () => {
+    const globalPath =
+      "/usr/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js";
+    const probe = {
+      existsSync: vi.fn((path: string) => path === globalPath),
+      getNpmPrefix: vi.fn(() => "/usr"),
+      findOnPath: () => "/opt/bin/chrome-devtools-mcp",
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe("/opt/bin/chrome-devtools-mcp");
+    expect(spec.args).toContain("--isolated");
+    expect(spec.args).not.toContain(globalPath);
+    expect(probe.getNpmPrefix).not.toHaveBeenCalled();
+    expect(probe.existsSync).not.toHaveBeenCalled();
+  });
+
+  it("prefers a PATH executable over the Windows npm global layout without invoking npm", () => {
+    const winPath = join(
+      "C:\\npm",
+      "node_modules",
+      "chrome-devtools-mcp",
+      "build",
+      "src",
+      "bin",
+      "chrome-devtools-mcp.js",
+    );
+    const probe = {
+      existsSync: vi.fn((path: string) => path === winPath),
+      getNpmPrefix: vi.fn(() => "C:\\npm"),
+      findOnPath: () => "/opt/bin/chrome-devtools-mcp",
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe("/opt/bin/chrome-devtools-mcp");
+    expect(spec.args).not.toContain(winPath);
+    expect(probe.getNpmPrefix).not.toHaveBeenCalled();
+    expect(probe.existsSync).not.toHaveBeenCalled();
+  });
+
+  it("falls back to npx when PATH has no chrome-devtools-mcp", () => {
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: () => "/usr",
+      findOnPath: () => null,
+    };
+    expect(resolveTransportSpec(probe).command).toBe("npx");
+  });
+
+  it("explicit MCP_PATH wins without probing PATH or npm", () => {
+    process.env.CHROME_DEVTOOLS_AXI_MCP_PATH = "/explicit/override.js";
+    const probe = {
+      existsSync: () => false,
+      getNpmPrefix: vi.fn(() => null),
+      findOnPath: vi.fn(() => "/opt/bin/chrome-devtools-mcp"),
+    };
+    const spec = resolveTransportSpec(probe);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.args[0]).toBe("/explicit/override.js");
+    expect(probe.findOnPath).not.toHaveBeenCalled();
+    expect(probe.getNpmPrefix).not.toHaveBeenCalled();
   });
 
   it("explicit MCP_PATH always wins over auto-detection", () => {
