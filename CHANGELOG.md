@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.39](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.38...chrome-devtools-axi-v0.1.39) (2026-10-04)
+
+
+### Bug Fixes
+
+* prefer MCP executables on PATH before npm fallbacks ([#164](https://github.com/kunchenguid/chrome-devtools-axi/issues/164)) ([c8c6e1b](https://github.com/kunchenguid/chrome-devtools-axi/commit/c8c6e1b82a4afe272a1dcac4b0870add8a45268d))
+
 ## [0.1.38](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.37...chrome-devtools-axi-v0.1.38) (2026-10-02)
 
 
