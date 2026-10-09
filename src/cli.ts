@@ -69,10 +69,12 @@ environment:
   CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH
                                     Chrome binary to launch instead of the installed Chrome
                                     (chrome-devtools-mcp --executablePath). Launch modes only;
-                                    ignored with AUTO_CONNECT and BROWSER_URL. Use a Chrome for
-                                    Testing build so launched browsers never share the installed
-                                    Chrome's macOS bundle id (which lets LaunchServices route the
-                                    user's clicked links into a windowless headless instance).
+                                    ignored with AUTO_CONNECT and BROWSER_URL. Takes precedence
+                                    over CHROME_DEVTOOLS_AXI_CHANNEL for launched browsers. Use a
+                                    Chrome for Testing build so launched browsers never share the
+                                    installed Chrome's macOS bundle id (which lets LaunchServices
+                                    route the user's clicked links into a windowless headless
+                                    instance).
                                     e.g. "$HOME/.cache/puppeteer/chrome/mac_arm-155.0.8059.39/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
   CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
                                     (no shell-style quoting; flags with spaces are not supported)

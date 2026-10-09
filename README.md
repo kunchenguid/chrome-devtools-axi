@@ -402,6 +402,7 @@ export CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH="$HOME/.cache/puppeteer/chrome/mac_ar
 ```
 
 It applies only when this tool launches the browser (the default `--isolated` mode and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR`) and is ignored in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT` and `CHROME_DEVTOOLS_AXI_BROWSER_URL` modes, where the browser is already running.
+For launched browsers it takes precedence over `CHROME_DEVTOOLS_AXI_CHANNEL`, which is then not passed.
 On macOS, prefer a [Chrome for Testing](https://developer.chrome.com/blog/chrome-for-testing) build: a headless copy of the installed Chrome registers with LaunchServices under the installed browser's bundle id, so links clicked in other apps can be delivered to a windowless automation instance instead of the user's browser. Chrome for Testing uses its own bundle id and can never be chosen.
 
 ### Keychain isolation

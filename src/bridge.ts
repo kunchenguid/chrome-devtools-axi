@@ -688,6 +688,11 @@ export function buildTransportArgs(): string[] {
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
   const userDataDir = process.env.CHROME_DEVTOOLS_AXI_USER_DATA_DIR;
   const channel = process.env.CHROME_DEVTOOLS_AXI_CHANNEL?.trim();
+  const executablePath =
+    process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH?.trim();
+  const launchesExecutablePath = Boolean(
+    executablePath && !autoConnect && !browserUrl,
+  );
 
   if (autoConnect) {
     // Chrome 144+ built-in remote debugging via chrome://inspect/#remote-debugging.
@@ -746,9 +751,7 @@ export function buildTransportArgs(): string[] {
     // headless copy of the installed Chrome shares its bundle id, and
     // LaunchServices may hand the user's clicked links to that windowless
     // instance; Chrome for Testing registers under its own bundle id.
-    const executablePath =
-      process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH?.trim();
-    if (executablePath) {
+    if (launchesExecutablePath) {
       args.push(`--executablePath=${executablePath}`);
     }
   }
@@ -757,7 +760,10 @@ export function buildTransportArgs(): string[] {
   // targets: the running instance --autoConnect attaches to, or the one launched
   // by default. It is irrelevant when attaching to an explicit endpoint, so it is
   // omitted in BROWSER_URL/wsEndpoint mode. Validation is left to chrome-devtools-mcp.
-  if (channel && !browserUrl) {
+  // chrome-devtools-mcp also declares --channel and --executablePath mutually
+  // exclusive; an explicit binary is more specific than a channel, so it takes
+  // precedence in launch modes, just as an explicit endpoint does above.
+  if (channel && !browserUrl && !launchesExecutablePath) {
     args.push(`--channel=${channel}`);
   }
 
