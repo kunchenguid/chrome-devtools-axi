@@ -55,6 +55,10 @@ const LAUNCH_ONLY_ENV_MATRIX: Array<{
     name: "isolated mode with caller-supplied chrome args",
     env: { CHROME_DEVTOOLS_AXI_CHROME_ARGS: "--enable-unsafe-webgpu" },
   },
+  {
+    name: "isolated mode with a custom executable",
+    env: { CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH: "/opt/chrome/chrome" },
+  },
 ];
 
 const ATTACH_ONLY_ENV_MATRIX: Array<{
@@ -83,6 +87,7 @@ const MANAGED_ENV_KEYS = [
   "CHROME_DEVTOOLS_AXI_AUTO_CONNECT",
   "CHROME_DEVTOOLS_AXI_CHANNEL",
   "CHROME_DEVTOOLS_AXI_WS_HEADERS",
+  "CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH",
 ] as const;
 
 /** True when these args ask chrome-devtools-mcp to launch its own browser. */

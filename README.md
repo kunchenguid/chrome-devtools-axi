@@ -394,6 +394,16 @@ export CHROME_DEVTOOLS_AXI_CHANNEL=beta
 This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
 It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
 
+Launch a specific Chrome binary instead of the installed Chrome with `CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH` (chrome-devtools-mcp's `--executablePath`):
+
+```sh
+npx @puppeteer/browsers install chrome@stable --path ~/.cache/puppeteer
+export CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH="$HOME/.cache/puppeteer/chrome/mac_arm-155.0.8059.39/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+```
+
+It applies only when this tool launches the browser (the default `--isolated` mode and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR`) and is ignored in the `CHROME_DEVTOOLS_AXI_AUTO_CONNECT` and `CHROME_DEVTOOLS_AXI_BROWSER_URL` modes, where the browser is already running.
+On macOS, prefer a [Chrome for Testing](https://developer.chrome.com/blog/chrome-for-testing) build: a headless copy of the installed Chrome registers with LaunchServices under the installed browser's bundle id, so links clicked in other apps can be delivered to a windowless automation instance instead of the user's browser. Chrome for Testing uses its own bundle id and can never be chosen.
+
 ### Keychain isolation
 
 When chrome-devtools-axi launches Chrome itself - the default `--isolated` mode and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` - it always passes `--use-mock-keychain` and `--password-store=basic`.

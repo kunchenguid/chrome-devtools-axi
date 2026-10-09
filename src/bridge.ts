@@ -739,6 +739,18 @@ export function buildTransportArgs(): string[] {
     for (const arg of KEYCHAIN_ISOLATION_CHROME_ARGS) {
       args.push(`--chrome-arg=${arg}`);
     }
+    // Launch modes only, like `--chrome-arg`: an attached browser is already
+    // running, so which binary it came from is not ours to choose. This maps
+    // chrome-devtools-mcp's `--executablePath` so a launched browser can be a
+    // Chrome for Testing build rather than the installed Chrome. On macOS a
+    // headless copy of the installed Chrome shares its bundle id, and
+    // LaunchServices may hand the user's clicked links to that windowless
+    // instance; Chrome for Testing registers under its own bundle id.
+    const executablePath =
+      process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH?.trim();
+    if (executablePath) {
+      args.push(`--executablePath=${executablePath}`);
+    }
   }
 
   // --channel selects which installed Chrome distribution chrome-devtools-mcp

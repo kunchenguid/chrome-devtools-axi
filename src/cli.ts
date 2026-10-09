@@ -66,6 +66,14 @@ environment:
                                     attaches to, and which one is launched in the default and
                                     USER_DATA_DIR modes. Ignored with CHROME_DEVTOOLS_AXI_BROWSER_URL.
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
+  CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH
+                                    Chrome binary to launch instead of the installed Chrome
+                                    (chrome-devtools-mcp --executablePath). Launch modes only;
+                                    ignored with AUTO_CONNECT and BROWSER_URL. Use a Chrome for
+                                    Testing build so launched browsers never share the installed
+                                    Chrome's macOS bundle id (which lets LaunchServices route the
+                                    user's clicked links into a windowless headless instance).
+                                    e.g. "$HOME/.cache/puppeteer/chrome/mac_arm-155.0.8059.39/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
   CHROME_DEVTOOLS_AXI_CHROME_ARGS   Whitespace-separated Chrome flags forwarded to the browser
                                     (no shell-style quoting; flags with spaces are not supported)
                                     e.g. "--enable-gpu --ignore-gpu-blocklist"
