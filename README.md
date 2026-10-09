@@ -394,10 +394,12 @@ export CHROME_DEVTOOLS_AXI_CHANNEL=beta
 This selects which Chrome `--autoConnect` attaches to, and which one is launched in the default and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` modes.
 It is ignored when `CHROME_DEVTOOLS_AXI_BROWSER_URL` is set, since that connects to an explicit endpoint regardless of channel.
 
-Launch a specific Chrome binary instead of the installed Chrome with `CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH` (chrome-devtools-mcp's `--executablePath`):
+Launch a specific Chrome binary instead of the installed Chrome with `CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH` (chrome-devtools-mcp's `--executablePath`).
+The installer prints the executable path of the downloaded browser; set the variable to that printed path, which depends on your platform and the current stable version:
 
 ```sh
 npx @puppeteer/browsers install chrome@stable --path ~/.cache/puppeteer
+# macOS arm64 example; use the path the installer printed
 export CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH="$HOME/.cache/puppeteer/chrome/mac_arm-155.0.8059.39/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 ```
 
