@@ -6,6 +6,29 @@ import {
 } from "../src/idle.js";
 
 describe("resolveIdleTimeoutMs", () => {
+  // The default argument reads the real environment, so a developer who
+  // followed the README and exported CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
+  // globally must not see the `undefined` case pick that value up.
+  let savedIdleTimeout: string | undefined;
+
+  beforeEach(() => {
+    savedIdleTimeout = process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    if (savedIdleTimeout === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = savedIdleTimeout;
+    }
+  });
+
+  it("reads CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS when no value is passed", () => {
+    process.env.CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS = "1800000";
+    expect(resolveIdleTimeoutMs()).toBe(1_800_000);
+  });
+
   it("leaves idle shutdown off unless a positive integer is configured", () => {
     for (const raw of [
       undefined,
