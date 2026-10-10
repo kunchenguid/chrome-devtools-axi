@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.40](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.39...chrome-devtools-axi-v0.1.40) (2026-10-10)
+
+
+### Features
+
+* **bridge:** add CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH to launch a custom Chrome binary ([#167](https://github.com/kunchenguid/chrome-devtools-axi/issues/167)) ([13260d5](https://github.com/kunchenguid/chrome-devtools-axi/commit/13260d584841bf167a9ed84121b0ec225a44b69c))
+
 ## [0.1.39](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.38...chrome-devtools-axi-v0.1.39) (2026-10-04)
 
 
