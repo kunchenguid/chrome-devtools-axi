@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.41](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.40...chrome-devtools-axi-v0.1.41) (2026-10-12)
+
+
+### Bug Fixes
+
+* **cli:** make resize report the viewport the page actually has ([#172](https://github.com/kunchenguid/chrome-devtools-axi/issues/172)) ([c0bc93e](https://github.com/kunchenguid/chrome-devtools-axi/commit/c0bc93eb3ea20636c15a215127eeb7a252b7597d))
+* **cli:** select the tab new_page created, not the one matching its URL ([#171](https://github.com/kunchenguid/chrome-devtools-axi/issues/171)) ([9e362df](https://github.com/kunchenguid/chrome-devtools-axi/commit/9e362dfd05dceccdae8356eb8982770f271608ed))
+
 ## [0.1.40](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.39...chrome-devtools-axi-v0.1.40) (2026-10-10)
 
 
