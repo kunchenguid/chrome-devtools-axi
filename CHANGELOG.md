@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.43](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.42...chrome-devtools-axi-v0.1.43) (2026-10-15)
+
+
+### Features
+
+* **cli:** allow metadata-only navigation output ([#179](https://github.com/kunchenguid/chrome-devtools-axi/issues/179)) ([73d1020](https://github.com/kunchenguid/chrome-devtools-axi/commit/73d1020d09588e3e29dd1f1323f56f6150960caf))
+
 ## [0.1.42](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.41...chrome-devtools-axi-v0.1.42) (2026-10-13)
 
 
