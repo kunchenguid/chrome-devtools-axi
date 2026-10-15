@@ -772,6 +772,166 @@ describe("main", () => {
   });
 });
 
+describe("navigation snapshot output", () => {
+  const savedHome = process.env.HOME;
+  const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;
+  let tmpHome = "";
+  const snapshot =
+    'RootWebArea "Navigation page"\n  uid=1 button "Continue"\n  uid=2 link "Help"';
+
+  afterEach(() => {
+    callTool.mockReset();
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    if (savedSession === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_SESSION;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_SESSION = savedSession;
+    }
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function isolateSession(): void {
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-navigation-snapshot-"));
+    process.env.HOME = tmpHome;
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "navigation-snapshot";
+  }
+
+  function mockSnapshot(): void {
+    callTool.mockImplementation(async (tool: string) =>
+      tool === "take_snapshot" ? snapshot : "",
+    );
+  }
+
+  it.each([
+    {
+      command: "newpage",
+      argv: ["newpage", "https://example.com"],
+      url: "https://example.com",
+    },
+    { command: "selectpage", argv: ["selectpage", "7"], url: undefined },
+  ])(
+    "keeps the automatic snapshot for $command by default",
+    async ({ command, argv, url }) => {
+      isolateSession();
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      mockSnapshot();
+
+      await main(argv);
+
+      const output = String(write.mock.calls[0]?.[0]);
+      expect(output).toContain("title: Navigation page");
+      expect(output).toContain("refs: 2");
+      expect(output).toContain("snapshot:");
+      expect(output).toContain("RootWebArea");
+      expect(output).toContain("help[");
+      expect(output).toContain("Run `chrome-devtools-axi click");
+      if (url) expect(output).toContain(`url: "${url}"`);
+      else expect(output).not.toContain("url:");
+      if (command === "selectpage") {
+        expect(callTool).toHaveBeenCalledWith("select_page", { pageId: 7 });
+      }
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it.each([
+    {
+      command: "newpage",
+      argv: ["newpage", "--background", "--no-snapshot", "https://example.com"],
+      url: "https://example.com",
+      background: true,
+    },
+    {
+      command: "newpage",
+      argv: ["newpage", "https://example.com", "--full", "--no-snapshot"],
+      url: "https://example.com",
+      background: false,
+    },
+    {
+      command: "selectpage",
+      argv: ["selectpage", "--no-snapshot", "7"],
+      url: undefined,
+      background: false,
+    },
+    {
+      command: "selectpage",
+      argv: ["selectpage", "7", "--full", "--no-snapshot"],
+      url: undefined,
+      background: false,
+    },
+  ])(
+    "$command --no-snapshot returns metadata only",
+    async ({ command, argv, url, background }) => {
+      isolateSession();
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      mockSnapshot();
+
+      await main(argv);
+
+      const output = String(write.mock.calls[0]?.[0]);
+      expect(output).toContain("title: Navigation page");
+      expect(output).toContain("refs: 2");
+      expect(output).not.toContain("snapshot:");
+      expect(output).not.toContain("RootWebArea");
+      expect(output).not.toContain("uid=");
+      expect(output).not.toContain("help[");
+      if (url) {
+        expect(output).toContain(`url: "${url}"`);
+        expect(callTool).toHaveBeenCalledWith("new_page", {
+          url,
+          ...(background ? { background: true } : {}),
+        });
+      } else {
+        expect(output).not.toContain("url:");
+        expect(callTool).toHaveBeenCalledWith("select_page", { pageId: 7 });
+      }
+      expect(callTool.mock.calls.map(([tool]) => tool)).toContain(
+        "take_snapshot",
+      );
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it("reports a missing page ID when --no-snapshot is the only argument", async () => {
+    isolateSession();
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    await main(["selectpage", "--no-snapshot"]);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(output).toContain("Missing page ID");
+    expect(output).not.toContain("Invalid page ID");
+    expect(callTool).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("keeps the explicit snapshot command unchanged", async () => {
+    isolateSession();
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    mockSnapshot();
+
+    await main(["snapshot"]);
+
+    const output = String(write.mock.calls[0]?.[0]);
+    expect(output).toContain("title: Navigation page");
+    expect(output).toContain("snapshot:");
+    expect(output).toContain("RootWebArea");
+    expect(output).toContain("help[");
+    expect(process.exitCode).toBeUndefined();
+  });
+});
+
 describe("pages selected overlay", () => {
   const savedHome = process.env.HOME;
   const savedSession = process.env.CHROME_DEVTOOLS_AXI_SESSION;

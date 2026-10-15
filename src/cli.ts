@@ -345,7 +345,7 @@ List all open pages/tabs in the browser.
 examples:
   chrome-devtools-axi pages`,
 
-  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--full]
+  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--full] [--no-snapshot]
 Open a new tab and navigate to a URL.
 
 args:
@@ -354,12 +354,14 @@ args:
 flags:
   --background  Open in background without bringing to front
   --full        Show complete snapshot without truncation
+  --no-snapshot  Show page metadata without snapshot or snapshot-derived help
+                 (takes precedence over --full)
 
 examples:
   chrome-devtools-axi newpage https://example.com
   chrome-devtools-axi newpage https://example.com --background`,
 
-  selectpage: `usage: chrome-devtools-axi selectpage <id> [--full]
+  selectpage: `usage: chrome-devtools-axi selectpage <id> [--full] [--no-snapshot]
 Switch to a tab by page ID.
 
 args:
@@ -367,6 +369,8 @@ args:
 
 flags:
   --full  Show complete snapshot without truncation
+  --no-snapshot  Show page metadata without snapshot or snapshot-derived help
+                 (takes precedence over --full)
 
 examples:
   chrome-devtools-axi selectpage 1`,
@@ -959,6 +963,7 @@ function formatPageOutput(
   command: string,
   url?: string,
   full = false,
+  noSnapshot = false,
 ): string {
   const title = extractTitle(snapshot);
   const refs = countRefs(snapshot);
@@ -971,6 +976,7 @@ function formatPageOutput(
   if (url) page.url = url;
   page.refs = refs;
   blocks.push(encode({ page }));
+  if (noSnapshot) return renderOutput(blocks);
 
   // Truncate snapshot
   const tr = truncateSnapshot(snapshot, full);
@@ -1298,6 +1304,7 @@ async function handlePages(): Promise<string> {
 }
 
 async function handleNewPage(args: string[], full: boolean): Promise<string> {
+  const noSnapshot = args.includes("--no-snapshot");
   const url = args.filter((a) => !a.startsWith("--"))[0];
   if (!url) {
     throw new CdpError("Missing URL", "VALIDATION_ERROR", [
@@ -1309,14 +1316,15 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
   if (background) toolArgs.background = true;
   await callTool("new_page", toolArgs);
   const snapshot = await stampFresh();
-  return formatPageOutput(snapshot, "newpage", url, full);
+  return formatPageOutput(snapshot, "newpage", url, full, noSnapshot);
 }
 
 async function handleSelectPage(
   args: string[],
   full: boolean,
 ): Promise<string> {
-  const id = args[0];
+  const noSnapshot = args.includes("--no-snapshot");
+  const id = args.filter((arg) => arg !== "--no-snapshot")[0];
   if (!id) {
     throw new CdpError("Missing page ID", "VALIDATION_ERROR", [
       "Run `chrome-devtools-axi selectpage <id>` — get ID from `pages` command",
@@ -1330,7 +1338,7 @@ async function handleSelectPage(
   }
   await callTool("select_page", { pageId });
   const snapshot = await stampFresh();
-  return formatPageOutput(snapshot, "selectpage", undefined, full);
+  return formatPageOutput(snapshot, "selectpage", undefined, full, noSnapshot);
 }
 
 async function handleClosePage(args: string[]): Promise<string> {
@@ -1766,8 +1774,8 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   dialog: [],
   upload: ["--full"],
   pages: [],
-  newpage: ["--background", "--full"],
-  selectpage: ["--full"],
+  newpage: ["--background", "--full", "--no-snapshot"],
+  selectpage: ["--full", "--no-snapshot"],
   closepage: [],
   resize: [],
   emulate: [

@@ -205,6 +205,20 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | `closepage <id>`  | Close a tab by ID           |
 | `resize <w> <h>`  | Resize the browser viewport |
 
+By default, `newpage` and `selectpage` print the automatic accessibility tree
+and snapshot-derived suggestions. Use `--no-snapshot` when navigating to a page
+and continuing with `eval` or another chained command without needing element
+UIDs. It suppresses only the printed tree and its derived guidance: capture
+still runs, preserving page metadata and fresh element-reference generations.
+Leave it off for UID-based `click`/`fill` workflows, or run `snapshot` explicitly.
+The flag may appear before or after the URL/page ID and takes precedence over
+`--full`.
+
+```sh
+chrome-devtools-axi newpage https://example.com --no-snapshot
+chrome-devtools-axi selectpage 1 --no-snapshot
+```
+
 `resize` reads the page's viewport back and fails, naming the actual size, when it did not reach the requested size (an emulated viewport, page zoom or the window's minimum size can hold it); use `emulate --viewport` then.
 
 Page-scoped tools require a selected page. `pages` only lists tabs and never changes the selection. `selectpage` sets it. `newpage` (and `open` when it has to create a tab) selects the tab chrome-devtools-mcp reports as selected in its own listing, which is the tab it just created, even when that URL is already open in another tab or changed while loading; a title continuation, no marked row, more than one `[selected]` line anywhere in the listing, a repeated `## Pages` section or page id, or chrome-devtools-mcp's note that it moved its selection off a closed tab leaves the selection unset, and the next page-scoped command fails until `selectpage`. The selected column in `pages` is AXI's selection, not the MCP `[selected]` marker. Closing the selected tab clears it. There is no automatic retarget onto another tab.
@@ -269,6 +283,7 @@ are command-specific; the CLI rejects a flag that is not listed by
 | `-v`, `-V`, `--version`     | Show the installed CLI version              |
 | `--check`                   | Check for available updates (update)        |
 | `--full`                    | Show complete output without truncation     |
+| `--no-snapshot`             | Omit auto snapshot (newpage/selectpage)     |
 | `--background`              | Open new page in background (newpage)       |
 | `--uid @<uid>`              | Target a specific element (screenshot)      |
 | `--full-page`               | Capture entire scrollable page (screenshot) |
