@@ -317,6 +317,8 @@ For both commands, `all` or an omitted `--type` returns every item.
 
 ## Configuration
 
+AXI honors chrome-devtools-mcp’s usage-statistics opt-out by forwarding `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` and `CI` to the MCP server it launches.
+
 The bridge server port defaults to `9224`. Override it with an environment variable:
 
 ```sh

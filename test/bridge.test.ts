@@ -2597,19 +2597,22 @@ describe("idle activity", () => {
 });
 
 describe("buildMcpChildEnv", () => {
-  it("forwards chrome-devtools-mcp opt-out switches to the stdio child", () => {
-    const env = buildMcpChildEnv({
-      PATH: process.env.PATH,
-      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
-      CI: "true",
-      CHROME_DEVTOOLS_AXI_SESSION: "worker-1",
-      SECRET_TOKEN: "do-not-forward",
-    });
-    expect(env.CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS).toBe("1");
-    expect(env.CI).toBe("true");
-    expect(env).not.toHaveProperty("SECRET_TOKEN");
-    expect(env).not.toHaveProperty("CHROME_DEVTOOLS_AXI_SESSION");
-  });
+  it.each(["CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS", "CI"])(
+    "forwards %s without unrelated variables",
+    (key) => {
+      const env = buildMcpChildEnv({
+        PATH: process.env.PATH,
+        [key]: "1",
+        CHROME_DEVTOOLS_AXI_SESSION: "worker-1",
+        SECRET_TOKEN: "do-not-forward",
+        CHROME_DEVTOOLS_MCP_OTHER_SETTING: "do-not-forward",
+      });
+      expect(env[key]).toBe("1");
+      expect(env).not.toHaveProperty("SECRET_TOKEN");
+      expect(env).not.toHaveProperty("CHROME_DEVTOOLS_MCP_OTHER_SETTING");
+      expect(env).not.toHaveProperty("CHROME_DEVTOOLS_AXI_SESSION");
+    },
+  );
 
   it("keeps the SDK default environment", () => {
     const env = buildMcpChildEnv({});

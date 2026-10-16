@@ -1006,22 +1006,14 @@ export function resolveTransport(
   return { kind: "stdio", spec: resolveTransportSpec(probe) };
 }
 
-/**
- * Environment for a stdio-launched chrome-devtools-mcp. The MCP SDK otherwise
- * passes only a minimal allowlist (HOME, PATH, ...), which silently drops
- * chrome-devtools-mcp's own env switches such as
- * `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` and `CI` (usage-statistics opt-out).
- * Forward exactly those on top of the SDK default.
- */
+/** Preserve the SDK defaults and the MCP usage-statistics opt-out switches. */
 export function buildMcpChildEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const childEnv = getDefaultEnvironment();
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) continue;
-    if (key === "CI" || key.startsWith("CHROME_DEVTOOLS_MCP_")) {
-      childEnv[key] = value;
-    }
+  for (const key of ["CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS", "CI"]) {
+    const value = env[key];
+    if (value !== undefined) childEnv[key] = value;
   }
   return childEnv;
 }
