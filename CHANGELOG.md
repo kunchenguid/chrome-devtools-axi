@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.44](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.43...chrome-devtools-axi-v0.1.44) (2026-10-16)
+
+
+### Bug Fixes
+
+* **bridge:** honor chrome-devtools-mcp usage-statistics opt-out ([#182](https://github.com/kunchenguid/chrome-devtools-axi/issues/182)) ([30d5e29](https://github.com/kunchenguid/chrome-devtools-axi/commit/30d5e29c41bc2df7f1d4385d8d24a1aa2a749658))
+* **cli:** resolve relative upload paths from the caller's cwd ([#183](https://github.com/kunchenguid/chrome-devtools-axi/issues/183)) ([dcce27e](https://github.com/kunchenguid/chrome-devtools-axi/commit/dcce27eb6a9add08262bb371a297abc197a1602d))
+
 ## [0.1.43](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.42...chrome-devtools-axi-v0.1.43) (2026-10-15)
 
 
