@@ -17,7 +17,10 @@
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -806,8 +809,7 @@ export interface SessionTerminatingTransport extends Transport {
 }
 
 export type ResolvedTransport =
-  | { kind: "http"; url: URL }
-  | { kind: "stdio"; spec: TransportSpec };
+  { kind: "http"; url: URL } | { kind: "stdio"; spec: TransportSpec };
 
 /**
  * A selected MCP transport plus the lifecycle operation that is unique to a
@@ -1004,8 +1006,29 @@ export function resolveTransport(
   return { kind: "stdio", spec: resolveTransportSpec(probe) };
 }
 
+/**
+ * Environment for a stdio-launched chrome-devtools-mcp. The MCP SDK otherwise
+ * passes only a minimal allowlist (HOME, PATH, ...), which silently drops
+ * chrome-devtools-mcp's own env switches such as
+ * `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` and `CI` (usage-statistics opt-out).
+ * Forward exactly those on top of the SDK default.
+ */
+export function buildMcpChildEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const childEnv = getDefaultEnvironment();
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if (key === "CI" || key.startsWith("CHROME_DEVTOOLS_MCP_")) {
+      childEnv[key] = value;
+    }
+  }
+  return childEnv;
+}
+
 const DEFAULT_BRIDGE_TRANSPORT_FACTORIES: BridgeTransportFactories = {
-  createStdio: (spec) => new StdioClientTransport(spec),
+  createStdio: (spec) =>
+    new StdioClientTransport({ ...spec, env: buildMcpChildEnv() }),
   createHttp: (url) => new StreamableHTTPClientTransport(url),
 };
 
@@ -1112,8 +1135,7 @@ export function createRootsAwareBridgeClient(client: Client): RootsAwareClient {
     confirmedRoots = null;
     currentRoots = next;
     let waiter:
-      | { resolve: () => void; reject: (error: unknown) => void }
-      | undefined;
+      { resolve: () => void; reject: (error: unknown) => void } | undefined;
     const fetched = new Promise<void>((resolve, reject) => {
       waiter = { resolve, reject };
       onRootsFetched = waiter;

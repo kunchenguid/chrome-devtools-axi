@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import {
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  buildMcpChildEnv,
   buildTransportArgs,
   closeBridgeTransport,
   createBridgeServer,
@@ -2592,5 +2593,27 @@ describe("idle activity", () => {
         server.close(() => closed());
       });
     }
+  });
+});
+
+describe("buildMcpChildEnv", () => {
+  it("forwards chrome-devtools-mcp opt-out switches to the stdio child", () => {
+    const env = buildMcpChildEnv({
+      PATH: process.env.PATH,
+      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1",
+      CI: "true",
+      CHROME_DEVTOOLS_AXI_SESSION: "worker-1",
+      SECRET_TOKEN: "do-not-forward",
+    });
+    expect(env.CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS).toBe("1");
+    expect(env.CI).toBe("true");
+    expect(env).not.toHaveProperty("SECRET_TOKEN");
+    expect(env).not.toHaveProperty("CHROME_DEVTOOLS_AXI_SESSION");
+  });
+
+  it("keeps the SDK default environment", () => {
+    const env = buildMcpChildEnv({});
+    if (process.env.PATH) expect(env.PATH).toBe(process.env.PATH);
+    expect(env).not.toHaveProperty("CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS");
   });
 });
