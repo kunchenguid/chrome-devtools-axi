@@ -311,6 +311,8 @@ Saved-path output uses the resolved absolute path.
 A denied or failed write exits non-zero with the tool error instead of printing success.
 Snapshots truncate at about 16k characters unless `--full` is set. `eval` output keeps its head and tail when truncated.
 
+Relative file paths for `upload` also resolve against the directory where you invoke the CLI, even if the bridge started in a different directory. Absolute upload paths pass through unchanged.
+
 `console --type` accepts `log`, `debug`, `info`, `error`, `warn`, `dir`, `dirxml`, `table`, `trace`, `clear`, `startGroup`, `startGroupCollapsed`, `endGroup`, `assert`, `profile`, `profileEnd`, `count`, `timeEnd`, `verbose`, `issue`, and `all`.
 `network --type` accepts `document`, `stylesheet`, `image`, `media`, `font`, `script`, `texttrack`, `xhr`, `fetch`, `prefetch`, `eventsource`, `websocket`, `manifest`, `signedexchange`, `ping`, `cspviolationreport`, `preflight`, `fedcm`, `other`, and `all`.
 For both commands, `all` or an omitted `--type` returns every item.
