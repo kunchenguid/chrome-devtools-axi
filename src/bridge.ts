@@ -809,7 +809,8 @@ export interface SessionTerminatingTransport extends Transport {
 }
 
 export type ResolvedTransport =
-  { kind: "http"; url: URL } | { kind: "stdio"; spec: TransportSpec };
+  | { kind: "http"; url: URL }
+  | { kind: "stdio"; spec: TransportSpec };
 
 /**
  * A selected MCP transport plus the lifecycle operation that is unique to a
@@ -1127,7 +1128,8 @@ export function createRootsAwareBridgeClient(client: Client): RootsAwareClient {
     confirmedRoots = null;
     currentRoots = next;
     let waiter:
-      { resolve: () => void; reject: (error: unknown) => void } | undefined;
+      | { resolve: () => void; reject: (error: unknown) => void }
+      | undefined;
     const fetched = new Promise<void>((resolve, reject) => {
       waiter = { resolve, reject };
       onRootsFetched = waiter;
