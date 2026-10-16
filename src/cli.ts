@@ -1492,7 +1492,10 @@ async function handleUpload(args: string[], full: boolean): Promise<string> {
   }
   const snapshot = await callWithSnapshot("upload_file", {
     uid: await parseUidFresh(uid),
-    filePaths: [filePath],
+    // The bridge (and the chrome-devtools-mcp/Chrome it owns) may run from a
+    // different cwd than this invocation, so a relative path must be resolved
+    // here or Chrome reads the wrong file and the upload silently fails.
+    filePaths: [resolveOutputPath(filePath)],
   });
   return formatPageOutput(snapshot, "upload", undefined, full);
 }

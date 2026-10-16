@@ -208,7 +208,7 @@ describe("main", () => {
     {
       argv: ["upload", "@1", "-file"],
       tool: "upload_file",
-      args: { uid: "1", filePaths: ["-file"] },
+      args: { uid: "1", filePaths: [resolve(process.cwd(), "-file")] },
       preflight: true,
     },
     {
@@ -240,6 +240,30 @@ describe("main", () => {
       expect(callTool).toHaveBeenCalledWith(
         tool,
         expect.objectContaining(args),
+      );
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ["nested/resume.pdf", resolve(process.cwd(), "nested/resume.pdf")],
+    ["/abs/resume.pdf", "/abs/resume.pdf"],
+  ])(
+    "resolves upload path %s against the invoking cwd",
+    async (input, expected) => {
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+      callTool
+        .mockResolvedValueOnce(
+          'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+        )
+        .mockResolvedValue("");
+
+      await main(["upload", "@1", input]);
+
+      expect(callTool).toHaveBeenCalledWith(
+        "upload_file",
+        expect.objectContaining({ uid: "1", filePaths: [expected] }),
       );
       expect(process.exitCode).toBeUndefined();
     },
