@@ -120,3 +120,42 @@ export function resolveSessionPidFile(
 ): string {
   return join(resolveSessionStateDir(name), "bridge.pid");
 }
+
+/**
+ * Attach once: with `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1`, every session shares
+ * one bridge (one chrome-devtools-mcp, one connection to the user's Chrome),
+ * so Chrome's "Allow remote debugging?" dialog is answered once instead of
+ * once per session. Each session keeps its own state directory (selected
+ * page, snapshot generation); chrome-devtools-mcp takes `pageId` on every
+ * page-scoped tool and serializes calls, so sessions never steer each other.
+ *
+ * On by default in autoConnect mode. `CHROME_DEVTOOLS_AXI_ATTACH_ONCE=0`
+ * restores one bridge per session. It never applies with a shared MCP URL, a
+ * BROWSER_URL, or an explicit CHROME_DEVTOOLS_AXI_PORT.
+ */
+export const ATTACH_ONCE_ENV = "CHROME_DEVTOOLS_AXI_ATTACH_ONCE";
+const ATTACH_ONCE_BRIDGE_PREFIX = "attach-once";
+
+export function isAttachOnce(): boolean {
+  const env = process.env;
+  if (env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT !== "1") return false;
+  if (env[ATTACH_ONCE_ENV]?.trim() === "0") return false;
+  if (env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim()) return false;
+  if (env.CHROME_DEVTOOLS_AXI_BROWSER_URL?.trim()) return false;
+  if (env.CHROME_DEVTOOLS_AXI_PORT?.trim()) return false;
+  return true;
+}
+
+/**
+ * The name the bridge process runs under: the session's own name, or in
+ * attach-once mode one shared name per Chrome channel. It picks the bridge's
+ * port and PID file; the session's own state stays under
+ * `resolveSessionStateDir()`. Validates the session name either way.
+ */
+export function resolveBridgeSessionName(): string {
+  const session = resolveSessionName();
+  if (!isAttachOnce()) return session;
+  const raw = process.env.CHROME_DEVTOOLS_AXI_CHANNEL?.trim() || "stable";
+  const channel = raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+  return `${ATTACH_ONCE_BRIDGE_PREFIX}.${channel}`;
+}

@@ -3,10 +3,12 @@ import { runAxiCli } from "axi-sdk-js";
 import {
   CdpError,
   callTool,
+  detachSession,
   ensureBridge,
   getSessionSnapshotIfRunning,
   stopBridge,
 } from "./client.js";
+import { isAttachOnce } from "./sessions.js";
 import { getCurrentGeneration } from "./generation.js";
 import {
   readStdin,
@@ -70,6 +72,12 @@ environment:
                                     canary, or dev. Selects which installed Chrome --autoConnect
                                     attaches to, and which one is launched in the default and
                                     USER_DATA_DIR modes. Ignored with CHROME_DEVTOOLS_AXI_BROWSER_URL.
+  CHROME_DEVTOOLS_AXI_ATTACH_ONCE   With AUTO_CONNECT=1 (and no BROWSER_URL, MCP_SERVER_URL or
+                                    PORT), every session shares one bridge and one connection to
+                                    your Chrome, so "Allow remote debugging?" is asked once, not
+                                    once per session. Sessions keep their own selected page and
+                                    snapshot state. On by default; set to 0 for one bridge per
+                                    session.
   CHROME_DEVTOOLS_AXI_HEADED        Set to 1 to run Chrome in headed (visible) mode
   CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH
                                     Chrome binary to launch instead of the installed Chrome
@@ -332,11 +340,18 @@ Start the bridge server (launches headless Chrome).
 examples:
   chrome-devtools-axi start`,
 
-  stop: `usage: chrome-devtools-axi stop
+  stop: `usage: chrome-devtools-axi stop [--shared]
 Stop the bridge server and close the browser.
 
+In attach-once mode (CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1, the default there),
+every session shares one bridge and one approved Chrome connection: \`stop\`
+only detaches this session (forgets its selected page). Add --shared to stop
+the shared bridge for every session; the next command reconnects and Chrome
+asks "Allow remote debugging?" again.
+
 examples:
-  chrome-devtools-axi stop`,
+  chrome-devtools-axi stop
+  chrome-devtools-axi stop --shared`,
 
   // Page management
   pages: `usage: chrome-devtools-axi pages
@@ -1277,7 +1292,17 @@ export function formatStopOutput(wasStopped: boolean): string {
   return encode({ status: wasStopped ? "stopped" : "stopped (no-op)" });
 }
 
-async function handleStop(): Promise<string> {
+async function handleStop(args: string[] = []): Promise<string> {
+  if (isAttachOnce() && !args.includes("--shared")) {
+    const running = detachSession();
+    return encode({
+      status: "detached",
+      bridge: running ? "shared, still running" : "not running",
+      help: [
+        "Attach-once mode: other sessions keep the shared Chrome connection. Run `chrome-devtools-axi stop --shared` to stop it for everyone.",
+      ],
+    });
+  }
   const wasStopped = await stopBridge();
   return formatStopOutput(wasStopped);
 }
@@ -1754,7 +1779,7 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
   "perf-insight": withoutFullFlag(handlePerfInsight),
   heap: withoutFullFlag(handleHeap),
   start: async () => handleStart(),
-  stop: async () => handleStop(),
+  stop: async (args) => handleStop(args),
   setup: withoutFullFlag(handleSetup),
 };
 
@@ -1799,7 +1824,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   "perf-insight": [],
   heap: [],
   start: [],
-  stop: [],
+  stop: ["--shared"],
   setup: [],
 };
 

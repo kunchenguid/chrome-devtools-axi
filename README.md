@@ -450,6 +450,15 @@ Each session name gets its own bridge process, port (auto-derived from the name,
 Outside shared-service mode, the default `--isolated` and `CHROME_DEVTOOLS_AXI_USER_DATA_DIR` launch modes each launch a Chrome per bridge, so concurrent sessions share neither browser state nor each other's stale-ref tracking.
 Sessions that attach to the same external browser - multiple `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1` sessions on one running Chrome, or the same `CHROME_DEVTOOLS_AXI_BROWSER_URL`/`wsEndpoint` - drive that shared browser and are isolated only at the bridge level, where the per-session generation counter does not prevent cross-talk.
 A session name does not choose a connection mode or profile; for a locally launched persistent browser, give each session its own `CHROME_DEVTOOLS_AXI_USER_DATA_DIR`.
+
+#### Attach once
+
+Chrome asks "Allow remote debugging?" for every new connection to a running browser.
+So with `CHROME_DEVTOOLS_AXI_AUTO_CONNECT=1`, every session shares one bridge (`attach-once.<channel>`, one chrome-devtools-mcp, one connection), and you approve the dialog once instead of once per session.
+Each session still keeps its own selected page and snapshot generation under `sessions/<name>/`; chrome-devtools-mcp takes `pageId` on every page-scoped tool and runs one call at a time, so sessions on different tabs never steer each other.
+`chrome-devtools-axi stop` then only detaches the session (forgets its selected page); `stop --shared` stops the shared bridge for everyone, and the next command reconnects and asks again.
+After a browser reconnect, page ids are reissued: a session's old id fails with "No page found" until it runs `selectpage` or `open`.
+Attach once is on by default in autoConnect mode and never applies with `CHROME_DEVTOOLS_AXI_BROWSER_URL`, `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL`, or an explicit `CHROME_DEVTOOLS_AXI_PORT`. Set `CHROME_DEVTOOLS_AXI_ATTACH_ONCE=0` for one bridge per session.
 The default (unset) session keeps port 9224 and the legacy state paths below.
 
 Do not export `CHROME_DEVTOOLS_AXI_PORT` globally when running concurrent sessions: it overrides the per-session derived port and forces every session onto the same port, so the second session fails to start - its bridge cannot bind the already-taken port, and the first session's bridge is rejected as a mismatch rather than silently shared.

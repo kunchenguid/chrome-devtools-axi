@@ -20,7 +20,8 @@ import {
   rememberToolRouting,
 } from "./selected-page.js";
 import {
-  resolveSessionName,
+  isAttachOnce,
+  resolveBridgeSessionName,
   resolveSessionPidFile,
   resolveSessionPort,
 } from "./sessions.js";
@@ -71,7 +72,7 @@ interface PidInfo {
 }
 
 function readPidFile(
-  pidFile: string = resolveSessionPidFile(),
+  pidFile: string = resolveSessionPidFile(resolveBridgeSessionName()),
 ): PidInfo | null {
   try {
     if (!existsSync(pidFile)) return null;
@@ -476,7 +477,8 @@ export async function ensureBridge(
   ) => SpawnedBridge = spawnBridgeProcess,
   notice?: PageIdentityNotice,
 ): Promise<number> {
-  const sessionName = resolveSessionName();
+  // The bridge's name: this session's, or the shared attach-once bridge's.
+  const sessionName = resolveBridgeSessionName();
   const port = resolveSessionPort(sessionName);
   const pidFile = resolveSessionPidFile(sessionName);
 
@@ -915,7 +917,7 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
   let sessionName: string;
   let pidInfo: PidInfo | null;
   try {
-    sessionName = resolveSessionName();
+    sessionName = resolveBridgeSessionName();
     pidInfo = readPidFile(resolveSessionPidFile(sessionName));
   } catch {
     return null;
@@ -960,4 +962,15 @@ export async function stopBridge(): Promise<boolean> {
   });
   clearSelectedPageId();
   return true;
+}
+
+/**
+ * Attach-once `stop` without `--shared`: forget this session's page and leave
+ * the shared bridge (and its approved Chrome connection) to the other
+ * sessions. Returns whether a shared bridge is running.
+ */
+export function detachSession(): boolean {
+  clearSelectedPageId();
+  const pidInfo = readPidFile();
+  return pidInfo !== null && isProcessAlive(pidInfo.pid);
 }
