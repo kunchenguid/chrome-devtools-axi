@@ -10,6 +10,7 @@ import { AxiError } from "axi-sdk-js";
 import {
   AMBIENT_REQUEST_HEADER,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  CHROME_DEVTOOLS_MCP_SPEC,
   PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
 } from "./bridge-script.js";
@@ -436,7 +437,7 @@ export function buildBridgeEarlyExitError(
   }
 
   const suggestions = [
-    "Check that chrome-devtools-mcp can start: npx chrome-devtools-mcp@latest --help",
+    `Check that chrome-devtools-mcp can start: npx ${CHROME_DEVTOOLS_MCP_SPEC} --help`,
   ];
   if (process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim()) {
     suggestions.push(
@@ -444,7 +445,7 @@ export function buildBridgeEarlyExitError(
     );
   } else {
     suggestions.push(
-      "`npx -y chrome-devtools-mcp@latest` may have failed to resolve/download the package (offline, or a slow cold first run); install it globally and set:",
+      `\`npx -y ${CHROME_DEVTOOLS_MCP_SPEC}\` may have failed to resolve/download the package (offline, or a slow cold first run); install it globally and set:`,
       '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
     );
   }
@@ -588,11 +589,11 @@ export async function ensureBridge(
       : sharedMcpMode === "proxy"
         ? sharedMcpSuggestions("proxy")
         : [
-            "Check that chrome-devtools-mcp is installed: npx chrome-devtools-mcp@latest --help",
+            `Check that chrome-devtools-mcp is installed: npx ${CHROME_DEVTOOLS_MCP_SPEC} --help`,
           ];
   if (!sharedMcpMode && !process.env.CHROME_DEVTOOLS_AXI_MCP_PATH?.trim()) {
     suggestions.push(
-      "If `npx -y chrome-devtools-mcp@latest` is slow on this machine, install mcp globally and set:",
+      `If \`npx -y ${CHROME_DEVTOOLS_MCP_SPEC}\` is slow on this machine, install mcp globally and set:`,
       '  export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"',
     );
   }

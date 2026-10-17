@@ -7,6 +7,7 @@ import {
   getSessionSnapshotIfRunning,
   stopBridge,
 } from "./client.js";
+import { CHROME_DEVTOOLS_MCP_SPEC } from "./bridge-script.js";
 import { getCurrentGeneration } from "./generation.js";
 import {
   readStdin,
@@ -101,11 +102,11 @@ environment:
                                     e.g. "/path/to/.chrome-profile"
   CHROME_DEVTOOLS_AXI_MCP_PATH      Absolute path to a chrome-devtools-mcp script. When set
                                     without a shared URL, the bridge spawns 'node $MCP_PATH'
-                                    directly instead of 'npx -y chrome-devtools-mcp@latest'.
+                                    directly instead of 'npx -y ${CHROME_DEVTOOLS_MCP_SPEC}'.
                                     With MCP_SERVER_URL also set, selects stdio proxy mode:
                                     the executable must advertise --serverUrl in --help.
                                     Local-mode recommendation:
-                                      npm install -g chrome-devtools-mcp
+                                      npm install -g ${CHROME_DEVTOOLS_MCP_SPEC}
                                       export CHROME_DEVTOOLS_AXI_MCP_PATH="$(npm prefix -g)/lib/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
   CHROME_DEVTOOLS_AXI_MCP_SERVER_URL
                                     Shared MCP service URL. With MCP_PATH, starts a verified
