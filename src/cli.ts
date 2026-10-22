@@ -13,6 +13,7 @@ import {
   parseNavigationTimeoutMs,
 } from "./navigation-timeout.js";
 import {
+  fillRef,
   readStdin,
   runScript,
   waitForDuration,
@@ -1240,10 +1241,8 @@ async function handleFill(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  const snapshot = await callWithSnapshot("fill", {
-    uid: await parseUidFresh(uid),
-    value,
-  });
+  await fillRef(callTool, await parseUidFresh(uid), value);
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "fill", undefined, full);
 }
 
