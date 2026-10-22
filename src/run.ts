@@ -133,7 +133,7 @@ function nativeFillFunction(text: string): string {
   const textTypes = ['text', 'search', 'url', 'tel', 'email', 'password', 'number'];
   const fillable = el instanceof HTMLTextAreaElement
     || (el instanceof HTMLInputElement && textTypes.includes(el.type));
-  if (!fillable || el.disabled || el.readOnly) return false;
+  if (!fillable || el.matches(':disabled') || el.readOnly) return false;
   el.focus();
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(text)});

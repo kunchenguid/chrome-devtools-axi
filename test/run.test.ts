@@ -625,11 +625,19 @@ describe("createPageHelper", () => {
       disabled = false;
       readOnly = false;
       focused = false;
+      inheritedDisabled = false;
       readonly events: string[] = [];
       readonly observedExternalValues: boolean[] = [];
 
       focus(): void {
         this.focused = true;
+      }
+
+      /** Mirrors the browser's :disabled, which is also true inside <fieldset disabled>. */
+      matches(selector: string): boolean {
+        return (
+          selector === ":disabled" && (this.disabled || this.inheritedDisabled)
+        );
       }
 
       dispatchEvent(event: { type: string }): boolean {
@@ -724,12 +732,23 @@ describe("createPageHelper", () => {
         Object.assign(new Input(), { type: "file" }),
         Object.assign(new TextArea(), { readOnly: true }),
         Object.assign(new Input(), { disabled: true }),
+        Object.assign(new Input(), { inheritedDisabled: true }),
         { currentValue: "" } as Field,
       ];
       for (const element of unhandled) {
         expect(sentFunction()(element)).toBe(false);
         expect(element.currentValue).toBe("");
       }
+    });
+
+    it("leaves a field disabled only via an ancestor <fieldset disabled> to MCP fill", async () => {
+      callTool.mockResolvedValueOnce(EVAL_RESPONSE(false));
+      await fillRef(callTool, "5", "hello");
+
+      const element = Object.assign(new Input(), { inheritedDisabled: true });
+      expect(element.disabled).toBe(false);
+      expect(sentFunction()(element)).toBe(false);
+      expect(element.currentValue).toBe("");
     });
 
     it("falls back to MCP fill when the native path declines", async () => {
