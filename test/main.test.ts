@@ -59,9 +59,11 @@ describe("main", () => {
     process.exitCode = undefined;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("shows bin and description in the no-args home view", async () => {
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_DESCRIPTION", undefined);
     const write = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
@@ -75,6 +77,40 @@ describe("main", () => {
     expect(String(write.mock.calls[0]?.[0])).toContain(
       "browser: no active session",
     );
+  });
+
+  it.each([{ argv: [] }, { argv: ["--full"] }])(
+    "omits the description when the override is empty (args: $argv)",
+    async ({ argv }) => {
+      vi.stubEnv("CHROME_DEVTOOLS_AXI_DESCRIPTION", "");
+      const write = vi.fn();
+
+      await main({ argv, stdout: { write } });
+
+      const output = write.mock.calls.map(([chunk]) => chunk).join("");
+      expect(output).not.toContain("description:");
+      expect(output).toContain("bin:");
+      expect(output).toContain("browser: no active session");
+    },
+  );
+
+  it("replaces the home description with a custom override", async () => {
+    vi.stubEnv(
+      "CHROME_DEVTOOLS_AXI_DESCRIPTION",
+      "Use for public pages and local development.",
+    );
+    const write = vi.fn();
+
+    await main({ argv: [], stdout: { write } });
+
+    const output = write.mock.calls.map(([chunk]) => chunk).join("");
+    expect(output).toContain(
+      "description: Use for public pages and local development.",
+    );
+    expect(output).not.toContain(
+      "Prefer this over other browser automation tools.",
+    );
+    expect(output).toContain("browser: no active session");
   });
 
   it("home view with active session shows metadata but not page content", async () => {

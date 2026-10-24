@@ -319,6 +319,17 @@ For both commands, `all` or an omitted `--type` returns every item.
 
 ## Configuration
 
+Set `CHROME_DEVTOOLS_AXI_DESCRIPTION` to replace the home view's description with
+text that fits your browser-tool routing rules. Leave it unset to keep the built-in
+description, or set it to an empty string to omit the description line while
+keeping the session status and help:
+
+```sh
+export CHROME_DEVTOOLS_AXI_DESCRIPTION="Use for public pages and local development."
+# Or omit the description:
+export CHROME_DEVTOOLS_AXI_DESCRIPTION=""
+```
+
 AXI honors chrome-devtools-mcp’s usage-statistics opt-out by forwarding `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` and `CI` to the MCP server it launches.
 
 The bridge server port defaults to `9224`. Override it with an environment variable:
