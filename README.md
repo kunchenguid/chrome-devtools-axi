@@ -267,9 +267,10 @@ For large request or response bodies, prefer `network-get <id> --response-file <
 | `update`         | Upgrade the installed CLI to the latest npm version    |
 | `update --check` | Report current vs latest version without installing it |
 
-Running with no command shows the CLI home view. It prepends `bin` and
-`description` metadata, then includes the current snapshot when a browser
-session is active or the no-session status/help block when one is not.
+Running with no command shows the CLI home view. By default, it prepends `bin`
+and `description` metadata (see [Configuration](#configuration) to customize the
+description), then includes the current snapshot when a browser session is active
+or the no-session status/help block when one is not.
 
 ### Flags
 
