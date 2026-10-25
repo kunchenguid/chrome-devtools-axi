@@ -267,9 +267,10 @@ For large request or response bodies, prefer `network-get <id> --response-file <
 | `update`         | Upgrade the installed CLI to the latest npm version    |
 | `update --check` | Report current vs latest version without installing it |
 
-Running with no command shows the CLI home view. It prepends `bin` and
-`description` metadata, then includes the current snapshot when a browser
-session is active or the no-session status/help block when one is not.
+Running with no command shows the CLI home view. By default, it prepends `bin`
+and `description` metadata (see [Configuration](#configuration) to customize the
+description), then includes the current snapshot when a browser session is active
+or the no-session status/help block when one is not.
 
 ### Flags
 
@@ -318,6 +319,17 @@ Relative file paths for `upload` also resolve against the directory where you in
 For both commands, `all` or an omitted `--type` returns every item.
 
 ## Configuration
+
+Set `CHROME_DEVTOOLS_AXI_DESCRIPTION` to replace the home view's description with
+text that fits your browser-tool routing rules. Leave it unset to keep the built-in
+description, or set it to an empty string to omit the description line while
+keeping the session status and help:
+
+```sh
+export CHROME_DEVTOOLS_AXI_DESCRIPTION="Use for public pages and local development."
+# Or omit the description:
+export CHROME_DEVTOOLS_AXI_DESCRIPTION=""
+```
 
 AXI honors chrome-devtools-mcp’s usage-statistics opt-out by forwarding `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS` and `CI` to the MCP server it launches.
 

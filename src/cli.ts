@@ -63,6 +63,8 @@ flags[2]:
   --help, -v/-V/--version
 
 environment:
+  CHROME_DEVTOOLS_AXI_DESCRIPTION   Override the home description (default: built-in description).
+                                    Set to an empty string to omit the description line.
   CHROME_DEVTOOLS_AXI_AUTO_CONNECT  Set to 1 to connect to the user's running Chrome (144+)
                                     via chrome://inspect/#remote-debugging instead of launching
                                     a new browser. Requires remote debugging enabled in Chrome.
@@ -909,8 +911,17 @@ function wrapsRawStdout(argv: string[] | undefined): boolean {
 function wrapStdout(
   stdout: CliStdout | undefined,
   argv: string[] | undefined,
+  omitHomeDescription = false,
 ): CliStdout | undefined {
   const target = stdout ?? process.stdout;
+  if (omitHomeDescription) {
+    return {
+      write(chunk: string) {
+        // axi-sdk-js always emits a description field, even for an empty string.
+        return target.write(chunk.replace(/^description: ""\n/m, ""));
+      },
+    };
+  }
   if (!wrapsRawStdout(argv)) {
     return stdout;
   }
@@ -1854,12 +1865,18 @@ export async function main(
   const requestedArgv = resolveArgv(normalized.argv);
   const homeFull = shouldRenderFullHome(requestedArgv);
   const argv = homeFull ? [] : normalized.argv;
-  const stdout = wrapStdout(normalized.stdout, argv);
+  const description =
+    process.env.CHROME_DEVTOOLS_AXI_DESCRIPTION ?? HOME_DESCRIPTION;
+  const stdout = wrapStdout(
+    normalized.stdout,
+    argv,
+    description === "" && (homeFull || requestedArgv.length === 0),
+  );
 
   await runAxiCli({
     ...(argv ? { argv } : {}),
     ...(stdout ? { stdout } : {}),
-    description: HOME_DESCRIPTION,
+    description,
     version: VERSION,
     topLevelHelp: TOP_HELP,
     home: async (args) => handleHome(homeFull || splitFullFlag(args).full),
