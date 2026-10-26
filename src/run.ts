@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CdpError } from "./client.js";
+import { openUrl } from "./navigation.js";
 import { captureFreshSnapshot, parseUidFresh } from "./uid-freshness.js";
 
 type CallTool = (
@@ -125,15 +126,6 @@ function stripSnapshotHeader(text: string): string {
   return text.replace(/^[\s\S]*?##\s+Latest page snapshot\s*\n/, "");
 }
 
-/** Check if an open error is recoverable by falling back to new_page. */
-function isRecoverableOpenError(error: unknown): boolean {
-  if (!(error instanceof CdpError)) return false;
-  if (error.code !== "BROWSER_ERROR") return false;
-  return /not connected|session (?:closed|not found)|no page/i.test(
-    error.message,
-  );
-}
-
 // --- Selector detection ---
 
 const UID_RE = /^@?(?:\d[\d_]*|g\d+:.+)$/;
@@ -211,12 +203,7 @@ export function createPageHelper(callTool: CallTool): PageHelper {
           'Start with `await page.open("https://example.com")`',
         ]);
       }
-      try {
-        await callTool("navigate_page", { type: "url", url });
-      } catch (error) {
-        if (!isRecoverableOpenError(error)) throw error;
-        await callTool("new_page", { url });
-      }
+      await openUrl(callTool, url);
       const info = await evalJs(
         `() => ({ url: location.href, status: performance.getEntriesByType('navigation').pop()?.responseStatus ?? null })`,
       );

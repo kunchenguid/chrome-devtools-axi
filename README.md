@@ -219,6 +219,8 @@ chrome-devtools-axi newpage https://example.com --no-snapshot
 chrome-devtools-axi selectpage 1 --no-snapshot
 ```
 
+If the page does not load (a navigation timeout or an unreachable host, for example), `open` and `newpage` exit with an error naming the reason. The tab they navigated stays selected, so `snapshot` shows what loaded, and a retried `open` navigates that tab again instead of opening another one.
+
 `resize` reads the page's viewport back and fails, naming the actual size, when it did not reach the requested size (an emulated viewport, page zoom or the window's minimum size can hold it); use `emulate --viewport` then.
 
 Page-scoped tools require a selected page. `pages` only lists tabs and never changes the selection. `selectpage` sets it. `newpage` (and `open` when it has to create a tab) selects the tab chrome-devtools-mcp reports as selected in its own listing, which is the tab it just created, even when that URL is already open in another tab or changed while loading; a title continuation, no marked row, more than one `[selected]` line anywhere in the listing, a repeated `## Pages` section or page id, or chrome-devtools-mcp's note that it moved its selection off a closed tab leaves the selection unset, and the next page-scoped command fails until `selectpage`. The selected column in `pages` is AXI's selection, not the MCP `[selected]` marker. Closing the selected tab clears it. There is no automatic retarget onto another tab.

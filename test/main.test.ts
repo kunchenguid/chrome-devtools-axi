@@ -431,13 +431,15 @@ describe("main", () => {
       .mockRejectedValueOnce(new CdpError("Not connected", "BROWSER_ERROR"))
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
 
     await main(["open", "https://airlockhq.com"]);
 
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
-      ["new_page", { url: "https://airlockhq.com" }],
+      ["new_page", { url: "about:blank" }],
+      ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
@@ -449,6 +451,27 @@ describe("main", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("fails open when chrome-devtools-mcp reports the navigation did not complete", async () => {
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce(
+      "Unable to navigate in the selected page: Navigation timeout of 10000 ms exceeded.\n## Pages\n1: Slow (http://127.0.0.1:8765/slow) [selected]",
+    );
+
+    await main(["open", "http://127.0.0.1:8765/slow"]);
+
+    expect(callTool.mock.calls).toEqual([
+      ["navigate_page", { type: "url", url: "http://127.0.0.1:8765/slow" }],
+    ]);
+    expect(process.exitCode).toBe(1);
+    expect(decode(String(write.mock.calls[0]?.[0]))).toMatchObject({
+      error:
+        "Navigation to http://127.0.0.1:8765/slow failed: Navigation timeout of 10000 ms exceeded",
+      code: "TIMEOUT",
+    });
+  });
+
   it("recovers open by creating a page when a browser reconnect dropped the selection", async () => {
     const write = vi
       .spyOn(process.stdout, "write")
@@ -458,13 +481,15 @@ describe("main", () => {
       .mockRejectedValueOnce(await reconnectClearedError())
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
 
     await main(["open", "https://airlockhq.com"]);
 
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
-      ["new_page", { url: "https://airlockhq.com" }],
+      ["new_page", { url: "about:blank" }],
+      ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
@@ -945,8 +970,12 @@ describe("navigation snapshot output", () => {
       if (url) {
         expect(output).toContain(`url: "${url}"`);
         expect(callTool).toHaveBeenCalledWith("new_page", {
-          url,
+          url: "about:blank",
           ...(background ? { background: true } : {}),
+        });
+        expect(callTool).toHaveBeenCalledWith("navigate_page", {
+          type: "url",
+          url,
         });
       } else {
         expect(output).not.toContain("url:");

@@ -140,6 +140,7 @@ describe("createPageHelper", () => {
     callTool
       .mockRejectedValueOnce(new CdpError("not connected", "BROWSER_ERROR"))
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce(OPEN_INFO_RESPONSE);
 
     const page = createPageHelper(callTool);
@@ -150,8 +151,14 @@ describe("createPageHelper", () => {
       url: "https://example.com",
     });
     expect(callTool).toHaveBeenCalledWith("new_page", {
-      url: "https://example.com",
+      url: "about:blank",
     });
+    expect(callTool.mock.calls.map(([tool]) => tool)).toEqual([
+      "navigate_page",
+      "new_page",
+      "navigate_page",
+      "evaluate_script",
+    ]);
     expect(result).toEqual({ url: "https://example.com", status: 200 });
   });
 
@@ -159,14 +166,21 @@ describe("createPageHelper", () => {
     callTool
       .mockRejectedValueOnce(await reconnectClearedError())
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce(OPEN_INFO_RESPONSE);
 
     const page = createPageHelper(callTool);
     const result = await page.open("https://example.com");
 
     expect(callTool).toHaveBeenCalledWith("new_page", {
-      url: "https://example.com",
+      url: "about:blank",
     });
+    expect(callTool.mock.calls.map(([tool]) => tool)).toEqual([
+      "navigate_page",
+      "new_page",
+      "navigate_page",
+      "evaluate_script",
+    ]);
     expect(result).toEqual({ url: "https://example.com", status: 200 });
   });
 
@@ -751,6 +765,7 @@ describe("page.open fallback", () => {
     callTool
       .mockRejectedValueOnce(new CdpError("session closed", "BROWSER_ERROR"))
       .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("")
       .mockResolvedValueOnce(
         'Script ran on page and returned:\n```json\n{"url":"https://test.com","status":200}\n```',
       );
@@ -759,8 +774,14 @@ describe("page.open fallback", () => {
     await page.open("https://test.com");
 
     expect(callTool).toHaveBeenCalledWith("new_page", {
-      url: "https://test.com",
+      url: "about:blank",
     });
+    expect(callTool.mock.calls.map(([tool]) => tool)).toEqual([
+      "navigate_page",
+      "new_page",
+      "navigate_page",
+      "evaluate_script",
+    ]);
   });
 
   it("does not fall back on non-recoverable errors", async () => {
