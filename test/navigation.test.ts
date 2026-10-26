@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openInNewPage, openUrl } from "../src/navigation.js";
@@ -8,6 +8,24 @@ import {
   setSelectedPageId,
 } from "../src/selected-page.js";
 import { resolveSessionStateDir } from "../src/sessions.js";
+
+const fsControl = vi.hoisted(() => ({ unwritableFile: "" }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
+      if (args[0] === fsControl.unwritableFile) {
+        throw Object.assign(
+          new Error("EACCES: permission denied, open 'selected-page-id'"),
+          { code: "EACCES" },
+        );
+      }
+      return actual.writeFileSync(...args);
+    },
+  };
+});
 
 const url = "http://127.0.0.1:9/timeout?message=timed%20out";
 
@@ -53,13 +71,13 @@ describe("newpage when selection persistence fails", () => {
     selectionFile = join(resolveSessionStateDir(), "selected-page-id");
   });
   afterEach(() => {
-    chmodSync(selectionFile, 0o600);
+    fsControl.unwritableFile = "";
     vi.unstubAllEnvs();
     rmSync(testHome, { recursive: true, force: true });
   });
 
   it("fails before navigating the old tab when its selection file is unwritable", async () => {
-    chmodSync(selectionFile, 0o400);
+    fsControl.unwritableFile = selectionFile;
     const createdPage = "## Pages\n1: about:blank\n2: about:blank [selected]";
     const callTool = vi.fn(async (name: string, args = {}) => {
       rememberToolRouting(name, args, createdPage);
