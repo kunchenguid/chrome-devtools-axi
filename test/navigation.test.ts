@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CdpError } from "../src/client.js";
@@ -26,7 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   chmodSync(selectionFile, 0o600);
   vi.unstubAllEnvs();
-  execFileSync("trash", [testHome]);
+  rmSync(testHome, { recursive: true, force: true });
 });
 
 describe.each([

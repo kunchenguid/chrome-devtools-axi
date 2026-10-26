@@ -441,7 +441,10 @@ describe("main", () => {
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "about:blank" }],
-      ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
+      [
+        "navigate_page",
+        { type: "url", url: "https://airlockhq.com", pageId: 1 },
+      ],
       ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
@@ -510,7 +513,10 @@ describe("main", () => {
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
       ["new_page", { url: "about:blank" }],
-      ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
+      [
+        "navigate_page",
+        { type: "url", url: "https://airlockhq.com", pageId: 1 },
+      ],
       ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
@@ -1001,6 +1007,7 @@ describe("navigation snapshot output", () => {
         expect(callTool).toHaveBeenCalledWith("navigate_page", {
           type: "url",
           url,
+          pageId: 1,
         });
       } else {
         expect(output).not.toContain("url:");

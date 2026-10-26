@@ -43,16 +43,6 @@ function navigationError(url: string, reason: string): CdpError {
   );
 }
 
-/** Navigate the session's selected page, failing loud if the load fails. */
-async function navigateSelectedPage(
-  callTool: CallTool,
-  url: string,
-): Promise<void> {
-  const result = await callTool("navigate_page", { type: "url", url });
-  const reason = navigationFailureReason(result);
-  if (reason !== null) throw navigationError(url, reason);
-}
-
 /**
  * Create a tab and navigate it to `url`. The tab is selected for this
  * session before the navigation starts, so even if the load fails, the
@@ -73,7 +63,13 @@ export async function openInNewPage(
       "BROWSER_ERROR",
     );
   }
-  await navigateSelectedPage(callTool, url);
+  const navigationResult = await callTool("navigate_page", {
+    type: "url",
+    url,
+    pageId: createdId,
+  });
+  const reason = navigationFailureReason(navigationResult);
+  if (reason !== null) throw navigationError(url, reason);
 }
 
 /** Whether `open` should fall back from `navigate_page` to a new tab. */

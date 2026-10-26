@@ -1384,6 +1384,42 @@ describe("callTool pageId routing", () => {
     );
   });
 
+  it("keeps the created navigation target when another newpage finishes before dispatch", async () => {
+    const toolResults = {
+      new_page: "## Pages\n1: about:blank\n2: about:blank [selected]",
+    };
+    await withFakeBridge(
+      async (fake) => {
+        await openInNewPage(async (name, args) => {
+          if (name === "navigate_page") {
+            toolResults.new_page =
+              "## Pages\n1: about:blank\n2: about:blank\n3: about:blank [selected]";
+            await openInNewPage(callTool, "https://second.example/");
+          }
+          return callTool(name, args);
+        }, "https://first.example/");
+        expect(fake.calls).toEqual([
+          { name: "new_page", args: { url: "about:blank" } },
+          { name: "new_page", args: { url: "about:blank" } },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "https://second.example/", pageId: 3 },
+          },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "https://first.example/", pageId: 2 },
+          },
+        ]);
+        await callTool("take_snapshot");
+        expect(fake.calls.at(-1)).toEqual({
+          name: "take_snapshot",
+          args: { pageId: 3 },
+        });
+      },
+      { toolResults },
+    );
+  });
+
   it("routes to the tab newpage created even when its navigation fails", async () => {
     await withFakeBridge(
       async (fake) => {
