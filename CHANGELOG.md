@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.45](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.44...chrome-devtools-axi-v0.1.45) (2026-10-25)
+
+
+### Features
+
+* allow overriding or hiding the home description ([#187](https://github.com/kunchenguid/chrome-devtools-axi/issues/187)) ([0b94b40](https://github.com/kunchenguid/chrome-devtools-axi/commit/0b94b40679eb6774e028352288d3d96c947c7651))
+
 ## [0.1.44](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.43...chrome-devtools-axi-v0.1.44) (2026-10-16)
 
 
