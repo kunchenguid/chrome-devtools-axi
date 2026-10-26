@@ -3,6 +3,10 @@
  * navigation can fail. Subsequent calls then keep targeting the created tab.
  */
 import { CdpError } from "./client.js";
+import {
+  createdPageIdFromNewPageDump,
+  getSelectedPageId,
+} from "./selected-page.js";
 
 type CallTool = (
   name: string,
@@ -14,7 +18,7 @@ const RECONNECT_NOTE_PREFIX = "Note: the browser was restarted or reconnected";
 
 // MCP emits tool response lines before page-owned titles and dialog text.
 // Inspect only the first line, allowing its one-shot reconnect notice.
-export function navigationFailureReason(result: string): string | null {
+function navigationFailureReason(result: string): string | null {
   const lines = result.split(/\r?\n/);
   let first = lines[0] ?? "";
   if (first.startsWith(RECONNECT_NOTE_PREFIX)) first = lines[1] ?? "";
@@ -30,7 +34,9 @@ export function navigationFailureReason(result: string): string | null {
 function navigationError(url: string, reason: string): CdpError {
   return new CdpError(
     `Navigation to ${url} failed: ${reason}`,
-    /timeout|timed out/i.test(reason) ? "TIMEOUT" : "BROWSER_ERROR",
+    /timeout|timed out/i.test(reason.split(" at ", 1)[0])
+      ? "TIMEOUT"
+      : "BROWSER_ERROR",
     [
       "The tab stays selected; run `chrome-devtools-axi snapshot` to see what loaded",
     ],
@@ -59,7 +65,14 @@ export async function openInNewPage(
 ): Promise<void> {
   const args: Record<string, unknown> = { url: "about:blank" };
   if (opts.background) args.background = true;
-  await callTool("new_page", args);
+  const result = await callTool("new_page", args);
+  const createdId = createdPageIdFromNewPageDump(result);
+  if (createdId === null || getSelectedPageId() !== createdId) {
+    throw new CdpError(
+      "Could not persist selection of the created tab",
+      "BROWSER_ERROR",
+    );
+  }
   await navigateSelectedPage(callTool, url);
 }
 

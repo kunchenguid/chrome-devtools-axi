@@ -32,6 +32,7 @@ import {
   runScript,
 } from "../src/run.js";
 import * as generation from "../src/generation.js";
+import * as selectedPage from "../src/selected-page.js";
 
 /** Mock response for the evaluate_script call that page.open() makes to read url+status. */
 const OPEN_INFO_RESPONSE =
@@ -137,9 +138,10 @@ describe("createPageHelper", () => {
   });
 
   it("page.open calls navigate_page, falls back to new_page, returns { url, status }", async () => {
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(new CdpError("not connected", "BROWSER_ERROR"))
-      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce(OPEN_INFO_RESPONSE);
 
@@ -163,9 +165,10 @@ describe("createPageHelper", () => {
   });
 
   it("page.open falls back to new_page when a browser reconnect dropped the selection", async () => {
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(await reconnectClearedError())
-      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce(OPEN_INFO_RESPONSE);
 
@@ -762,9 +765,10 @@ describe("run command validation", () => {
 
 describe("page.open fallback", () => {
   it("falls back to new_page on session-closed error", async () => {
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(new CdpError("session closed", "BROWSER_ERROR"))
-      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce(
         'Script ran on page and returned:\n```json\n{"url":"https://test.com","status":200}\n```',

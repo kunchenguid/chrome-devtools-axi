@@ -37,6 +37,7 @@ import { main } from "../src/cli.js";
 import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
 import * as generation from "../src/generation.js";
 import { setSelectedPageId } from "../src/selected-page.js";
+import * as selectedPage from "../src/selected-page.js";
 
 /**
  * The reconnect-cleared error exactly as `src/client.ts` ships it, rebuilt on
@@ -427,9 +428,10 @@ describe("main", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(new CdpError("Not connected", "BROWSER_ERROR"))
-      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
@@ -495,9 +497,10 @@ describe("main", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(await reconnectClearedError())
-      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
@@ -903,9 +906,13 @@ describe("navigation snapshot output", () => {
   }
 
   function mockSnapshot(): void {
-    callTool.mockImplementation(async (tool: string) =>
-      tool === "take_snapshot" ? snapshot : "",
-    );
+    callTool.mockImplementation(async (tool: string) => {
+      if (tool === "new_page") {
+        setSelectedPageId(1);
+        return "## Pages\n1: about:blank [selected]";
+      }
+      return tool === "take_snapshot" ? snapshot : "";
+    });
   }
 
   it.each([
