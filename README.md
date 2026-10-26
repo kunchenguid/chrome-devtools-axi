@@ -219,7 +219,7 @@ chrome-devtools-axi newpage https://example.com --no-snapshot
 chrome-devtools-axi selectpage 1 --no-snapshot
 ```
 
-If the page does not load (a navigation timeout or an unreachable host, for example), `open` and `newpage` exit with an error naming the reason. The tab they navigated stays selected, so `snapshot` shows what loaded, and a retried `open` navigates that tab again instead of opening another one. Chrome’s `net::ERR_ABORTED` outcome (including downloads and HTTP 204 responses) keeps the normal successful return and snapshot of the current page.
+If the page does not load (a navigation timeout or an unreachable host, for example), `open` and `newpage` exit with an error naming the reason. In `run` scripts, `page.open()` rejects with the same error. The tab they navigated stays selected, so `snapshot` shows what loaded. Retrying `open` or `page.open()` navigates that tab again instead of opening another one. Chrome's `net::ERR_ABORTED` outcome (including downloads and HTTP 204 responses) keeps the normal successful return, with the CLI commands also taking a snapshot of the current page.
 
 `resize` reads the page's viewport back and fails, naming the actual size, when it did not reach the requested size (an emulated viewport, page zoom or the window's minimum size can hold it); use `emulate --viewport` then.
 
