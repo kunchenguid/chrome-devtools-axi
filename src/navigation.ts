@@ -1,22 +1,7 @@
 /**
- * URL navigation for `open`, `newpage`, and the `run` helper's `page.open`.
- *
- * chrome-devtools-mcp's `new_page` creates and selects the tab, then loads
- * the URL. If the load fails (a navigation timeout, for example), the tool
- * returns only an error. The tab stays open, but the `## Pages` dump that
- * `rememberToolRouting` reads its id from is never sent. The session then
- * keeps no selection (or the previous tab's), and each retried `open` leaves
- * one more unreachable tab behind. So a tab is created on `about:blank`,
- * which loads without waiting on the network, and its id is recorded from
- * that dump. Only then is it navigated with `navigate_page`, whose failure
- * cannot lose the routing.
- *
- * `navigate_page` does not fail as an MCP error. It catches the failed
- * `goto` and returns `Unable to navigate in the selected page: <reason>.`
- * as an ordinary response line. Passing that on as success would report a
- * timed-out or unreachable page as opened, so it becomes a `CdpError` here.
+ * Create new tabs on about:blank so MCP reports their ids before a network
+ * navigation can fail. Subsequent calls then keep targeting the created tab.
  */
-
 import { CdpError } from "./client.js";
 
 type CallTool = (
@@ -27,21 +12,19 @@ type CallTool = (
 const NAVIGATION_FAILED_PREFIX = "Unable to navigate in the selected page: ";
 const RECONNECT_NOTE_PREFIX = "Note: the browser was restarted or reconnected";
 
-/**
- * The reason chrome-devtools-mcp gave for a failed `navigate_page`, or null.
- *
- * Only the first response line is read, after at most one leading reconnect
- * note. chrome-devtools-mcp writes its own text lines ahead of the
- * page-derived blocks (`## Pages` titles, dialog text), so a page cannot
- * place a line there. The URL interpolated into the line comes from the
- * caller.
- */
+// MCP emits tool response lines before page-owned titles and dialog text.
+// Inspect only the first line, allowing its one-shot reconnect notice.
 export function navigationFailureReason(result: string): string | null {
   const lines = result.split(/\r?\n/);
   let first = lines[0] ?? "";
   if (first.startsWith(RECONNECT_NOTE_PREFIX)) first = lines[1] ?? "";
   if (!first.startsWith(NAVIGATION_FAILED_PREFIX)) return null;
-  return first.slice(NAVIGATION_FAILED_PREFIX.length).replace(/\.$/, "");
+  const reason = first
+    .slice(NAVIGATION_FAILED_PREFIX.length)
+    .replace(/\.$/, "");
+  // Downloads and HTTP 204 responses abort goto without a page-load failure.
+  // MCP cannot distinguish these from other cancellations; retain its result.
+  return reason.startsWith("net::ERR_ABORTED at ") ? null : reason;
 }
 
 function navigationError(url: string, reason: string): CdpError {

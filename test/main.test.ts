@@ -472,6 +472,24 @@ describe("main", () => {
     });
   });
 
+  it.each(["download", "no-content"])(
+    "keeps open successful when Chrome aborts navigation to %s",
+    async (path) => {
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const url = `http://127.0.0.1:8765/${path}`;
+      callTool
+        .mockResolvedValue("")
+        .mockResolvedValueOnce(
+          `Unable to navigate in the selected page: net::ERR_ABORTED at ${url}.\n## Pages\n1: Fast fixture (http://127.0.0.1:8765/fast) [selected]`,
+        )
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce('RootWebArea "Fast fixture"');
+      await main(["open", url]);
+      expect(process.exitCode).toBeUndefined();
+      expect(callTool).toHaveBeenCalledWith("take_snapshot");
+    },
+  );
+
   it("recovers open by creating a page when a browser reconnect dropped the selection", async () => {
     const write = vi
       .spyOn(process.stdout, "write")

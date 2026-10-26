@@ -1353,10 +1353,11 @@ describe("callTool pageId routing", () => {
             "http://127.0.0.1:8765/slow",
           ).catch((e: unknown) => e);
           expect(error).toBeInstanceOf(CdpError);
-          expect((error as CdpError).code).toBe("TIMEOUT");
-          expect((error as CdpError).message).toBe(
-            "Navigation to http://127.0.0.1:8765/slow failed: Navigation timeout of 10000 ms exceeded",
-          );
+          expect(error).toMatchObject({ code: "TIMEOUT" });
+          expect(error).toMatchObject({
+            message:
+              "Navigation to http://127.0.0.1:8765/slow failed: Navigation timeout of 10000 ms exceeded",
+          });
         }
         await callTool("take_snapshot");
         // One tab created; both attempts and the snapshot target it. The
@@ -1392,10 +1393,11 @@ describe("callTool pageId routing", () => {
           "http://127.0.0.1:9/unreachable",
           { background: true },
         ).catch((e: unknown) => e);
-        expect((error as CdpError).code).toBe("BROWSER_ERROR");
-        expect((error as CdpError).message).toBe(
-          "Navigation to http://127.0.0.1:9/unreachable failed: net::ERR_UNSAFE_PORT at http://127.0.0.1:9/unreachable",
-        );
+        expect(error).toMatchObject({ code: "BROWSER_ERROR" });
+        expect(error).toMatchObject({
+          message:
+            "Navigation to http://127.0.0.1:9/unreachable failed: net::ERR_UNSAFE_PORT at http://127.0.0.1:9/unreachable",
+        });
         await callTool("take_snapshot");
         expect(fake.calls).toEqual([
           { name: "select_page", args: { pageId: 1 } },
