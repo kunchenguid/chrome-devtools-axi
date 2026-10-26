@@ -52,9 +52,8 @@ export function setSelectedPageId(pageId: number): void {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, String(pageId));
   } catch {
-    // Best-effort: a write failure still leaves this invocation with no
-    // persisted id. The next process re-reads disk and fails loud rather
-    // than guessing a page from `list_pages`.
+    // Best-effort: a failed write can leave a prior id on disk. Callers
+    // requiring a newly persisted selection must verify it before proceeding.
   }
 }
 
