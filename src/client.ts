@@ -173,6 +173,9 @@ function httpPost(
  * Probe the bridge's `/health` endpoint. With `deep: true`, asks the bridge
  * to drive one CDP-backed MCP call (`list_pages`) so callers can distinguish
  * "MCP server is up but the attached browser is gone" from genuine readiness.
+ * While a tool call is pending, the bridge checks the MCP connection and
+ * reports busy instead. Only an explicitly matching session may reuse it;
+ * target verification resumes on the next idle deep probe.
  *
  * With `expectedSession`, a bridge that reports a *different* session name is
  * treated as unhealthy, so a session never silently reuses another session's
@@ -202,6 +205,15 @@ export async function checkBridgeHealth(
     const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
     const resp = await httpGet(port, path, timeoutMs, ambientHeaders(opts));
     const data = JSON.parse(resp);
+    // A pending tool owns the MCP queue, so another target probe cannot finish
+    // independently. Reuse only an explicitly matching session; the bridge
+    // still checks the MCP connection and resumes target probes when idle.
+    if (opts.deep && data.status === "busy") {
+      return (
+        opts.expectedSession !== undefined &&
+        data.session === opts.expectedSession
+      );
+    }
     if (data.status !== "ok") return false;
     if (
       opts.expectedSession !== undefined &&

@@ -7,6 +7,7 @@
  *   GET  /tools                 → [{ name, description }]
  *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
  *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason,
+ *                                 200 reports status: "busy" while a tool call is pending,
  *                                 200 adds pageIdentityChanged when the probe consumed
  *                                 chrome-devtools-mcp's one-shot reconnect marker *and*
  *                                 that dropped a persisted page selection
@@ -122,6 +123,10 @@ export interface BridgeClient {
 export interface RootsAwareClient extends BridgeClient {
   applyRoots(dirs: string[]): Promise<void>;
 }
+
+// Count queued as well as executing calls, including roots negotiation. A deep
+// probe uses the same MCP queue and cannot establish target health while busy.
+const pendingToolCalls = new WeakMap<BridgeClient, number>();
 
 export async function isBridgeClientConnected(
   client: BridgeClient,
@@ -480,13 +485,19 @@ async function handleCallRequest(
 ): Promise<void> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
-  const result = await client.callTool(
-    {
-      name: payload.name,
-      arguments: payload.args,
-    },
-    payload.roots,
-  );
+  pendingToolCalls.set(client, (pendingToolCalls.get(client) ?? 0) + 1);
+  let result: unknown;
+  try {
+    result = await client.callTool(
+      {
+        name: payload.name,
+        arguments: payload.args,
+      },
+      payload.roots,
+    );
+  } finally {
+    pendingToolCalls.set(client, (pendingToolCalls.get(client) ?? 1) - 1);
+  }
   const text = extractToolText(getToolContent(result));
   const pageIdentityChanged = didMcpPageIdentityChange(result, text);
   if (pageIdentityChanged) onPageIdentityChanged?.();
@@ -554,6 +565,14 @@ export async function handleBridgeRequest(
       const deep = req.url.includes("deep=1");
       let droppedSelection = false;
       if (deep) {
+        if ((pendingToolCalls.get(client) ?? 0) > 0) {
+          // listTools above still verifies the MCP connection. Do not queue an
+          // exclusive list_pages behind a legitimate wait and mistake the
+          // client's health deadline for a dead browser. The next idle probe
+          // must verify the target normally; busy is not a cached health result.
+          writeJson(res, 200, { status: "busy", session: sessionName });
+          return;
+        }
         const probe = await isBridgeTargetReachable(client);
         if (!probe.ok) {
           writeJson(res, 503, {
