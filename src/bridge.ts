@@ -6,7 +6,7 @@
  *   POST /call  { name, args }  → { result }
  *   GET  /tools                 → [{ name, description }]
  *   GET  /health                → { status: "ok", session } or 503 { status: "error", error }
- *   GET  /health?deep=1         → also verifies the attached CDP target; 503 may include reason,
+ *   GET  /health?deep=1         → verifies the CDP target when idle; 503 may include reason,
  *                                 200 reports status: "busy" while a tool call is pending,
  *                                 200 adds pageIdentityChanged when the probe consumed
  *                                 chrome-devtools-mcp's one-shot reconnect marker *and*
@@ -148,12 +148,8 @@ export async function isBridgeClientConnected(
  * the underlying Chrome/Electron target.
  *
  * It also reports chrome-devtools-mcp's one-shot reconnect marker (see
- * {@link didMcpPageIdentityChange}) rather than only its own reachability:
- * `ensureBridge` deep-probes before every command, so after an in-process
- * browser reconnect this `list_pages` is the first call to see the marker and
- * consumes it, leaving none for the `/call` that follows. `handleBridgeRequest`
- * relays that to the CLI, which otherwise has no way to tell a selection the
- * reconnect just dropped from one that was never made.
+ * {@link didMcpPageIdentityChange}); see `PageIdentityNotice` in `src/client.ts`
+ * for why `handleBridgeRequest` must relay a probe's selection loss to the CLI.
  */
 export async function isBridgeTargetReachable(
   client: BridgeClient,

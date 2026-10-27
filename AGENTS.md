@@ -7,7 +7,7 @@ chrome-devtools-axi is an agent-ergonomic CLI wrapper around [chrome-devtools-mc
 ## Invariants
 
 - Node 20+, TypeScript, ESM-only (`"type": "module"`, module resolution `Node16`). Relative imports use `.js` extensions even from `.ts` files.
-- `ensureBridge` (`src/client.ts`) reuses a bridge only after `/health?deep=1`. A dead browser is terminated and respawned, never reused as a stale endpoint.
+- `ensureBridge` (`src/client.ts`) reuses a bridge only after `/health?deep=1`; [README How It Works](README.md#how-it-works) owns the reuse and recovery policy.
 - Launch modes (`--isolated` / `--userDataDir`) pass `KEYCHAIN_ISOLATION_CHROME_ARGS`; attach modes omit them. `test/keychain-isolation.test.ts` owns that split.
 - `resolveSessionName` (`src/sessions.ts`) rejects path-traversal, unsafe, and all-dot names. A session isolates only the bridge. Two sessions forced onto one port fail loudly (`BRIDGE_PORT_IN_USE_EXIT_CODE`, 48); do not export `CHROME_DEVTOOLS_AXI_PORT` globally across sessions.
 - Page identity is never self-healed. `callTool` injects the last AXI `select_page` id (`src/selected-page.ts`); `list_pages` never sets it. Missing selection fails with "No page is currently selected". After a reconnect, `open` creates a new tab.
