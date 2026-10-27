@@ -3,6 +3,7 @@ import {
   formatStopOutput,
   formatScreenshotOutput,
   getCommandHelp,
+  TOP_HELP,
   parseConsoleArgs,
   parseNetworkArgs,
   parseScreenshotArgs,
@@ -43,6 +44,7 @@ describe("getCommandHelp", () => {
       "press",
       "scroll",
       "back",
+      "reload",
     ]) {
       expect(getCommandHelp(cmd)).toContain("--full");
     }
@@ -54,7 +56,7 @@ describe("getCommandHelp", () => {
     expect(getCommandHelp("stop")).not.toContain("--full");
   });
 
-  it("has help for all 13 commands", () => {
+  it("has help for core commands", () => {
     const commands = [
       "open",
       "snapshot",
@@ -65,6 +67,7 @@ describe("getCommandHelp", () => {
       "press",
       "scroll",
       "back",
+      "reload",
       "wait",
       "eval",
       "start",
@@ -73,6 +76,22 @@ describe("getCommandHelp", () => {
     for (const cmd of commands) {
       expect(getCommandHelp(cmd)).not.toBeNull();
     }
+  });
+
+  it("press help explains browser shortcut limitations and refresh alternatives", () => {
+    const help = getCommandHelp("press");
+    expect(help).toContain("Input.dispatchKeyEvent");
+    for (const shortcut of ["Meta+R", "Ctrl+R", "Meta+L"]) {
+      expect(help).toContain(shortcut);
+    }
+    expect(help).toContain("not delivered as");
+    expect(help).toContain("chrome-devtools-axi reload");
+    expect(help).toContain("eval '() => location.reload()'");
+  });
+
+  it("reload is discoverable in top-level and command help", () => {
+    expect(TOP_HELP).toContain("back, reload, wait");
+    expect(getCommandHelp("reload")).toContain("Reload the selected page");
   });
 
   it("screenshot help includes flags", () => {

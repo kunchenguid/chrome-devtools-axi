@@ -49,9 +49,9 @@ export type MainOptions = {
 };
 
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
-commands[35]:
+commands[36]:
   open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
-  type <text>, press <key>, scroll <dir>, back, wait <ms|text>, eval <js>,
+  type <text>, press <key>, scroll <dir>, back, reload, wait <ms|text>, eval <js>,
   run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
@@ -224,7 +224,10 @@ examples:
   chrome-devtools-axi type "search query" --full`,
 
   press: `usage: chrome-devtools-axi press <key> [--full]
-Press a keyboard key.
+Press a keyboard key in the page via CDP Input.dispatchKeyEvent.
+Browser shortcuts such as Meta+R, Ctrl+R, and Meta+L are not delivered as
+browser commands. Use \`chrome-devtools-axi reload\` to refresh the page,
+or \`chrome-devtools-axi eval '() => location.reload()'\`.
 
 args:
   <key>  Key name, e.g. Enter, Tab, Escape, ArrowDown (required)
@@ -258,6 +261,16 @@ flags:
 examples:
   chrome-devtools-axi back
   chrome-devtools-axi back --full`,
+
+  reload: `usage: chrome-devtools-axi reload [--full]
+Reload the selected page and snapshot.
+
+flags:
+  --full  Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi reload
+  chrome-devtools-axi reload --full`,
 
   wait: `usage: chrome-devtools-axi wait <ms|text>
 Wait for a duration or for text to appear on the page.
@@ -1212,6 +1225,12 @@ async function handleBack(full: boolean): Promise<string> {
   return formatPageOutput(snapshot, "back", undefined, full);
 }
 
+async function handleReload(full: boolean): Promise<string> {
+  await callTool("navigate_page", { type: "reload" });
+  const snapshot = await stampFresh();
+  return formatPageOutput(snapshot, "reload", undefined, full);
+}
+
 async function handleWait(args: string[]): Promise<string> {
   const target = args[0];
   if (!target) {
@@ -1741,6 +1760,7 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
   press: withFullFlag(handlePress),
   scroll: withFullFlag(handleScroll),
   back: async (args) => handleBack(splitFullFlag(args).full),
+  reload: async (args) => handleReload(splitFullFlag(args).full),
   wait: withoutFullFlag(handleWait),
   eval: withFullFlag(handleEval),
   run: async () => handleRun(),
@@ -1779,6 +1799,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   press: ["--full"],
   scroll: ["--full"],
   back: ["--full"],
+  reload: ["--full"],
   wait: [],
   eval: ["--full"],
   run: [],

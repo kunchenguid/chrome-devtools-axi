@@ -170,6 +170,7 @@ In URL-only shared mode, the bridge uses Streamable HTTP directly instead:
 | `screenshot <p>`  | Save a screenshot to a file                  |
 | `scroll <dir>`    | Scroll: up, down, top, bottom                |
 | `back`            | Navigate back                                |
+| `reload`          | Reload the selected page and snapshot        |
 | `wait <ms\|text>` | Wait for time or text to appear              |
 | `eval <js>`       | Evaluate a JavaScript expression or function |
 | `run`             | Execute a multi-step script from stdin       |
@@ -194,6 +195,13 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | `fillform @<uid>=<val>...` | Fill multiple form fields      |
 | `dialog <accept\|dismiss>` | Handle a browser dialog        |
 | `upload @<uid> <path>`     | Upload a file through an input |
+
+`press` delivers keys to the page via CDP `Input.dispatchKeyEvent`, not as
+browser commands. Browser shortcuts such as `Meta+R`, `Ctrl+R`, and `Meta+L`
+do not trigger browser actions. To refresh the selected page, use
+`chrome-devtools-axi reload` (or `chrome-devtools-axi eval '() => location.reload()'`).
+Like other snapshot-producing commands, `reload` accepts `--full` for an
+untruncated snapshot.
 
 ### Page Management
 

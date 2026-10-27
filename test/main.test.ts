@@ -422,6 +422,77 @@ describe("main", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it.each([false, true])(
+    "reload snapshots the selected page (full: %s)",
+    async (full) => {
+      const write = vi.fn();
+      vi.spyOn(generation, "bumpGeneration").mockReturnValue(8);
+      const snapshot =
+        'RootWebArea "Reloaded"\n  uid=1 heading "Fresh state"\n' +
+        '  StaticText "content"\n'.repeat(1000) +
+        '  StaticText "snapshot end"';
+      callTool
+        .mockResolvedValueOnce("Reloaded the page")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce(snapshot)
+        .mockResolvedValueOnce("");
+
+      await main({
+        argv: ["reload", ...(full ? ["--full"] : [])],
+        stdout: { write },
+      });
+
+      expect(callTool.mock.calls).toEqual([
+        ["navigate_page", { type: "reload" }],
+        ["evaluate_script", expect.any(Object)],
+        ["take_snapshot"],
+        ["evaluate_script", expect.any(Object)],
+      ]);
+      const output = write.mock.calls.map(([chunk]) => chunk).join("");
+      expect(output).toContain("title: Reloaded");
+      expect(output).toContain("snapshot:");
+      expect(output).toContain('uid=g8:1 heading "Fresh state"');
+      if (full) {
+        expect(output).toContain("snapshot end");
+        expect(output).not.toContain("(truncated,");
+      } else {
+        expect(output).not.toContain("snapshot end");
+        expect(output).toContain("(truncated,");
+        expect(output).toContain("chrome-devtools-axi reload --full");
+      }
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
+
+  it("reload surfaces navigation failures without taking a snapshot", async () => {
+    const write = vi.fn();
+    callTool.mockRejectedValueOnce(
+      new CdpError("No page is currently selected", "BROWSER_ERROR"),
+    );
+
+    await main({ argv: ["reload"], stdout: { write } });
+
+    expect(callTool.mock.calls).toEqual([
+      ["navigate_page", { type: "reload" }],
+    ]);
+    expect(write.mock.calls.map(([chunk]) => chunk).join("")).toContain(
+      "No page is currently selected",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("reload rejects unknown flags before calling MCP", async () => {
+    const write = vi.fn();
+
+    await main({ argv: ["reload", "--unknown"], stdout: { write } });
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(write.mock.calls.map(([chunk]) => chunk).join("")).toContain(
+      "Unknown flag --unknown",
+    );
+    expect(process.exitCode).toBe(2);
+  });
+
   it("recovers open by creating a page when the browser is not yet connected", async () => {
     const write = vi
       .spyOn(process.stdout, "write")
