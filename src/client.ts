@@ -173,15 +173,19 @@ function httpPost(
  * Probe the bridge's `/health` endpoint. With `deep: true`, asks the bridge
  * to drive one CDP-backed MCP call (`list_pages`) so callers can distinguish
  * "MCP server is up but the attached browser is gone" from genuine readiness.
+ * While a tool call is pending, the bridge checks the MCP connection and
+ * reports busy instead. Only an explicitly matching session may reuse it;
+ * target verification resumes on the next idle deep probe.
  *
  * With `expectedSession`, a bridge that reports a *different* session name is
  * treated as unhealthy, so a session never silently reuses another session's
  * bridge after a port collision (two sessions pinned to one port via a global
  * `CHROME_DEVTOOLS_AXI_PORT`). A bridge that omits the field (older version) is
- * accepted, since there is no mismatch to detect.
+ * accepted only for status `ok`, since there is no mismatch to detect.
  *
- * With `notice`, a healthy *deep* probe writes the bridge's `pageIdentityChanged`
- * flag into that caller-owned holder (see {@link PageIdentityNotice}).
+ * With `notice`, a *deep* probe returning status `ok` writes the bridge's
+ * `pageIdentityChanged` flag into that caller-owned holder (see
+ * {@link PageIdentityNotice}); a busy response leaves it unchanged.
  *
  * With `ambient`, the probe is marked as observation only, so it does not
  * renew an opted-in idle timeout (see {@link AMBIENT_REQUEST_HEADER}).
@@ -202,6 +206,12 @@ export async function checkBridgeHealth(
     const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
     const resp = await httpGet(port, path, timeoutMs, ambientHeaders(opts));
     const data = JSON.parse(resp);
+    if (opts.deep && data.status === "busy") {
+      return (
+        opts.expectedSession !== undefined &&
+        data.session === opts.expectedSession
+      );
+    }
     if (data.status !== "ok") return false;
     if (
       opts.expectedSession !== undefined &&
@@ -226,10 +236,10 @@ export async function checkBridgeHealth(
  * on the clear having removed an id, so a session that never selected a page is
  * never told it lost one.
  *
- * `ensureBridge` deep-probes before every command, and that probe's
- * `list_pages` is what consumes chrome-devtools-mcp's one-shot reconnect marker
- * and clears the persisted selection - so without this relay the command that
- * follows finds no selection and blames the caller for never selecting a page.
+ * An idle deep probe's `list_pages` can consume chrome-devtools-mcp's one-shot
+ * reconnect marker and clear the persisted selection before the command runs.
+ * Without this relay, the command that follows finds no selection and blames
+ * the caller for never selecting a page.
  *
  * The holder is created by the caller and threaded through, never module state:
  * a `run` script can have several `callTool`s in flight at once, and a shared
@@ -245,7 +255,7 @@ export async function checkBridgeHealth(
  * through here.
  */
 export interface PageIdentityNotice {
-  /** Written by the last deep probe of the owning `ensureBridge` call. */
+  /** Written by the last status `ok` deep probe of the owning `ensureBridge` call. */
   pageIdentityChanged: boolean;
 }
 
@@ -457,17 +467,13 @@ export function buildBridgeEarlyExitError(
 /**
  * Ensure the bridge is running, starting it if needed. Returns the port.
  *
- * Verifies a *deep* health check (one round-trip CDP-backed MCP call) before
- * declaring the bridge ready, so a bridge whose attached browser/Electron
- * target was killed while still answering local /health requests gets torn
- * down + restarted instead of being reused as a stale endpoint.
+ * Uses {@link checkBridgeHealth}'s deep-check reuse policy. A failed check
+ * triggers teardown and restart rather than reuse of a stale endpoint.
  *
  * `spawnBridge` is injectable for tests; production uses {@link spawnBridgeProcess}.
  *
- * `notice` is the caller's own {@link PageIdentityNotice} holder; every deep
- * probe this call makes writes its `pageIdentityChanged` flag there, so the
- * reconnect attribution belongs to this invocation and cannot cross a
- * concurrent one.
+ * `notice` is the caller's own {@link PageIdentityNotice} holder, so reconnect
+ * attribution belongs to this invocation and cannot cross a concurrent one.
  */
 export async function ensureBridge(
   spawnBridge: (
@@ -480,8 +486,6 @@ export async function ensureBridge(
   const port = resolveSessionPort(sessionName);
   const pidFile = resolveSessionPidFile(sessionName);
 
-  // Check existing bridge via PID file. Use a deep probe so a bridge whose
-  // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
     if (
