@@ -23,6 +23,17 @@ export function resolveBridgeScript(importMetaDir: string): string {
 }
 
 /**
+ * The chrome-devtools-mcp release the default npx fallback runs, and the one
+ * every suggestion and help string names. It is the version this build was
+ * tested against: an unpinned `@latest` runs whatever was published last, so an
+ * engine release could break the wrapper (or run unreviewed code) overnight.
+ * Bump it deliberately, together with the tests; `test/engine-pin.test.ts`
+ * fails when a surface names a different spec.
+ */
+export const CHROME_DEVTOOLS_MCP_VERSION = "1.10.1";
+export const CHROME_DEVTOOLS_MCP_SPEC = `chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}`;
+
+/**
  * Distinct exit code the bridge uses for an EADDRINUSE bind failure. A generic
  * non-zero exit is ambiguous (npx/MCP launch failures exit non-zero too), so
  * `ensureBridge` keys on this sentinel to attribute an early death to a genuine

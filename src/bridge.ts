@@ -53,6 +53,7 @@ import { pathToFileURL } from "node:url";
 import {
   AMBIENT_REQUEST_HEADER,
   BRIDGE_PORT_IN_USE_EXIT_CODE,
+  CHROME_DEVTOOLS_MCP_SPEC,
   PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
 } from "./bridge-script.js";
@@ -685,7 +686,7 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
 ] as const;
 
 export function buildTransportArgs(): string[] {
-  const args = ["-y", "chrome-devtools-mcp@latest"];
+  const args = ["-y", CHROME_DEVTOOLS_MCP_SPEC];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -962,7 +963,7 @@ export function resolveTransportSpec(
   }
   const mcpPath = explicitPath || detectGlobalMcpPath(probe);
   if (mcpPath) {
-    // Strip the npx prefix `["-y", "chrome-devtools-mcp@latest"]` — direct
+    // Strip the npx prefix `["-y", CHROME_DEVTOOLS_MCP_SPEC]` — direct
     // node spawn doesn't need it.
     return {
       command: process.execPath,
