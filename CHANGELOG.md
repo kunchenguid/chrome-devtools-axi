@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.46](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.45...chrome-devtools-axi-v0.1.46) (2026-10-28)
+
+
+### Features
+
+* **cli:** add reload command and clarify browser shortcut limits ([#191](https://github.com/kunchenguid/chrome-devtools-axi/issues/191)) ([abfb414](https://github.com/kunchenguid/chrome-devtools-axi/commit/abfb41488808f904a899cdde4989fdc53c6266e2))
+
 ## [0.1.45](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.44...chrome-devtools-axi-v0.1.45) (2026-10-25)
 
 
