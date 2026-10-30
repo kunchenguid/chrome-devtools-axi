@@ -25,6 +25,7 @@ import {
 } from "./snapshot.js";
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
+import { openInNewPage, openUrl } from "./navigation.js";
 import { parsePagesList } from "./pages.js";
 import { overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
@@ -1078,14 +1079,6 @@ export async function parseUidFresh(
   return parseUidFreshShared(arg, caller);
 }
 
-function isRecoverableOpenError(error: unknown): error is CdpError {
-  if (!(error instanceof CdpError)) return false;
-  if (error.code !== "BROWSER_ERROR") return false;
-  return /not connected|session (?:closed|not found)|no page/i.test(
-    error.message,
-  );
-}
-
 async function callWithSnapshot(
   name: string,
   args: Record<string, unknown>,
@@ -1110,14 +1103,7 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  try {
-    await callTool("navigate_page", { type: "url", url });
-  } catch (error) {
-    if (!isRecoverableOpenError(error)) {
-      throw error;
-    }
-    await callTool("new_page", { url });
-  }
+  await openUrl(callTool, url);
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "open", url, full);
 }
@@ -1341,10 +1327,9 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
       "Run `chrome-devtools-axi newpage https://example.com` to open a new tab",
     ]);
   }
-  const background = args.includes("--background");
-  const toolArgs: Record<string, unknown> = { url };
-  if (background) toolArgs.background = true;
-  await callTool("new_page", toolArgs);
+  await openInNewPage(callTool, url, {
+    background: args.includes("--background"),
+  });
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "newpage", url, full, noSnapshot);
 }

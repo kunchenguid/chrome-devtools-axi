@@ -37,6 +37,7 @@ import {
   waitForProcessExit,
 } from "../src/client.js";
 import { resolveSessionPidFile } from "../src/sessions.js";
+import { openInNewPage, openUrl } from "../src/navigation.js";
 
 describe("CdpError", () => {
   it("uses the shared axi-sdk-js error contract", () => {
@@ -1332,6 +1333,132 @@ describe("callTool pageId routing", () => {
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });
     }
+  });
+
+  // chrome-devtools-mcp 1.11.0 text for a `goto` that hit its 10 s cap. The
+  // page row still shows the tab, now selected, on whatever it had loaded.
+  const NAVIGATION_TIMEOUT_RESULT = [
+    "Unable to navigate in the selected page: Navigation timeout of 10000 ms exceeded.",
+    "## Pages",
+    "1: about:blank",
+    "2: Slow (http://127.0.0.1:8765/slow) [selected]",
+  ].join("\n");
+
+  it("keeps a fresh session on the created tab when its navigation times out, and retries there", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const error = await openUrl(
+            callTool,
+            "http://127.0.0.1:8765/slow",
+          ).catch((e: unknown) => e);
+          expect(error).toBeInstanceOf(CdpError);
+          expect(error).toMatchObject({ code: "TIMEOUT" });
+          expect(error).toMatchObject({
+            message:
+              "Navigation to http://127.0.0.1:8765/slow failed: Navigation timeout of 10000 ms exceeded",
+          });
+        }
+        await callTool("take_snapshot");
+        // One tab created; both attempts and the snapshot target it. The
+        // first navigate_page never reaches the bridge: there is no selection.
+        expect(fake.calls).toEqual([
+          { name: "new_page", args: { url: "about:blank" } },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "http://127.0.0.1:8765/slow", pageId: 2 },
+          },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "http://127.0.0.1:8765/slow", pageId: 2 },
+          },
+          { name: "take_snapshot", args: { pageId: 2 } },
+        ]);
+      },
+      {
+        toolResults: {
+          new_page: "## Pages\n1: about:blank\n2: about:blank [selected]",
+          navigate_page: NAVIGATION_TIMEOUT_RESULT,
+        },
+      },
+    );
+  });
+
+  it("keeps the created navigation target when another newpage finishes before dispatch", async () => {
+    const toolResults = {
+      new_page: "## Pages\n1: about:blank\n2: about:blank [selected]",
+    };
+    await withFakeBridge(
+      async (fake) => {
+        await openInNewPage(async (name, args) => {
+          if (name === "navigate_page") {
+            toolResults.new_page =
+              "## Pages\n1: about:blank\n2: about:blank\n3: about:blank [selected]";
+            await openInNewPage(callTool, "https://second.example/");
+          }
+          return callTool(name, args);
+        }, "https://first.example/");
+        expect(fake.calls).toEqual([
+          { name: "new_page", args: { url: "about:blank" } },
+          { name: "new_page", args: { url: "about:blank" } },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "https://second.example/", pageId: 3 },
+          },
+          {
+            name: "navigate_page",
+            args: { type: "url", url: "https://first.example/", pageId: 2 },
+          },
+        ]);
+        await callTool("take_snapshot");
+        expect(fake.calls.at(-1)).toEqual({
+          name: "take_snapshot",
+          args: { pageId: 3 },
+        });
+      },
+      { toolResults },
+    );
+  });
+
+  it("routes to the tab newpage created even when its navigation fails", async () => {
+    await withFakeBridge(
+      async (fake) => {
+        await callTool("select_page", { pageId: 1 });
+        const error = await openInNewPage(
+          callTool,
+          "http://127.0.0.1:9/unreachable",
+          { background: true },
+        ).catch((e: unknown) => e);
+        expect(error).toMatchObject({ code: "BROWSER_ERROR" });
+        expect(error).toMatchObject({
+          message:
+            "Navigation to http://127.0.0.1:9/unreachable failed: net::ERR_UNSAFE_PORT at http://127.0.0.1:9/unreachable",
+        });
+        await callTool("take_snapshot");
+        expect(fake.calls).toEqual([
+          { name: "select_page", args: { pageId: 1 } },
+          { name: "new_page", args: { url: "about:blank", background: true } },
+          {
+            name: "navigate_page",
+            args: {
+              type: "url",
+              url: "http://127.0.0.1:9/unreachable",
+              pageId: 3,
+            },
+          },
+          // Not page 1: the snapshot shows the tab that was created.
+          { name: "take_snapshot", args: { pageId: 3 } },
+        ]);
+      },
+      {
+        toolResults: {
+          new_page:
+            "## Pages\n1: https://example.com/\n3: about:blank [selected]",
+          navigate_page:
+            "Unable to navigate in the selected page: net::ERR_UNSAFE_PORT at http://127.0.0.1:9/unreachable.\n## Pages\n1: https://example.com/\n3: 127.0.0.1 (chrome-error://chromewebdata/) [selected]",
+        },
+      },
+    );
   });
 });
 

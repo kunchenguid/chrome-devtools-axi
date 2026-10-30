@@ -37,6 +37,7 @@ import { main } from "../src/cli.js";
 import { CdpError, getSessionSnapshotIfRunning } from "../src/client.js";
 import * as generation from "../src/generation.js";
 import { setSelectedPageId } from "../src/selected-page.js";
+import * as selectedPage from "../src/selected-page.js";
 
 /**
  * The reconnect-cleared error exactly as `src/client.ts` ships it, rebuilt on
@@ -498,8 +499,10 @@ describe("main", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(new CdpError("Not connected", "BROWSER_ERROR"))
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
@@ -508,7 +511,11 @@ describe("main", () => {
 
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
-      ["new_page", { url: "https://airlockhq.com" }],
+      ["new_page", { url: "about:blank" }],
+      [
+        "navigate_page",
+        { type: "url", url: "https://airlockhq.com", pageId: 1 },
+      ],
       ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
@@ -520,13 +527,54 @@ describe("main", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("fails open when chrome-devtools-mcp reports the navigation did not complete", async () => {
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    callTool.mockResolvedValueOnce(
+      "Unable to navigate in the selected page: Navigation timeout of 10000 ms exceeded.\n## Pages\n1: Slow (http://127.0.0.1:8765/slow) [selected]",
+    );
+
+    await main(["open", "http://127.0.0.1:8765/slow"]);
+
+    expect(callTool.mock.calls).toEqual([
+      ["navigate_page", { type: "url", url: "http://127.0.0.1:8765/slow" }],
+    ]);
+    expect(process.exitCode).toBe(1);
+    expect(decode(String(write.mock.calls[0]?.[0]))).toMatchObject({
+      error:
+        "Navigation to http://127.0.0.1:8765/slow failed: Navigation timeout of 10000 ms exceeded",
+      code: "TIMEOUT",
+    });
+  });
+
+  it.each(["download", "no-content"])(
+    "keeps open successful when Chrome aborts navigation to %s",
+    async (path) => {
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const url = `http://127.0.0.1:8765/${path}`;
+      callTool
+        .mockResolvedValue("")
+        .mockResolvedValueOnce(
+          `Unable to navigate in the selected page: net::ERR_ABORTED at ${url}.\n## Pages\n1: Fast fixture (http://127.0.0.1:8765/fast) [selected]`,
+        )
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce('RootWebArea "Fast fixture"');
+      await main(["open", url]);
+      expect(process.exitCode).toBeUndefined();
+      expect(callTool).toHaveBeenCalledWith("take_snapshot");
+    },
+  );
+
   it("recovers open by creating a page when a browser reconnect dropped the selection", async () => {
     const write = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
+    vi.spyOn(selectedPage, "getSelectedPageId").mockReturnValue(1);
     callTool
       .mockRejectedValueOnce(await reconnectClearedError())
+      .mockResolvedValueOnce("## Pages\n1: about:blank [selected]")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce("")
       .mockResolvedValueOnce('RootWebArea "Airlock"\n  uid=1 link "Sign in"');
@@ -535,7 +583,11 @@ describe("main", () => {
 
     expect(callTool.mock.calls).toEqual([
       ["navigate_page", { type: "url", url: "https://airlockhq.com" }],
-      ["new_page", { url: "https://airlockhq.com" }],
+      ["new_page", { url: "about:blank" }],
+      [
+        "navigate_page",
+        { type: "url", url: "https://airlockhq.com", pageId: 1 },
+      ],
       ["evaluate_script", expect.any(Object)],
       ["take_snapshot"],
       ["evaluate_script", expect.any(Object)],
@@ -931,9 +983,13 @@ describe("navigation snapshot output", () => {
   }
 
   function mockSnapshot(): void {
-    callTool.mockImplementation(async (tool: string) =>
-      tool === "take_snapshot" ? snapshot : "",
-    );
+    callTool.mockImplementation(async (tool: string) => {
+      if (tool === "new_page") {
+        setSelectedPageId(1);
+        return "## Pages\n1: about:blank [selected]";
+      }
+      return tool === "take_snapshot" ? snapshot : "";
+    });
   }
 
   it.each([
@@ -1016,8 +1072,13 @@ describe("navigation snapshot output", () => {
       if (url) {
         expect(output).toContain(`url: "${url}"`);
         expect(callTool).toHaveBeenCalledWith("new_page", {
-          url,
+          url: "about:blank",
           ...(background ? { background: true } : {}),
+        });
+        expect(callTool).toHaveBeenCalledWith("navigate_page", {
+          type: "url",
+          url,
+          pageId: 1,
         });
       } else {
         expect(output).not.toContain("url:");
