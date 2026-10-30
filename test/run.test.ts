@@ -27,6 +27,7 @@ import { main, getCommandHelp } from "../src/cli.js";
 import { CdpError } from "../src/client.js";
 import {
   createPageHelper,
+  fillRef,
   isUidRef,
   parseEvalOutput,
   runScript,
@@ -611,6 +612,182 @@ describe("createPageHelper", () => {
       expect(element.events).toEqual(["input", "change"]);
       expect(element.observedExternalValues).toEqual([true]);
     }
+  });
+
+  describe("fillRef", () => {
+    const EVAL_RESPONSE = (value: boolean): string =>
+      `Script ran on page and returned:\n\`\`\`json\n${value}\n\`\`\``;
+
+    class Field {
+      currentValue = "";
+      trackerValue = "";
+      type = "text";
+      disabled = false;
+      readOnly = false;
+      focused = false;
+      inheritedDisabled = false;
+      readonly events: string[] = [];
+      readonly observedExternalValues: boolean[] = [];
+
+      focus(): void {
+        this.focused = true;
+      }
+
+      /** Mirrors the browser's :disabled, which is also true inside <fieldset disabled>. */
+      matches(selector: string): boolean {
+        return (
+          selector === ":disabled" && (this.disabled || this.inheritedDisabled)
+        );
+      }
+
+      dispatchEvent(event: { type: string }): boolean {
+        if (event.type === "input") {
+          // React only reacts when the value differs from what its tracker saw.
+          const changed = this.currentValue !== this.trackerValue;
+          this.observedExternalValues.push(changed);
+          if (changed) this.trackerValue = this.currentValue;
+        }
+        this.events.push(event.type);
+        return true;
+      }
+    }
+    class Input extends Field {}
+    class TextArea extends Field {}
+    class Select extends Field {}
+
+    class TestEvent {
+      constructor(public readonly type: string) {}
+    }
+
+    /** Give the element React's own-property `value` that records writes in the tracker. */
+    function trackValueWrites(element: Field): void {
+      const nativeValue = Object.getOwnPropertyDescriptor(
+        Object.getPrototypeOf(element),
+        "value",
+      )!;
+      Object.defineProperty(element, "value", {
+        get(this: Field): string {
+          return nativeValue.get!.call(this);
+        },
+        set(this: Field, value: string) {
+          nativeValue.set!.call(this, value);
+          this.trackerValue = value;
+        },
+      });
+    }
+
+    beforeEach(() => {
+      for (const Element of [Input, TextArea, Select]) {
+        Object.defineProperty(Element.prototype, "value", {
+          configurable: true,
+          get(this: Field): string {
+            return this.currentValue;
+          },
+          set(this: Field, value: string) {
+            this.currentValue = value;
+          },
+        });
+      }
+      vi.stubGlobal("HTMLInputElement", Input);
+      vi.stubGlobal("HTMLTextAreaElement", TextArea);
+      vi.stubGlobal("HTMLSelectElement", Select);
+      vi.stubGlobal("Event", TestEvent);
+    });
+
+    function sentFunction(): (element: Field) => boolean {
+      const call = callTool.mock.calls.find(
+        ([name]) => name === "evaluate_script",
+      );
+      return new Function(`return (${call![1].function})`)();
+    }
+
+    it("sets the value through the prototype setter so a controlled field sees the change", async () => {
+      callTool.mockResolvedValueOnce(EVAL_RESPONSE(true));
+
+      await fillRef(callTool, "5", "hello world");
+
+      expect(callTool).toHaveBeenCalledTimes(1);
+      expect(callTool).toHaveBeenCalledWith("evaluate_script", {
+        function: expect.any(String),
+        args: ["5"],
+      });
+      for (const Element of [Input, TextArea]) {
+        const element = new Element();
+        trackValueWrites(element);
+        expect(sentFunction()(element)).toBe(true);
+        expect(element.currentValue).toBe("hello world");
+        expect(element.focused).toBe(true);
+        expect(element.events).toEqual(["input", "change"]);
+        expect(element.observedExternalValues).toEqual([true]);
+      }
+    });
+
+    it("leaves selects, non-text inputs and read-only or disabled fields to MCP fill", async () => {
+      callTool.mockResolvedValueOnce(EVAL_RESPONSE(false));
+      await fillRef(callTool, "5", "hello");
+
+      const unhandled: Field[] = [
+        new Select(),
+        Object.assign(new Input(), { type: "checkbox" }),
+        Object.assign(new Input(), { type: "file" }),
+        Object.assign(new TextArea(), { readOnly: true }),
+        Object.assign(new Input(), { disabled: true }),
+        Object.assign(new Input(), { inheritedDisabled: true }),
+        { currentValue: "" } as Field,
+      ];
+      for (const element of unhandled) {
+        expect(sentFunction()(element)).toBe(false);
+        expect(element.currentValue).toBe("");
+      }
+    });
+
+    it("leaves a field disabled only via an ancestor <fieldset disabled> to MCP fill", async () => {
+      callTool.mockResolvedValueOnce(EVAL_RESPONSE(false));
+      await fillRef(callTool, "5", "hello");
+
+      const element = Object.assign(new Input(), { inheritedDisabled: true });
+      expect(element.disabled).toBe(false);
+      expect(sentFunction()(element)).toBe(false);
+      expect(element.currentValue).toBe("");
+    });
+
+    it("falls back to MCP fill when the native path declines", async () => {
+      callTool
+        .mockResolvedValueOnce(EVAL_RESPONSE(false))
+        .mockResolvedValueOnce("");
+
+      await fillRef(callTool, "5", "hello");
+
+      expect(callTool).toHaveBeenNthCalledWith(2, "fill", {
+        uid: "5",
+        value: "hello",
+      });
+    });
+
+    it("does not call MCP fill after the native path filled the field", async () => {
+      callTool.mockResolvedValueOnce(EVAL_RESPONSE(true));
+
+      await fillRef(callTool, "5", "hello");
+
+      expect(callTool).not.toHaveBeenCalledWith("fill", expect.anything());
+    });
+
+    it("page.fill with a uid uses the native path", async () => {
+      vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+      callTool
+        .mockResolvedValueOnce(
+          'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+        )
+        .mockResolvedValueOnce(EVAL_RESPONSE(true));
+
+      await createPageHelper(callTool).fill("@g7:3", "hello");
+
+      expect(callTool).toHaveBeenLastCalledWith("evaluate_script", {
+        function: expect.stringContaining('"hello"'),
+        args: ["3"],
+      });
+      expect(callTool).not.toHaveBeenCalledWith("fill", expect.anything());
+    });
   });
 
   it.each([

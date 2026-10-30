@@ -197,6 +197,31 @@ describe("main", () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it("fills a ref through the native setter and skips MCP fill once it is handled", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(generation, "getCurrentGeneration").mockReturnValue(7);
+    callTool
+      .mockResolvedValueOnce(
+        'Script ran on page and returned:\n```json\n{"generation":7,"mutations":0}\n```',
+      )
+      .mockResolvedValueOnce(
+        "Script ran on page and returned:\n```json\ntrue\n```",
+      )
+      .mockResolvedValue("");
+
+    await main(["fill", "@1", "hello"]);
+
+    expect(callTool.mock.calls[1]).toEqual([
+      "evaluate_script",
+      {
+        function: expect.stringContaining('"hello"'),
+        args: ["1"],
+      },
+    ]);
+    expect(callTool).not.toHaveBeenCalledWith("fill", expect.anything());
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it.each([
     { argv: ["fill", "@1", "--literal"], tool: "fill", preflight: true },
     { argv: ["type", "--literal"], tool: "type_text" },
@@ -226,10 +251,12 @@ describe("main", () => {
         preflight ? "evaluate_script" : tool,
       );
       if (preflight) {
-        expect(callTool.mock.calls[1]).toEqual([
+        // The stub reply is not `true`, so `fill` falls back to MCP fill after
+        // its native-setter attempt.
+        expect(callTool).toHaveBeenCalledWith(
           tool,
           expect.objectContaining({ value: argv[argv.length - 1] }),
-        ]);
+        );
       }
       expect(process.exitCode).toBeUndefined();
     },
