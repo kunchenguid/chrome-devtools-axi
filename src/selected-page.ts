@@ -6,19 +6,8 @@
  *
  * Survives across short-lived CLI processes the same way the snapshot
  * generation counter does: a file in the active session's state dir.
- * `select_page` writes the caller-supplied id. `new_page` (open / newpage)
- * uses MCP's structured page identity when available. Older servers fall
- * back to the one complete row in that tool's own dump that
- * ends in ` [selected]`. chrome-devtools-mcp selects the page it creates,
- * serializes tool calls, and appends that suffix after the ` (url)` wrapper,
- * so a single-line page title cannot put it at the end of a row. The URL is
- * not used: it can change while loading (redirects, query rewrites) and need
- * not be unique (#146, #155, #170). Not a `list_pages` call, and not every
- * `N:` line after `## Pages`. Any dump `createdPageIdFromNewPageDump` rejects
- * clears the session id so the next page-scoped call fails loud until an
- * explicit `select_page`. `close_page` of the selected id also clears it,
- * and so does the bridge when chrome-devtools-mcp reports a browser reconnect
- * that reissues every page id (`didMcpPageIdentityChange` in `src/bridge.ts`).
+ * See README.md#page-management for selection behavior and
+ * `createdPageIdFromNewPageDump` for the legacy text parser's safety rationale.
  */
 
 import {
