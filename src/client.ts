@@ -13,6 +13,7 @@ import {
   PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
 } from "./bridge-script.js";
+import { callRequestTimeoutMs } from "./navigation-timeout.js";
 import { needsPageId } from "./pages.js";
 import {
   clearSelectedPageId,
@@ -747,6 +748,7 @@ export async function callTool(
     resolved = resolveToolArgs(name, args, notice.pageIdentityChanged);
     const result = await postTool(port, name, resolved, {
       roots: collectRootDirs(name, resolved),
+      timeoutMs: callRequestTimeoutMs(resolved),
     });
     rememberToolRouting(name, resolved, result);
     return result;

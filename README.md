@@ -294,6 +294,7 @@ are command-specific; the CLI rejects a flag that is not listed by
 | `--full`                    | Show complete output without truncation     |
 | `--no-snapshot`             | Omit auto snapshot (newpage/selectpage)     |
 | `--background`              | Open new page in background (newpage)       |
+| `--timeout <ms>`            | Navigation timeout (open/newpage)           |
 | `--uid @<uid>`              | Target a specific element (screenshot)      |
 | `--full-page`               | Capture entire scrollable page (screenshot) |
 | `--format <fmt>`            | Image format: png, jpeg, webp (screenshot)  |
@@ -481,6 +482,17 @@ State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `session
 | --------------------- | ------------------------------------- |
 | `bridge.pid`          | PID and port of the running bridge    |
 | `snapshot-generation` | Counter used to detect stale uid refs |
+
+### Navigation timeout
+
+chrome-devtools-mcp gives a navigation 10 seconds by default, so a heavy page can fail with `Navigation timeout of 10000 ms exceeded`. Opt into a longer wait with `--timeout <ms>` on `open` or `newpage`, or set a default once:
+
+```sh
+chrome-devtools-axi newpage https://example.com/report --timeout 60000
+export CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS=60000
+```
+
+The flag wins over the environment variable. Either must be a positive integer (at most 1000000000); anything else is a usage error. Without either, nothing is sent and the 10-second default applies. The bridge raises its own MCP request deadline above the navigation timeout, so a long navigation is not cut off first.
 
 ### Idle timeout
 

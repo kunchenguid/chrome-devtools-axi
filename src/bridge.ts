@@ -56,6 +56,7 @@ import {
   PAGE_IDENTITY_CHANGED_ERROR,
   resolveBridgeScript,
 } from "./bridge-script.js";
+import { mcpRequestTimeoutMs } from "./navigation-timeout.js";
 import {
   createIdleTracker,
   IDLE_TIMEOUT_ENV,
@@ -1171,7 +1172,9 @@ export function createRootsAwareBridgeClient(client: Client): RootsAwareClient {
     callTool: (request, roots) =>
       enqueue(async () => {
         if (roots) await applyRootsNow(roots);
-        return client.callTool(request);
+        return client.callTool(request, undefined, {
+          timeout: mcpRequestTimeoutMs(request.arguments),
+        });
       }),
     close: () => client.close(),
     applyRoots: (dirs) => enqueue(() => applyRootsNow(dirs)),
