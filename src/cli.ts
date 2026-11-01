@@ -9,7 +9,10 @@ import {
 } from "./client.js";
 import { getCurrentGeneration } from "./generation.js";
 import {
-  navigationTimeoutArgs,
+  NAVIGATION_TIMEOUT_ENV,
+  parseNavigationTimeoutMs,
+} from "./navigation-timeout.js";
+import {
   readStdin,
   runScript,
   waitForDuration,
@@ -119,8 +122,8 @@ environment:
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
   CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS
-                                    Default navigation timeout in ms for open, newpage, back,
-                                    reload and page.open (positive integer). --timeout wins.
+                                    Default navigation timeout in ms for open and newpage
+                                    (positive integer). --timeout wins.
                                     Unset: chrome-devtools-mcp's 10000 ms default.
   CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
                                     Opt-in: a bridge started with this set stops itself after
@@ -259,23 +262,21 @@ examples:
   chrome-devtools-axi scroll down
   chrome-devtools-axi scroll top --full`,
 
-  back: `usage: chrome-devtools-axi back [--full] [--timeout <ms>]
+  back: `usage: chrome-devtools-axi back [--full]
 Navigate back in browser history.
 
 flags:
   --full  Show complete snapshot without truncation
-  --timeout <ms>  Navigation timeout in ms (default: 10000; env: CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS)
 
 examples:
   chrome-devtools-axi back
   chrome-devtools-axi back --full`,
 
-  reload: `usage: chrome-devtools-axi reload [--full] [--timeout <ms>]
+  reload: `usage: chrome-devtools-axi reload [--full]
 Reload the selected page and snapshot.
 
 flags:
   --full  Show complete snapshot without truncation
-  --timeout <ms>  Navigation timeout in ms (default: 10000; env: CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS)
 
 examples:
   chrome-devtools-axi reload
@@ -925,6 +926,31 @@ function splitFullFlag(args: string[]): { args: string[]; full: boolean } {
 }
 
 /**
+ * The navigation `timeout` tool argument, or nothing when the caller did not
+ * opt in. An explicit `--timeout` value wins over
+ * `CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS`; an invalid value from either is
+ * a usage error rather than a silent fallback to the 10s default.
+ */
+function navigationTimeoutArgs(flagValue?: string): { timeout?: number } {
+  const fromFlag = flagValue !== undefined;
+  const raw = fromFlag ? flagValue : process.env[NAVIGATION_TIMEOUT_ENV];
+  if (!fromFlag && (raw === undefined || raw.trim() === "")) return {};
+  const timeout = parseNavigationTimeoutMs(raw);
+  if (timeout === null) {
+    throw new CdpError(
+      fromFlag
+        ? `Invalid --timeout: ${JSON.stringify(raw)}`
+        : `Invalid ${NAVIGATION_TIMEOUT_ENV}: ${JSON.stringify(raw)}`,
+      "VALIDATION_ERROR",
+      [
+        "Pass a positive integer number of milliseconds, e.g. `--timeout 60000`",
+      ],
+    );
+  }
+  return { timeout };
+}
+
+/**
  * Pull `--timeout <ms>` out of a navigation command's args and resolve the
  * tool's `timeout` argument (the flag, else the environment default, else
  * nothing). Callers must have passed `validateCommandFlags`, which skips the
@@ -1255,16 +1281,14 @@ async function handleScroll(args: string[], full: boolean): Promise<string> {
   return formatPageOutput(snapshot, "scroll", undefined, full);
 }
 
-async function handleBack(args: string[], full: boolean): Promise<string> {
-  const { timeoutArgs } = splitTimeoutFlag("back", args);
-  await callTool("navigate_page", { type: "back", ...timeoutArgs });
+async function handleBack(full: boolean): Promise<string> {
+  await callTool("navigate_page", { type: "back" });
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "back", undefined, full);
 }
 
-async function handleReload(args: string[], full: boolean): Promise<string> {
-  const { timeoutArgs } = splitTimeoutFlag("reload", args);
-  await callTool("navigate_page", { type: "reload", ...timeoutArgs });
+async function handleReload(full: boolean): Promise<string> {
+  await callTool("navigate_page", { type: "reload" });
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "reload", undefined, full);
 }
@@ -1801,8 +1825,8 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
   type: withFullFlag(handleType),
   press: withFullFlag(handlePress),
   scroll: withFullFlag(handleScroll),
-  back: withFullFlag(handleBack),
-  reload: withFullFlag(handleReload),
+  back: async (args) => handleBack(splitFullFlag(args).full),
+  reload: async (args) => handleReload(splitFullFlag(args).full),
   wait: withoutFullFlag(handleWait),
   eval: withFullFlag(handleEval),
   run: async () => handleRun(),
@@ -1840,8 +1864,8 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   type: ["--full"],
   press: ["--full"],
   scroll: ["--full"],
-  back: ["--full", "--timeout"],
-  reload: ["--full", "--timeout"],
+  back: ["--full"],
+  reload: ["--full"],
   wait: [],
   eval: ["--full"],
   run: [],
@@ -1879,8 +1903,6 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
 
 const COMMAND_VALUE_FLAGS: Partial<Record<string, readonly string[]>> = {
   open: ["--timeout"],
-  back: ["--timeout"],
-  reload: ["--timeout"],
   newpage: ["--timeout"],
   screenshot: ["--uid", "--format"],
   emulate: COMMAND_FLAGS.emulate,

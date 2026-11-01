@@ -35,7 +35,6 @@ import {
   NAVIGATION_TIMEOUT_ENV,
   parseNavigationTimeoutMs,
 } from "../src/navigation-timeout.js";
-import { createPageHelper } from "../src/run.js";
 
 describe("parseNavigationTimeoutMs", () => {
   it("accepts positive integers up to the cap", () => {
@@ -212,18 +211,21 @@ describe("navigation --timeout", () => {
     ]);
   });
 
-  it("back and reload send the timeout to navigate_page", async () => {
-    await main(["back", "--timeout", "30000"]);
-    expect(firstCall()).toEqual([
-      "navigate_page",
-      { type: "back", timeout: 30_000 },
-    ]);
+  it("back and reload reject --timeout and send no timeout from the environment", async () => {
+    for (const command of ["back", "reload"]) {
+      const write = vi.fn();
+      process.exitCode = undefined;
+      await main({ argv: [command, "--timeout", "30000"], stdout: { write } });
+      expect(callTool).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(2);
+    }
+    vi.stubEnv(NAVIGATION_TIMEOUT_ENV, "30000");
+    process.exitCode = undefined;
+    await main(["back"]);
+    expect(firstCall()).toEqual(["navigate_page", { type: "back" }]);
     callTool.mockClear();
-    await main(["reload", "--timeout", "30000"]);
-    expect(firstCall()).toEqual([
-      "navigate_page",
-      { type: "reload", timeout: 30_000 },
-    ]);
+    await main(["reload"]);
+    expect(firstCall()).toEqual(["navigate_page", { type: "reload" }]);
   });
 
   it("open falls back to new_page with the same timeout", async () => {
@@ -276,8 +278,6 @@ describe("navigation --timeout", () => {
   it.each([
     ["open", "https://example.com"],
     ["newpage", "https://example.com"],
-    ["back"],
-    ["reload"],
   ])("%s refuses an invalid --timeout before calling MCP", async (...argv) => {
     for (const bad of ["0", "-1", "1.5", "abc", "10s", ""]) {
       const write = vi.fn();
@@ -316,47 +316,12 @@ describe("navigation --timeout", () => {
   });
 
   it("documents the flag in command help", async () => {
-    for (const command of ["open", "newpage", "back", "reload"]) {
+    for (const command of ["open", "newpage"]) {
       const write = vi.fn();
       await main({ argv: [command, "--help"], stdout: { write } });
       expect(write.mock.calls.map(([c]) => c).join("")).toContain(
         "--timeout <ms>",
       );
     }
-  });
-});
-
-describe("page helper navigation timeout", () => {
-  const info =
-    'Script ran on page and returned:\n```json\n{"url":"https://example.com","status":200}\n```';
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("page.open and page.back send the environment default", async () => {
-    vi.stubEnv(NAVIGATION_TIMEOUT_ENV, "40000");
-    const tool = vi.fn().mockResolvedValue(info);
-    const page = createPageHelper(tool);
-    await page.open("https://example.com");
-    await page.back();
-    expect(tool.mock.calls[0]).toEqual([
-      "navigate_page",
-      { type: "url", url: "https://example.com", timeout: 40_000 },
-    ]);
-    expect(tool.mock.calls[2]).toEqual([
-      "navigate_page",
-      { type: "back", timeout: 40_000 },
-    ]);
-  });
-
-  it("page.open sends no timeout when the environment is unset", async () => {
-    vi.stubEnv(NAVIGATION_TIMEOUT_ENV, undefined);
-    const tool = vi.fn().mockResolvedValue(info);
-    await createPageHelper(tool).open("https://example.com");
-    expect(tool.mock.calls[0]).toEqual([
-      "navigate_page",
-      { type: "url", url: "https://example.com" },
-    ]);
   });
 });

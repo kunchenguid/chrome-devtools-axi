@@ -1,6 +1,5 @@
 /**
- * Opt-in navigation timeout for `open`, `newpage`, `back`, `reload` and the
- * `run` script API's `page.open` / `page.back`.
+ * Opt-in navigation timeout for `open` and `newpage`.
  *
  * chrome-devtools-mcp's `new_page` and `navigate_page` accept a `timeout` in
  * milliseconds and fall back to a 10s default without one. AXI sends nothing
