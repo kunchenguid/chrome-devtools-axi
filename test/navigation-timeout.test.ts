@@ -304,6 +304,29 @@ describe("navigation --timeout", () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it.each(["open", "newpage"])(
+    "%s refuses a repeated --timeout before the url",
+    async (command) => {
+      const write = vi.fn();
+      await main({
+        argv: [
+          command,
+          "--timeout",
+          "30000",
+          "--timeout",
+          "60000",
+          "https://example.com",
+        ],
+        stdout: { write },
+      });
+      expect(callTool).not.toHaveBeenCalled();
+      expect(write.mock.calls.map(([c]) => c).join("")).toContain(
+        "--timeout may only be given once",
+      );
+      expect(process.exitCode).toBe(2);
+    },
+  );
+
   it("refuses an invalid environment default", async () => {
     vi.stubEnv(NAVIGATION_TIMEOUT_ENV, "soon");
     const write = vi.fn();

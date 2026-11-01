@@ -962,6 +962,11 @@ function splitTimeoutFlag(
 ): { args: string[]; timeoutArgs: { timeout?: number } } {
   const index = args.indexOf("--timeout");
   if (index === -1) return { args, timeoutArgs: navigationTimeoutArgs() };
+  if (args.filter((arg) => arg === "--timeout").length > 1) {
+    throw new CdpError("--timeout may only be given once", "VALIDATION_ERROR", [
+      `Run \`chrome-devtools-axi ${command} --help\` to see valid flags`,
+    ]);
+  }
   const value = args[index + 1];
   if (value === undefined) {
     throw new CdpError("Missing value for --timeout", "VALIDATION_ERROR", [
