@@ -118,8 +118,7 @@ function httpGet(
     );
     req.on("error", reject);
     req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("timeout"));
+      req.destroy(new CdpError("Bridge health check timed out", "TIMEOUT"));
     });
     req.end();
   });
@@ -169,6 +168,13 @@ function httpPost(
   });
 }
 
+interface BridgeHealthOptions {
+  deep?: boolean;
+  expectedSession?: string;
+  notice?: PageIdentityNotice;
+  ambient?: boolean;
+}
+
 /**
  * Probe the bridge's `/health` endpoint. With `deep: true`, asks the bridge
  * to drive one CDP-backed MCP call (`list_pages`) so callers can distinguish
@@ -186,36 +192,40 @@ function httpPost(
  * With `ambient`, the probe is marked as observation only, so it does not
  * renew an opted-in idle timeout (see {@link AMBIENT_REQUEST_HEADER}).
  *
- * Exported for tests; production code uses it via {@link ensureBridge}.
+ * A timeout reports false; lifecycle decisions use the detailed probe result.
  */
 export async function checkBridgeHealth(
   port: number,
-  opts: {
-    deep?: boolean;
-    expectedSession?: string;
-    notice?: PageIdentityNotice;
-    ambient?: boolean;
-  } = {},
+  opts: BridgeHealthOptions = {},
 ): Promise<boolean> {
+  return (await probeBridgeHealth(port, opts)) === "ready";
+}
+
+async function probeBridgeHealth(
+  port: number,
+  opts: BridgeHealthOptions,
+): Promise<"ready" | "unhealthy" | "timeout"> {
   try {
     const path = opts.deep ? "/health?deep=1" : "/health";
     const timeoutMs = opts.deep ? DEEP_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS;
     const resp = await httpGet(port, path, timeoutMs, ambientHeaders(opts));
     const data = JSON.parse(resp);
-    if (data.status !== "ok") return false;
+    if (data.status !== "ok") return "unhealthy";
     if (
       opts.expectedSession !== undefined &&
       typeof data.session === "string" &&
       data.session !== opts.expectedSession
     ) {
-      return false;
+      return "unhealthy";
     }
     if (opts.deep && opts.notice) {
       opts.notice.pageIdentityChanged = data.pageIdentityChanged === true;
     }
-    return true;
-  } catch {
-    return false;
+    return "ready";
+  } catch (error) {
+    return error instanceof CdpError && error.code === "TIMEOUT"
+      ? "timeout"
+      : "unhealthy";
   }
 }
 
@@ -461,6 +471,7 @@ export function buildBridgeEarlyExitError(
  * declaring the bridge ready, so a bridge whose attached browser/Electron
  * target was killed while still answering local /health requests gets torn
  * down + restarted instead of being reused as a stale endpoint.
+ * An inconclusive timeout leaves an existing bridge and its selection intact.
  *
  * `spawnBridge` is injectable for tests; production uses {@link spawnBridgeProcess}.
  *
@@ -484,14 +495,23 @@ export async function ensureBridge(
   // attached CDP target has gone away gets recycled instead of returned.
   const pidInfo = readPidFile(pidFile);
   if (pidInfo && isProcessAlive(pidInfo.pid)) {
-    if (
-      await checkBridgeHealth(pidInfo.port, {
-        deep: true,
-        expectedSession: sessionName,
-        notice,
-      })
-    ) {
+    const health = await probeBridgeHealth(pidInfo.port, {
+      deep: true,
+      expectedSession: sessionName,
+      notice,
+    });
+    if (health === "ready") {
       return pidInfo.port;
+    }
+    if (health === "timeout") {
+      throw new CdpError(
+        "Bridge health check timed out; the existing bridge was left running",
+        "TIMEOUT",
+        [
+          "Retry the command once the browser responds",
+          "Run `chrome-devtools-axi stop` to replace the bridge if it stays unresponsive",
+        ],
+      );
     }
     await terminateBridgeProcess(pidInfo.pid, {
       killProcessGroup: isBridgeProcess(pidInfo.pid),
