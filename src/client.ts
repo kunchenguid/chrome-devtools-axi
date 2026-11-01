@@ -610,12 +610,20 @@ function ambientHeaders(opts: { ambient?: boolean }): Record<string, string> {
   return opts.ambient ? { [AMBIENT_REQUEST_HEADER]: "1" } : {};
 }
 
-function parseCallResponse(resp: string): string {
+interface ToolResponse {
+  result: string;
+  structuredContent?: unknown;
+}
+
+function parseCallResponse(resp: string): ToolResponse {
   const data = JSON.parse(resp);
   if (data.error) {
     throw new Error(data.error);
   }
-  return data.result ?? "";
+  return {
+    result: data.result ?? "",
+    structuredContent: data.structuredContent,
+  };
 }
 
 async function postTool(
@@ -623,7 +631,7 @@ async function postTool(
   name: string,
   args: Record<string, unknown>,
   opts: { roots?: string[]; timeoutMs?: number; ambient?: boolean } = {},
-): Promise<string> {
+): Promise<ToolResponse> {
   const body: Record<string, unknown> = { name, args };
   if (opts.roots && opts.roots.length > 0) body.roots = opts.roots;
   const resp = await httpPost(
@@ -748,8 +756,13 @@ export async function callTool(
     const result = await postTool(port, name, resolved, {
       roots: collectRootDirs(name, resolved),
     });
-    rememberToolRouting(name, resolved, result);
-    return result;
+    rememberToolRouting(
+      name,
+      resolved,
+      result.result,
+      result.structuredContent,
+    );
+    return result.result;
   } catch (err) {
     if (err instanceof CdpError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -934,12 +947,13 @@ export async function getSessionSnapshotIfRunning(): Promise<string | null> {
   try {
     const pageId = getSelectedPageId();
     if (pageId === null) return null;
-    return await postTool(
+    const response = await postTool(
       pidInfo.port,
       "take_snapshot",
       { pageId },
       { timeoutMs: 5000, ambient: true },
     );
+    return response.result;
   } catch {
     return null;
   }
