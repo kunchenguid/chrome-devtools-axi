@@ -5,6 +5,7 @@ import {
   DEFAULT_BASE_PORT,
   DEFAULT_SESSION_NAME,
   defaultPortForSession,
+  resolveLocalBrowserPort,
   resolveSessionName,
   resolveSessionPidFile,
   resolveSessionPort,
@@ -141,6 +142,38 @@ describe("resolveSessionPort", () => {
     expect(resolveSessionPort(DEFAULT_SESSION_NAME)).toBe(DEFAULT_BASE_PORT);
     process.env.CHROME_DEVTOOLS_AXI_PORT = "0";
     expect(resolveSessionPort(DEFAULT_SESSION_NAME)).toBe(DEFAULT_BASE_PORT);
+  });
+});
+
+describe("resolveLocalBrowserPort", () => {
+  const saved = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    else process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = saved;
+  });
+
+  const portFor = (url: string | undefined) => {
+    if (url === undefined) delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    else process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = url;
+    return resolveLocalBrowserPort();
+  };
+
+  it("returns the port of loopback endpoints", () => {
+    expect(portFor("http://127.0.0.1:9224")).toBe(9224);
+    expect(portFor("http://localhost:9333/")).toBe(9333);
+    expect(portFor("ws://[::1]:9224/devtools/browser/x")).toBe(9224);
+  });
+
+  it("falls back to the scheme default port", () => {
+    expect(portFor("http://localhost")).toBe(80);
+    expect(portFor("wss://127.0.0.1/x")).toBe(443);
+  });
+
+  it("returns null when unset, malformed, or remote", () => {
+    expect(portFor(undefined)).toBeNull();
+    expect(portFor("not a url")).toBeNull();
+    expect(portFor("http://chrome.example:9224")).toBeNull();
   });
 });
 

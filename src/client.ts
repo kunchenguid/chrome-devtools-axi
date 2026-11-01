@@ -23,6 +23,7 @@ import {
 import {
   resolveSessionName,
   resolveSessionPidFile,
+  resolveLocalBrowserPort,
   resolveSessionPort,
 } from "./sessions.js";
 
@@ -456,6 +457,33 @@ export function buildBridgeEarlyExitError(
 }
 
 /**
+ * Refuse to spawn a bridge on the port of the local Chrome DevTools endpoint it
+ * would attach to. The bridge would otherwise fail to bind Chrome's listener
+ * and surface as a generic BRIDGE_NOT_READY. Applies only when a bridge would
+ * attach to `CHROME_DEVTOOLS_AXI_BROWSER_URL` itself: auto-connect and shared
+ * MCP modes ignore that URL.
+ */
+export function assertBridgePortDistinctFromBrowser(
+  sessionName: string,
+  port: number,
+): void {
+  if (process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1") return;
+  if (resolveSharedMcpMode()) return;
+  if (resolveLocalBrowserPort() !== port) return;
+  const explicit = Boolean(process.env.CHROME_DEVTOOLS_AXI_PORT?.trim());
+  throw new CdpError(
+    `Bridge port ${port} for session "${sessionName}" is the port of the Chrome DevTools endpoint in CHROME_DEVTOOLS_AXI_BROWSER_URL`,
+    "VALIDATION_ERROR",
+    [
+      "The bridge and the browser it attaches to need distinct ports; the bridge cannot listen on the browser's debugging port.",
+      explicit
+        ? "Set CHROME_DEVTOOLS_AXI_PORT to a different free port."
+        : "Set CHROME_DEVTOOLS_AXI_PORT to a free port other than the browser's, or use a different CHROME_DEVTOOLS_AXI_SESSION name.",
+    ],
+  );
+}
+
+/**
  * Ensure the bridge is running, starting it if needed. Returns the port.
  *
  * Verifies a *deep* health check (one round-trip CDP-backed MCP call) before
@@ -498,6 +526,8 @@ export async function ensureBridge(
       killProcessGroup: isBridgeProcess(pidInfo.pid),
     });
   }
+
+  assertBridgePortDistinctFromBrowser(sessionName, port);
 
   // MCP page ids reset with a new process; a leftover session id would
   // target the wrong tab (or none). Keep the file when reusing a live bridge.
