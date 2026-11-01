@@ -370,7 +370,7 @@ List all open pages/tabs in the browser.
 examples:
   chrome-devtools-axi pages`,
 
-  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--full] [--no-snapshot] [--timeout <ms>]
+  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--context <name>] [--full] [--no-snapshot] [--timeout <ms>]
 Open a new tab and navigate to a URL.
 
 args:
@@ -378,6 +378,9 @@ args:
 
 flags:
   --background  Open in background without bringing to front
+  --context <name>  Open in a separate browser context with its own cookies and
+                    storage; tabs given the same name share one while the
+                    bridge runs. Name: 1-64 chars from [A-Za-z0-9._-]
   --full        Show complete snapshot without truncation
   --no-snapshot  Show page metadata without snapshot or snapshot-derived help
                  (takes precedence over --full)
@@ -386,6 +389,7 @@ flags:
 examples:
   chrome-devtools-axi newpage https://example.com
   chrome-devtools-axi newpage https://example.com --background
+  chrome-devtools-axi newpage https://example.com --context signed-out
   chrome-devtools-axi newpage https://example.com --timeout 60000`,
 
   selectpage: `usage: chrome-devtools-axi selectpage <id> [--full] [--no-snapshot]
@@ -960,23 +964,38 @@ function splitTimeoutFlag(
   command: string,
   args: string[],
 ): { args: string[]; timeoutArgs: { timeout?: number } } {
-  const index = args.indexOf("--timeout");
-  if (index === -1) return { args, timeoutArgs: navigationTimeoutArgs() };
-  if (args.filter((arg) => arg === "--timeout").length > 1) {
-    throw new CdpError("--timeout may only be given once", "VALIDATION_ERROR", [
+  const split = splitValueFlag(command, args, "--timeout");
+  return {
+    args: split.args,
+    timeoutArgs: navigationTimeoutArgs(split.value),
+  };
+}
+
+/**
+ * Remove a flag that takes a value, such as `--context <name>`, from `args`.
+ * `value` is undefined when the flag is absent. Callers must have passed
+ * `validateCommandFlags`, which skips the value when scanning for unknown
+ * flags.
+ */
+function splitValueFlag(
+  command: string,
+  args: string[],
+  flag: string,
+): { args: string[]; value?: string } {
+  const index = args.indexOf(flag);
+  if (index === -1) return { args };
+  if (args.filter((arg) => arg === flag).length > 1) {
+    throw new CdpError(`${flag} may only be given once`, "VALIDATION_ERROR", [
       `Run \`chrome-devtools-axi ${command} --help\` to see valid flags`,
     ]);
   }
   const value = args[index + 1];
   if (value === undefined) {
-    throw new CdpError("Missing value for --timeout", "VALIDATION_ERROR", [
+    throw new CdpError(`Missing value for ${flag}`, "VALIDATION_ERROR", [
       `Run \`chrome-devtools-axi ${command} --help\` to see valid flags`,
     ]);
   }
-  return {
-    args: [...args.slice(0, index), ...args.slice(index + 2)],
-    timeoutArgs: navigationTimeoutArgs(value),
-  };
+  return { args: [...args.slice(0, index), ...args.slice(index + 2)], value };
 }
 
 function trimSingleTrailingNewline(text: string): string {
@@ -1404,7 +1423,22 @@ async function handleNewPage(
   rawArgs: string[],
   full: boolean,
 ): Promise<string> {
-  const { args, timeoutArgs } = splitTimeoutFlag("newpage", rawArgs);
+  const timeoutSplit = splitTimeoutFlag("newpage", rawArgs);
+  const { timeoutArgs } = timeoutSplit;
+  const { args, value: context } = splitValueFlag(
+    "newpage",
+    timeoutSplit.args,
+    "--context",
+  );
+  if (context !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(context)) {
+    throw new CdpError(
+      `Invalid --context "${context}": use 1-64 chars from [A-Za-z0-9._-]`,
+      "VALIDATION_ERROR",
+      [
+        "Run `chrome-devtools-axi newpage https://example.com --context login-b` to open a tab in a separate context",
+      ],
+    );
+  }
   const noSnapshot = args.includes("--no-snapshot");
   const url = args.filter((a) => !a.startsWith("--"))[0];
   if (!url) {
@@ -1415,6 +1449,7 @@ async function handleNewPage(
   const background = args.includes("--background");
   const toolArgs: Record<string, unknown> = { url, ...timeoutArgs };
   if (background) toolArgs.background = true;
+  if (context !== undefined) toolArgs.isolatedContext = context;
   await callTool("new_page", toolArgs);
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "newpage", url, full, noSnapshot);
@@ -1880,7 +1915,13 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   dialog: [],
   upload: ["--full"],
   pages: [],
-  newpage: ["--background", "--full", "--no-snapshot", "--timeout"],
+  newpage: [
+    "--background",
+    "--context",
+    "--full",
+    "--no-snapshot",
+    "--timeout",
+  ],
   selectpage: ["--full", "--no-snapshot"],
   closepage: [],
   resize: [],
@@ -1908,7 +1949,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
 
 const COMMAND_VALUE_FLAGS: Partial<Record<string, readonly string[]>> = {
   open: ["--timeout"],
-  newpage: ["--timeout"],
+  newpage: ["--context", "--timeout"],
   screenshot: ["--uid", "--format"],
   emulate: COMMAND_FLAGS.emulate,
   console: COMMAND_FLAGS.console,

@@ -227,6 +227,12 @@ chrome-devtools-axi newpage https://example.com --no-snapshot
 chrome-devtools-axi selectpage 1 --no-snapshot
 ```
 
+Tabs share one cookie jar unless `newpage` is given `--context <name>`. That opens the tab in a separate browser context (chrome-devtools-mcp's `isolatedContext`) with its own cookies and storage, so one browser can hold two sign-ins at once or a signed-out view beside a signed-in one. Later `newpage --context` calls with the same name join that context. Names are kept by the bridge, so each named session has its own, and after the bridge stops a name starts a fresh context (tabs already open in the old one stay open). Names use 1-64 characters from `[A-Za-z0-9._-]`.
+
+```sh
+chrome-devtools-axi newpage https://example.com --context signed-out
+```
+
 `resize` reads the page's viewport back and fails, naming the actual size, when it did not reach the requested size (an emulated viewport, page zoom or the window's minimum size can hold it); use `emulate --viewport` then.
 
 Page-scoped tools require a selected page. `pages` only lists tabs and never changes the selection. `selectpage` sets it. `newpage` (and `open` when it has to create a tab) selects the tab chrome-devtools-mcp reports as selected in its own listing, which is the tab it just created, even when that URL is already open in another tab or changed while loading; a title continuation, no marked row, more than one `[selected]` line anywhere in the listing, a repeated `## Pages` section or page id, or chrome-devtools-mcp's note that it moved its selection off a closed tab leaves the selection unset, and the next page-scoped command fails until `selectpage`. The selected column in `pages` is AXI's selection, not the MCP `[selected]` marker. Closing the selected tab clears it. There is no automatic retarget onto another tab.
@@ -294,6 +300,7 @@ are command-specific; the CLI rejects a flag that is not listed by
 | `--full`                    | Show complete output without truncation     |
 | `--no-snapshot`             | Omit auto snapshot (newpage/selectpage)     |
 | `--background`              | Open new page in background (newpage)       |
+| `--context <name>`          | Open in a separate context (newpage)        |
 | `--timeout <ms>`            | Navigation timeout (open/newpage)           |
 | `--uid @<uid>`              | Target a specific element (screenshot)      |
 | `--full-page`               | Capture entire scrollable page (screenshot) |

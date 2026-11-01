@@ -64,6 +64,18 @@ describe("createdPageIdFromNewPageDump", () => {
     ).toBe(3);
   });
 
+  it("records a marked row in an isolated context", () => {
+    expect(
+      createdPageIdFromNewPageDump(
+        [
+          "## Pages",
+          "1: Example Domain (https://example.com/)",
+          "2: Example Domain (https://example.com/) [selected] isolatedContext=signed-out",
+        ].join("\n"),
+      ),
+    ).toBe(2);
+  });
+
   it("records a duplicate about:blank tab", () => {
     expect(
       createdPageIdFromNewPageDump(

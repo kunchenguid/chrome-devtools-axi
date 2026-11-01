@@ -132,7 +132,11 @@ const MCP_OTHER_SECTION =
 const GENERIC_SCHEME_SLASH_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 const COLON_ONLY_SCHEME_URL = /^(?:about:|data:|view-source:|blob:)/i;
 const PAGE_ID_LINE = /^(\d+):\s*(.*)$/;
-const MCP_SELECTED_SUFFIX = / \[selected\]$/;
+// MCP writes ` isolatedContext=<name>` after the marker for a tab in a
+// separate context; `newpage --context` only accepts names matching
+// CONTEXT_NAME, so the suffix cannot reach back into a title.
+const MCP_SELECTED_SUFFIX =
+  / \[selected\](?: isolatedContext=[A-Za-z0-9._-]+)?$/;
 // MCP moved its selection off a page that closed; the marker is no longer
 // the created tab.
 const MCP_SELECTION_FALLBACK = /^Note: the previously selected page /;
