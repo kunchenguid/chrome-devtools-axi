@@ -155,6 +155,8 @@ describe("navigation --timeout", () => {
     process.env.HOME = tmpHome;
     process.env.CHROME_DEVTOOLS_AXI_SESSION = "navigation-timeout";
     vi.stubEnv(NAVIGATION_TIMEOUT_ENV, undefined);
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", undefined);
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_AUTO_CONNECT", undefined);
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     callTool.mockImplementation(async (tool: string) =>
       tool === "take_snapshot" ? 'RootWebArea "Page"\n  uid=1 link "Home"' : "",
