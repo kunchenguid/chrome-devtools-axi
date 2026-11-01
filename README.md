@@ -421,6 +421,8 @@ Connect to an existing Chrome instance instead of launching one:
 export CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222
 ```
 
+In this mode and with `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `newpage` and `open` open new tabs in the background, as `newpage --background` does. The browser is usually a visible window that a person or other agents also use, and a foreground tab brings it to the front, taking keyboard focus from whatever app the person was typing in.
+
 `CHROME_DEVTOOLS_AXI_BROWSER_URL` accepts both `http://` or `https://` URLs and `ws://` or `wss://` endpoints:
 
 - `http(s)://` uses `--browserUrl` and fetches `/json/version` to discover the WebSocket URL.

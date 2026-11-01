@@ -377,7 +377,9 @@ args:
   <url>  URL to open (required)
 
 flags:
-  --background  Open in background without bringing to front
+  --background  Open in background without bringing to front (always the case
+                when attached to a running browser with BROWSER_URL or
+                AUTO_CONNECT)
   --context <name>  Open in a separate browser context with its own cookies and
                     storage; tabs given the same name share one while the
                     bridge runs. Name: 1-64 chars from [A-Za-z0-9._-]
@@ -1163,6 +1165,20 @@ export async function parseUidFresh(
   return parseUidFreshShared(arg, caller);
 }
 
+/**
+ * True when the bridge attaches to a browser something else started
+ * (CHROME_DEVTOOLS_AXI_BROWSER_URL or CHROME_DEVTOOLS_AXI_AUTO_CONNECT). Such a
+ * browser is usually headed and shared with a person or other agents, and a
+ * tab opened in the foreground brings it in front of whatever they are
+ * typing into, so new tabs open in the background there.
+ */
+function attachesToRunningBrowser(): boolean {
+  return (
+    Boolean(process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL?.trim()) ||
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1"
+  );
+}
+
 function isRecoverableOpenError(error: unknown): error is CdpError {
   if (!(error instanceof CdpError)) return false;
   if (error.code !== "BROWSER_ERROR") return false;
@@ -1202,7 +1218,11 @@ async function handleOpen(rawArgs: string[], full: boolean): Promise<string> {
     if (!isRecoverableOpenError(error)) {
       throw error;
     }
-    await callTool("new_page", { url, ...timeoutArgs });
+    await callTool("new_page", {
+      url,
+      ...(attachesToRunningBrowser() ? { background: true } : {}),
+      ...timeoutArgs,
+    });
   }
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "open", url, full);
@@ -1446,7 +1466,8 @@ async function handleNewPage(
       "Run `chrome-devtools-axi newpage https://example.com` to open a new tab",
     ]);
   }
-  const background = args.includes("--background");
+  const background =
+    args.includes("--background") || attachesToRunningBrowser();
   const toolArgs: Record<string, unknown> = { url, ...timeoutArgs };
   if (background) toolArgs.background = true;
   if (context !== undefined) toolArgs.isolatedContext = context;
