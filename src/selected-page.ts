@@ -147,10 +147,14 @@ function createdPageIdFromStructuredContent(
     !structuredContent ||
     typeof structuredContent !== "object" ||
     !("pages" in structuredContent) ||
-    !Array.isArray(structuredContent.pages) ||
-    text.split(/\r?\n/).some((line) => MCP_SELECTION_FALLBACK.test(line.trim()))
+    !Array.isArray(structuredContent.pages)
   ) {
     return null;
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (MCP_PAGES_HEADER.test(line)) break;
+    if (MCP_SELECTION_FALLBACK.test(line)) return null;
   }
   const ids = new Set<number>();
   let selectedId: number | null = null;
