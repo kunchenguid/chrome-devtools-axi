@@ -348,7 +348,7 @@ The bridge server port defaults to `9224`. Override it with an environment varia
 export CHROME_DEVTOOLS_AXI_PORT=9225
 ```
 
-The bridge port must differ from the local port in `CHROME_DEVTOOLS_AXI_BROWSER_URL` (for example `http://127.0.0.1:9224`). When they match, the command fails with a `VALIDATION_ERROR` naming both instead of `BRIDGE_NOT_READY`; set `CHROME_DEVTOOLS_AXI_PORT` to a free port. AXI never changes the port you configured.
+The bridge port must differ from the port in `CHROME_DEVTOOLS_AXI_BROWSER_URL` when its host overlaps the bridge's `127.0.0.1` listener (`127.0.0.1`, its IPv4-mapped IPv6 form, `localhost`, or `0.0.0.0`). When they match, the command fails with a `VALIDATION_ERROR` naming both instead of `BRIDGE_NOT_READY`; set `CHROME_DEVTOOLS_AXI_PORT` to a free port. Distinct loopback addresses such as `::1` and `127.0.0.2` may use the same port. AXI never changes the port you configured.
 
 To share one long-lived Chrome DevTools MCP service across AXI sessions on the
 same host, set `CHROME_DEVTOOLS_AXI_MCP_SERVER_URL` to the service's Streamable

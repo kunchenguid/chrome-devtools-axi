@@ -159,10 +159,19 @@ describe("resolveLocalBrowserPort", () => {
     return resolveLocalBrowserPort();
   };
 
-  it("returns the port of loopback endpoints", () => {
+  it("returns the port of endpoints overlapping the bridge listener", () => {
     expect(portFor("http://127.0.0.1:9224")).toBe(9224);
     expect(portFor("http://localhost:9333/")).toBe(9333);
-    expect(portFor("ws://[::1]:9224/devtools/browser/x")).toBe(9224);
+    expect(portFor("http://0.0.0.0:9224")).toBe(9224);
+    expect(portFor("http://[::ffff:127.0.0.1]:9224")).toBe(9224);
+    expect(portFor("ws://[::ffff:7f00:1]:9224/devtools/browser/x")).toBe(9224);
+    expect(portFor("http://127.1:9224")).toBe(9224);
+  });
+
+  it("allows endpoints on distinct loopback addresses", () => {
+    expect(portFor("ws://[::1]:9224/devtools/browser/x")).toBeNull();
+    expect(portFor("http://127.0.0.2:9224")).toBeNull();
+    expect(portFor("http://[::ffff:127.0.0.2]:9224")).toBeNull();
   });
 
   it("falls back to the scheme default port", () => {
