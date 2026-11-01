@@ -15,8 +15,8 @@
  *
  * Precedence:
  *   port      - CHROME_DEVTOOLS_AXI_PORT > deterministic hash of the session name
- *               (never adjusted; `ensureBridge` refuses a port equal to
- *               `resolveLocalBrowserPort`)
+ *               (never adjusted; browser-endpoint collision validation lives
+ *               in `assertBridgePortDistinctFromBrowser` in client.ts)
  *   state dir - always derived from the session name
  *
  * The default session name is "default", which preserves prior behavior: port
