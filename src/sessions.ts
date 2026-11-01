@@ -23,6 +23,8 @@
  * 9224 and the legacy `~/.chrome-devtools-axi/` state paths.
  */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -110,7 +112,7 @@ export function resolveSessionPort(
  * or points at an address that does not overlap the bridge's `127.0.0.1`
  * listener. A URL without an explicit port resolves to the scheme default.
  */
-export function resolveLocalBrowserPort(): number | null {
+export async function resolveLocalBrowserPort(): Promise<number | null> {
   const raw = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL?.trim();
   if (!raw) return null;
   let url: URL;
@@ -120,11 +122,21 @@ export function resolveLocalBrowserPort(): number | null {
     return null;
   }
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  const overlapsBridge =
-    host === "localhost" ||
-    host === "0.0.0.0" ||
-    host === "127.0.0.1" ||
-    host === "::ffff:7f00:1";
+  let addresses: string[];
+  try {
+    addresses = isIP(host)
+      ? [host]
+      : (await lookup(host, { all: true })).map(({ address }) => address);
+  } catch {
+    return null;
+  }
+  const overlapsBridge = addresses.some(
+    (address) =>
+      address === "0.0.0.0" ||
+      address === "127.0.0.1" ||
+      address === "::ffff:127.0.0.1" ||
+      address === "::ffff:7f00:1",
+  );
   if (!overlapsBridge) return null;
   if (url.port) return Number.parseInt(url.port, 10);
   return url.protocol === "https:" || url.protocol === "wss:" ? 443 : 80;

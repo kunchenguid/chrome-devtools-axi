@@ -463,13 +463,13 @@ export function buildBridgeEarlyExitError(
  * attach to `CHROME_DEVTOOLS_AXI_BROWSER_URL` itself: auto-connect and shared
  * MCP modes ignore that URL.
  */
-export function assertBridgePortDistinctFromBrowser(
+export async function assertBridgePortDistinctFromBrowser(
   sessionName: string,
   port: number,
-): void {
+): Promise<void> {
   if (process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1") return;
   if (resolveSharedMcpMode()) return;
-  if (resolveLocalBrowserPort() !== port) return;
+  if ((await resolveLocalBrowserPort()) !== port) return;
   const explicit = Boolean(process.env.CHROME_DEVTOOLS_AXI_PORT?.trim());
   throw new CdpError(
     `Bridge port ${port} for session "${sessionName}" is the port of the Chrome DevTools endpoint in CHROME_DEVTOOLS_AXI_BROWSER_URL`,
@@ -527,7 +527,7 @@ export async function ensureBridge(
     });
   }
 
-  assertBridgePortDistinctFromBrowser(sessionName, port);
+  await assertBridgePortDistinctFromBrowser(sessionName, port);
 
   // MCP page ids reset with a new process; a leftover session id would
   // target the wrong tab (or none). Keep the file when reusing a live bridge.

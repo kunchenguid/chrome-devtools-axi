@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { lookup } from "node:dns/promises";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { request } from "node:http";
 import { ensureBridge, type SpawnedBridge } from "../src/client.js";
 import { resolveSessionPort } from "../src/sessions.js";
+
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn() }));
 
 vi.mock("node:http", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:http")>()),
@@ -25,6 +28,9 @@ describe("ensureBridge allowed browser endpoints", () => {
   let home: string;
 
   beforeEach(() => {
+    vi.mocked(lookup).mockResolvedValue([
+      { address: "::1", family: 6 },
+    ] as never);
     saved = keys.map((key) => process.env[key]);
     for (const key of keys) delete process.env[key];
     home = mkdtempSync(join(process.cwd(), ".test-port-success-"));
@@ -44,6 +50,10 @@ describe("ensureBridge allowed browser endpoints", () => {
     { name: "default port with distinct CDP port" },
     { name: "named session port", session: "success-worker" },
     { name: "explicit port", port: "9555" },
+    {
+      name: "localhost reaching IPv6-only browser",
+      browser: "http://localhost:9224",
+    },
     { name: "IPv6 loopback", browser: "http://[::1]:9224" },
     { name: "separate IPv4 loopback", browser: "http://127.0.0.2:9224" },
     { name: "auto-connect", browser: "http://127.0.0.1:9224", auto: "1" },

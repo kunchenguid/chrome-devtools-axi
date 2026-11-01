@@ -424,42 +424,42 @@ describe("bridge/browser port collision", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("refuses the default bridge port when the browser URL uses it", () => {
+  it("refuses the default bridge port when the browser URL uses it", async () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9224";
-    expect(() =>
+    await expect(
       assertBridgePortDistinctFromBrowser("default", 9224),
-    ).toThrowError(CdpError);
+    ).rejects.toThrowError(CdpError);
   });
 
-  it("allows distinct ports and remote browser endpoints", () => {
+  it("allows distinct ports and remote browser endpoints", async () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
-    expect(() =>
+    await expect(
       assertBridgePortDistinctFromBrowser("default", 9224),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://chrome.example:9224";
-    expect(() =>
+    await expect(
       assertBridgePortDistinctFromBrowser("default", 9224),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it("ignores the browser URL in auto-connect and shared MCP modes", () => {
+  it("ignores the browser URL in auto-connect and shared MCP modes", async () => {
     process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9224";
     process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
-    expect(() =>
+    await expect(
       assertBridgePortDistinctFromBrowser("default", 9224),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
     delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
     process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
       "http://127.0.0.1:9333/mcp";
-    expect(() =>
+    await expect(
       assertBridgePortDistinctFromBrowser("default", 9224),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
   it("ensureBridge refuses an explicit colliding port without spawning", async () => {
     process.env.CHROME_DEVTOOLS_AXI_SESSION = "collision-worker";
     process.env.CHROME_DEVTOOLS_AXI_PORT = "9555";
-    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://localhost:9555";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9555";
     let spawned = false;
     let caught: unknown;
     try {
