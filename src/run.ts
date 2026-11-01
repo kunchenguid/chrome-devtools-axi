@@ -9,6 +9,10 @@ import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CdpError } from "./client.js";
+import {
+  NAVIGATION_TIMEOUT_ENV,
+  parseNavigationTimeoutMs,
+} from "./navigation-timeout.js";
 import { captureFreshSnapshot, parseUidFresh } from "./uid-freshness.js";
 
 type CallTool = (
@@ -125,6 +129,33 @@ function stripSnapshotHeader(text: string): string {
   return text.replace(/^[\s\S]*?##\s+Latest page snapshot\s*\n/, "");
 }
 
+/**
+ * The navigation `timeout` tool argument, or nothing when the caller did not
+ * opt in. An explicit `--timeout` value wins over
+ * `CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS`; an invalid value from either is
+ * a usage error rather than a silent fallback to the 10s default.
+ */
+export function navigationTimeoutArgs(flagValue?: string): {
+  timeout?: number;
+} {
+  const fromFlag = flagValue !== undefined;
+  const raw = fromFlag ? flagValue : process.env[NAVIGATION_TIMEOUT_ENV];
+  if (!fromFlag && (raw === undefined || raw.trim() === "")) return {};
+  const timeout = parseNavigationTimeoutMs(raw);
+  if (timeout === null) {
+    throw new CdpError(
+      fromFlag
+        ? `Invalid --timeout: ${JSON.stringify(raw)}`
+        : `Invalid ${NAVIGATION_TIMEOUT_ENV}: ${JSON.stringify(raw)}`,
+      "VALIDATION_ERROR",
+      [
+        "Pass a positive integer number of milliseconds, e.g. `--timeout 60000`",
+      ],
+    );
+  }
+  return { timeout };
+}
+
 /** Check if an open error is recoverable by falling back to new_page. */
 function isRecoverableOpenError(error: unknown): boolean {
   if (!(error instanceof CdpError)) return false;
@@ -211,11 +242,12 @@ export function createPageHelper(callTool: CallTool): PageHelper {
           'Start with `await page.open("https://example.com")`',
         ]);
       }
+      const timeoutArgs = navigationTimeoutArgs();
       try {
-        await callTool("navigate_page", { type: "url", url });
+        await callTool("navigate_page", { type: "url", url, ...timeoutArgs });
       } catch (error) {
         if (!isRecoverableOpenError(error)) throw error;
-        await callTool("new_page", { url });
+        await callTool("new_page", { url, ...timeoutArgs });
       }
       const info = await evalJs(
         `() => ({ url: location.href, status: performance.getEntriesByType('navigation').pop()?.responseStatus ?? null })`,
@@ -321,7 +353,10 @@ export function createPageHelper(callTool: CallTool): PageHelper {
     },
 
     async back(): Promise<void> {
-      await callTool("navigate_page", { type: "back" });
+      await callTool("navigate_page", {
+        type: "back",
+        ...navigationTimeoutArgs(),
+      });
     },
   };
 }

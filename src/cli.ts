@@ -9,6 +9,7 @@ import {
 } from "./client.js";
 import { getCurrentGeneration } from "./generation.js";
 import {
+  navigationTimeoutArgs,
   readStdin,
   runScript,
   waitForDuration,
@@ -117,6 +118,10 @@ environment:
                                     If unset or blank, the bridge uses standalone stdio mode.
   CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS
                                     Bridge readiness deadline in ms (default: 30000, min: 1000)
+  CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS
+                                    Default navigation timeout in ms for open, newpage, back,
+                                    reload and page.open (positive integer). --timeout wins.
+                                    Unset: chrome-devtools-mcp's 10000 ms default.
   CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
                                     Opt-in: a bridge started with this set stops itself after
                                     this many ms with no commands (min: 1000). Unset or 0: the
@@ -135,7 +140,7 @@ tips:
 `;
 
 const COMMAND_HELP: Record<string, string> = {
-  open: `usage: chrome-devtools-axi open <url> [--full]
+  open: `usage: chrome-devtools-axi open <url> [--full] [--timeout <ms>]
 Navigate to a URL and capture an accessibility snapshot.
 
 args:
@@ -143,10 +148,12 @@ args:
 
 flags:
   --full  Show complete snapshot without truncation
+  --timeout <ms>  Navigation timeout in ms (default: 10000; env: CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS)
 
 examples:
   chrome-devtools-axi open https://example.com
-  chrome-devtools-axi open https://example.com --full`,
+  chrome-devtools-axi open https://example.com --full
+  chrome-devtools-axi open https://example.com --timeout 60000`,
 
   screenshot: `usage: chrome-devtools-axi screenshot <path> [--uid @<uid>] [--full-page] [--format png|jpeg|webp]
 Save a screenshot to a file.
@@ -252,21 +259,23 @@ examples:
   chrome-devtools-axi scroll down
   chrome-devtools-axi scroll top --full`,
 
-  back: `usage: chrome-devtools-axi back [--full]
+  back: `usage: chrome-devtools-axi back [--full] [--timeout <ms>]
 Navigate back in browser history.
 
 flags:
   --full  Show complete snapshot without truncation
+  --timeout <ms>  Navigation timeout in ms (default: 10000; env: CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS)
 
 examples:
   chrome-devtools-axi back
   chrome-devtools-axi back --full`,
 
-  reload: `usage: chrome-devtools-axi reload [--full]
+  reload: `usage: chrome-devtools-axi reload [--full] [--timeout <ms>]
 Reload the selected page and snapshot.
 
 flags:
   --full  Show complete snapshot without truncation
+  --timeout <ms>  Navigation timeout in ms (default: 10000; env: CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS)
 
 examples:
   chrome-devtools-axi reload
@@ -360,7 +369,7 @@ List all open pages/tabs in the browser.
 examples:
   chrome-devtools-axi pages`,
 
-  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--full] [--no-snapshot]
+  newpage: `usage: chrome-devtools-axi newpage <url> [--background] [--full] [--no-snapshot] [--timeout <ms>]
 Open a new tab and navigate to a URL.
 
 args:
@@ -371,10 +380,12 @@ flags:
   --full        Show complete snapshot without truncation
   --no-snapshot  Show page metadata without snapshot or snapshot-derived help
                  (takes precedence over --full)
+  --timeout <ms>  Navigation timeout in ms (default: 10000; env: CHROME_DEVTOOLS_AXI_NAVIGATION_TIMEOUT_MS)
 
 examples:
   chrome-devtools-axi newpage https://example.com
-  chrome-devtools-axi newpage https://example.com --background`,
+  chrome-devtools-axi newpage https://example.com --background
+  chrome-devtools-axi newpage https://example.com --timeout 60000`,
 
   selectpage: `usage: chrome-devtools-axi selectpage <id> [--full] [--no-snapshot]
 Switch to a tab by page ID.
@@ -913,6 +924,30 @@ function splitFullFlag(args: string[]): { args: string[]; full: boolean } {
   };
 }
 
+/**
+ * Pull `--timeout <ms>` out of a navigation command's args and resolve the
+ * tool's `timeout` argument (the flag, else the environment default, else
+ * nothing). Callers must have passed `validateCommandFlags`, which skips the
+ * flag's value when scanning for unknown flags.
+ */
+function splitTimeoutFlag(
+  command: string,
+  args: string[],
+): { args: string[]; timeoutArgs: { timeout?: number } } {
+  const index = args.indexOf("--timeout");
+  if (index === -1) return { args, timeoutArgs: navigationTimeoutArgs() };
+  const value = args[index + 1];
+  if (value === undefined) {
+    throw new CdpError("Missing value for --timeout", "VALIDATION_ERROR", [
+      `Run \`chrome-devtools-axi ${command} --help\` to see valid flags`,
+    ]);
+  }
+  return {
+    args: [...args.slice(0, index), ...args.slice(index + 2)],
+    timeoutArgs: navigationTimeoutArgs(value),
+  };
+}
+
 function trimSingleTrailingNewline(text: string): string {
   return text.endsWith("\n") ? text.slice(0, -1) : text;
 }
@@ -1102,7 +1137,8 @@ const SCROLL_FUNCTIONS: Record<string, string> = {
   bottom: "() => window.scrollTo(0, document.body.scrollHeight)",
 };
 
-async function handleOpen(args: string[], full: boolean): Promise<string> {
+async function handleOpen(rawArgs: string[], full: boolean): Promise<string> {
+  const { args, timeoutArgs } = splitTimeoutFlag("open", rawArgs);
   const url = args[0];
   if (!url) {
     throw new CdpError("Missing URL", "VALIDATION_ERROR", [
@@ -1111,12 +1147,12 @@ async function handleOpen(args: string[], full: boolean): Promise<string> {
   }
 
   try {
-    await callTool("navigate_page", { type: "url", url });
+    await callTool("navigate_page", { type: "url", url, ...timeoutArgs });
   } catch (error) {
     if (!isRecoverableOpenError(error)) {
       throw error;
     }
-    await callTool("new_page", { url });
+    await callTool("new_page", { url, ...timeoutArgs });
   }
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "open", url, full);
@@ -1219,14 +1255,16 @@ async function handleScroll(args: string[], full: boolean): Promise<string> {
   return formatPageOutput(snapshot, "scroll", undefined, full);
 }
 
-async function handleBack(full: boolean): Promise<string> {
-  await callTool("navigate_page", { type: "back" });
+async function handleBack(args: string[], full: boolean): Promise<string> {
+  const { timeoutArgs } = splitTimeoutFlag("back", args);
+  await callTool("navigate_page", { type: "back", ...timeoutArgs });
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "back", undefined, full);
 }
 
-async function handleReload(full: boolean): Promise<string> {
-  await callTool("navigate_page", { type: "reload" });
+async function handleReload(args: string[], full: boolean): Promise<string> {
+  const { timeoutArgs } = splitTimeoutFlag("reload", args);
+  await callTool("navigate_page", { type: "reload", ...timeoutArgs });
   const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "reload", undefined, full);
 }
@@ -1333,7 +1371,11 @@ async function handlePages(): Promise<string> {
   return renderOutput(blocks);
 }
 
-async function handleNewPage(args: string[], full: boolean): Promise<string> {
+async function handleNewPage(
+  rawArgs: string[],
+  full: boolean,
+): Promise<string> {
+  const { args, timeoutArgs } = splitTimeoutFlag("newpage", rawArgs);
   const noSnapshot = args.includes("--no-snapshot");
   const url = args.filter((a) => !a.startsWith("--"))[0];
   if (!url) {
@@ -1342,7 +1384,7 @@ async function handleNewPage(args: string[], full: boolean): Promise<string> {
     ]);
   }
   const background = args.includes("--background");
-  const toolArgs: Record<string, unknown> = { url };
+  const toolArgs: Record<string, unknown> = { url, ...timeoutArgs };
   if (background) toolArgs.background = true;
   await callTool("new_page", toolArgs);
   const snapshot = await stampFresh();
@@ -1759,8 +1801,8 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
   type: withFullFlag(handleType),
   press: withFullFlag(handlePress),
   scroll: withFullFlag(handleScroll),
-  back: async (args) => handleBack(splitFullFlag(args).full),
-  reload: async (args) => handleReload(splitFullFlag(args).full),
+  back: withFullFlag(handleBack),
+  reload: withFullFlag(handleReload),
   wait: withoutFullFlag(handleWait),
   eval: withFullFlag(handleEval),
   run: async () => handleRun(),
@@ -1790,7 +1832,7 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
 };
 
 const COMMAND_FLAGS: Record<string, readonly string[]> = {
-  open: ["--full"],
+  open: ["--full", "--timeout"],
   screenshot: ["--uid", "--full-page", "--format"],
   snapshot: ["--full"],
   click: ["--full"],
@@ -1798,8 +1840,8 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   type: ["--full"],
   press: ["--full"],
   scroll: ["--full"],
-  back: ["--full"],
-  reload: ["--full"],
+  back: ["--full", "--timeout"],
+  reload: ["--full", "--timeout"],
   wait: [],
   eval: ["--full"],
   run: [],
@@ -1809,7 +1851,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   dialog: [],
   upload: ["--full"],
   pages: [],
-  newpage: ["--background", "--full", "--no-snapshot"],
+  newpage: ["--background", "--full", "--no-snapshot", "--timeout"],
   selectpage: ["--full", "--no-snapshot"],
   closepage: [],
   resize: [],
@@ -1836,6 +1878,10 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
 };
 
 const COMMAND_VALUE_FLAGS: Partial<Record<string, readonly string[]>> = {
+  open: ["--timeout"],
+  back: ["--timeout"],
+  reload: ["--timeout"],
+  newpage: ["--timeout"],
   screenshot: ["--uid", "--format"],
   emulate: COMMAND_FLAGS.emulate,
   console: COMMAND_FLAGS.console,
