@@ -15,7 +15,7 @@
  *
  * Precedence:
  *   port      - CHROME_DEVTOOLS_AXI_PORT > deterministic hash of the session name
- *               (never the local port of CHROME_DEVTOOLS_AXI_BROWSER_URL; see
+ *               (never adjusted; `ensureBridge` refuses a port equal to
  *               `resolveLocalBrowserPort`)
  *   state dir - always derived from the session name
  *
