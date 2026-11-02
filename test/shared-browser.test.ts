@@ -102,6 +102,8 @@ describe("newpage and open in a shared browser", () => {
     [["newpage", "https://example.com", "--context", "two words"]],
     [["newpage", "https://example.com", "--context", "x".repeat(65)]],
     [["newpage", "https://example.com", "--context", "a", "--context", "b"]],
+    [["newpage", "https://example.com", "--context", "--no-snapshot"]],
+    [["newpage", "https://example.com", "--context", "-x"]],
   ])("rejects %j without calling the browser", async (argv) => {
     await main({ argv, stdout: { write: vi.fn() } });
     expect(callTool).not.toHaveBeenCalled();

@@ -30,7 +30,7 @@ import {
 import { getSuggestions } from "./suggestions.js";
 import { installHooksOrThrow } from "./hooks.js";
 import { parsePagesList } from "./pages.js";
-import { overlaySessionSelected } from "./selected-page.js";
+import { CONTEXT_NAME, overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
 import {
@@ -382,7 +382,8 @@ flags:
                 AUTO_CONNECT)
   --context <name>  Open in a separate browser context with its own cookies and
                     storage; tabs given the same name share one while the
-                    bridge runs. Name: 1-64 chars from [A-Za-z0-9._-]
+                    bridge runs. Name: 1-64 chars from [A-Za-z0-9._-],
+                    not starting with -
   --full        Show complete snapshot without truncation
   --no-snapshot  Show page metadata without snapshot or snapshot-derived help
                  (takes precedence over --full)
@@ -1450,9 +1451,9 @@ async function handleNewPage(
     timeoutSplit.args,
     "--context",
   );
-  if (context !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(context)) {
+  if (context !== undefined && !new RegExp(`^${CONTEXT_NAME}$`).test(context)) {
     throw new CdpError(
-      `Invalid --context "${context}": use 1-64 chars from [A-Za-z0-9._-]`,
+      `Invalid --context "${context}": use 1-64 chars from [A-Za-z0-9._-], not starting with -`,
       "VALIDATION_ERROR",
       [
         "Run `chrome-devtools-axi newpage https://example.com --context login-b` to open a tab in a separate context",
