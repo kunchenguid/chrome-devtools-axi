@@ -401,6 +401,8 @@ launch and attach settings. Run the shared service on the same host and
 filesystem as AXI, keeping the endpoint loopback-only, so saved artifact paths
 refer to the same local files. Generic MCP stdio clients remain supported; the
 proxy choice above only changes how AXI's bridge reaches the shared service.
+In this mode `newpage` and `open` open new tabs in the background, as they do
+with `CHROME_DEVTOOLS_AXI_BROWSER_URL` below.
 
 Stop any existing bridges for those session names before switching between
 these configurations: a running bridge retains its original transport

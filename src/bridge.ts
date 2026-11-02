@@ -481,6 +481,13 @@ async function handleCallRequest(
 ): Promise<void> {
   const body = await readRequestBody(req);
   const payload = parseBridgeCallPayload(body);
+  if (
+    payload.name === "new_page" &&
+    payload.args.background === undefined &&
+    attachesToRunningBrowser()
+  ) {
+    payload.args = { ...payload.args, background: true };
+  }
   const result = await client.callTool(
     {
       name: payload.name,
@@ -684,6 +691,26 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
   "--use-mock-keychain",
   "--password-store=basic",
 ] as const;
+
+/**
+ * True when this bridge drives a browser something else started: attached
+ * with CHROME_DEVTOOLS_AXI_BROWSER_URL or CHROME_DEVTOOLS_AXI_AUTO_CONNECT, or
+ * through a shared CHROME_DEVTOOLS_AXI_MCP_SERVER_URL service. Such a browser
+ * is usually headed and shared with a person or other agents, and a tab opened
+ * in the foreground brings it in front of whatever they are typing into, so
+ * the bridge opens new tabs in the background there. It reads the bridge's own
+ * spawn environment, which is what selected its transport, never the
+ * environment of the CLI invocation that happens to reuse it.
+ */
+export function attachesToRunningBrowser(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    Boolean(env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim()) ||
+    Boolean(env.CHROME_DEVTOOLS_AXI_BROWSER_URL?.trim()) ||
+    env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1"
+  );
+}
 
 export function buildTransportArgs(): string[] {
   const args = ["-y", "chrome-devtools-mcp@latest"];
