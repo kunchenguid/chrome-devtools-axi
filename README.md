@@ -227,7 +227,7 @@ chrome-devtools-axi newpage https://example.com --no-snapshot
 chrome-devtools-axi selectpage 1 --no-snapshot
 ```
 
-Tabs share one cookie jar unless `newpage` is given `--context <name>`. That opens the tab in a separate browser context (chrome-devtools-mcp's `isolatedContext`) with its own cookies and storage, so one browser can hold two sign-ins at once or a signed-out view beside a signed-in one. Later `newpage --context` calls with the same name join that context. Names are kept by the bridge, so each named session has its own, and after the bridge stops a name starts a fresh context (tabs already open in the old one stay open). Names use 1-64 characters from `[A-Za-z0-9._-]`, not starting with `-`.
+Tabs share one cookie jar unless `newpage` is given `--context <name>`. That opens the tab in a separate browser context (chrome-devtools-mcp's `isolatedContext`) with its own cookies and storage, so one browser can hold two sign-ins at once or a signed-out view beside a signed-in one. Later `newpage --context` calls with the same name join that context. Names are kept by the bridge, so each named session has its own, and after the bridge stops a name starts a fresh context. Stopping the bridge closes Chrome when AXI launched it; in a browser something else started (`CHROME_DEVTOOLS_AXI_BROWSER_URL` or `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`), tabs already open in the old context stay open. Names use 1-64 characters from `[A-Za-z0-9._-]`, not starting with `-`.
 
 ```sh
 chrome-devtools-axi newpage https://example.com --context signed-out
