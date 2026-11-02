@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AxiError } from "axi-sdk-js";
 import { decode } from "@toon-format/toon";
 
@@ -54,11 +54,6 @@ async function reconnectClearedError(): Promise<CdpError> {
 }
 
 describe("main", () => {
-  beforeEach(() => {
-    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", undefined);
-    vi.stubEnv("CHROME_DEVTOOLS_AXI_AUTO_CONNECT", undefined);
-  });
-
   afterEach(() => {
     callTool.mockReset();
     process.exitCode = undefined;
@@ -915,16 +910,10 @@ describe("navigation snapshot output", () => {
   const snapshot =
     'RootWebArea "Navigation page"\n  uid=1 button "Continue"\n  uid=2 link "Help"';
 
-  beforeEach(() => {
-    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", undefined);
-    vi.stubEnv("CHROME_DEVTOOLS_AXI_AUTO_CONNECT", undefined);
-  });
-
   afterEach(() => {
     callTool.mockReset();
     process.exitCode = undefined;
     vi.restoreAllMocks();
-    vi.unstubAllEnvs();
     if (savedHome === undefined) delete process.env.HOME;
     else process.env.HOME = savedHome;
     if (savedSession === undefined) {
