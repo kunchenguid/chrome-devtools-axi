@@ -2154,6 +2154,16 @@ describe("handleBridgeRequest /call new_page in a browser something else started
     ).toEqual({ url: "https://example.com" });
   });
 
+  it("keeps an explicit foreground request when attached", async () => {
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", "http://127.0.0.1:9222");
+    expect(
+      await forwardedArgs("new_page", {
+        url: "https://example.com",
+        background: false,
+      }),
+    ).toEqual({ url: "https://example.com", background: false });
+  });
+
   it("leaves other tools' arguments alone", async () => {
     vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", "http://127.0.0.1:9222");
     expect(
