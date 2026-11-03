@@ -1,16 +1,20 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { lookup } from "node:dns/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_BASE_PORT,
   DEFAULT_SESSION_NAME,
   defaultPortForSession,
+  resolveLocalBrowserPort,
   resolveSessionName,
   resolveSessionPidFile,
   resolveSessionPort,
   resolveSessionStateDir,
   validateSessionName,
 } from "../src/sessions.js";
+
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn() }));
 
 const STATE_DIR = join(homedir(), ".chrome-devtools-axi");
 
@@ -141,6 +145,72 @@ describe("resolveSessionPort", () => {
     expect(resolveSessionPort(DEFAULT_SESSION_NAME)).toBe(DEFAULT_BASE_PORT);
     process.env.CHROME_DEVTOOLS_AXI_PORT = "0";
     expect(resolveSessionPort(DEFAULT_SESSION_NAME)).toBe(DEFAULT_BASE_PORT);
+  });
+});
+
+describe("resolveLocalBrowserPort", () => {
+  const saved = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+
+  beforeEach(() => {
+    vi.mocked(lookup).mockResolvedValue([
+      { address: "127.0.0.1", family: 4 },
+    ] as never);
+  });
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    else process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = saved;
+  });
+
+  const portFor = (url: string | undefined) => {
+    if (url === undefined) delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
+    else process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = url;
+    return resolveLocalBrowserPort();
+  };
+
+  it("returns the port of endpoints overlapping the bridge listener", async () => {
+    expect(await portFor("http://127.0.0.1:9224")).toBe(9224);
+    expect(await portFor("http://localhost:9333/")).toBe(9333);
+    expect(await portFor("http://0.0.0.0:9224")).toBe(9224);
+    expect(await portFor("http://[::ffff:127.0.0.1]:9224")).toBe(9224);
+    expect(await portFor("ws://[::ffff:7f00:1]:9224/devtools/browser/x")).toBe(
+      9224,
+    );
+    expect(await portFor("http://127.1:9224")).toBe(9224);
+  });
+
+  it("allows endpoints on distinct loopback addresses", async () => {
+    expect(await portFor("ws://[::1]:9224/devtools/browser/x")).toBeNull();
+    expect(await portFor("http://127.0.0.2:9224")).toBeNull();
+    expect(await portFor("http://[::ffff:127.0.0.2]:9224")).toBeNull();
+  });
+
+  it("falls back to the scheme default port", async () => {
+    expect(await portFor("http://localhost")).toBe(80);
+    expect(await portFor("wss://127.0.0.1/x")).toBe(443);
+  });
+
+  it("returns null when unset, malformed, or remote", async () => {
+    expect(await portFor(undefined)).toBeNull();
+    expect(await portFor("not a url")).toBeNull();
+    vi.mocked(lookup).mockResolvedValue([
+      { address: "192.0.2.1", family: 4 },
+    ] as never);
+    expect(await portFor("http://chrome.example:9224")).toBeNull();
+  });
+  it("resolves all hostname addresses before classifying overlap", async () => {
+    vi.mocked(lookup).mockResolvedValue([
+      { address: "::1", family: 6 },
+    ] as never);
+    expect(await portFor("http://localhost:9224")).toBeNull();
+    expect(lookup).toHaveBeenLastCalledWith("localhost", { all: true });
+    vi.mocked(lookup).mockResolvedValue([
+      { address: "::1", family: 6 },
+      { address: "127.0.0.1", family: 4 },
+    ] as never);
+    expect(await portFor("http://localhost:9224")).toBe(9224);
+    vi.mocked(lookup).mockRejectedValue(new Error("ENOTFOUND"));
+    expect(await portFor("http://missing.example:9224")).toBeNull();
   });
 });
 

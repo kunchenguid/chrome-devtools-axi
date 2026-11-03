@@ -15,12 +15,16 @@
  *
  * Precedence:
  *   port      - CHROME_DEVTOOLS_AXI_PORT > deterministic hash of the session name
+ *               (never adjusted; browser-endpoint collision validation lives
+ *               in `assertBridgePortDistinctFromBrowser` in client.ts)
  *   state dir - always derived from the session name
  *
  * The default session name is "default", which preserves prior behavior: port
  * 9224 and the legacy `~/.chrome-devtools-axi/` state paths.
  */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -100,6 +104,42 @@ export function resolveSessionPort(
     if (!Number.isNaN(parsed) && parsed > 0) return parsed;
   }
   return defaultPortForSession(name);
+}
+
+/**
+ * Port of a local Chrome DevTools endpoint named by
+ * `CHROME_DEVTOOLS_AXI_BROWSER_URL`, or null when the URL is unset, malformed,
+ * or points at an address that does not overlap the bridge's `127.0.0.1`
+ * listener. A URL without an explicit port resolves to the scheme default.
+ */
+export async function resolveLocalBrowserPort(): Promise<number | null> {
+  const raw = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL?.trim();
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  let addresses: string[];
+  try {
+    addresses = isIP(host)
+      ? [host]
+      : (await lookup(host, { all: true })).map(({ address }) => address);
+  } catch {
+    return null;
+  }
+  const overlapsBridge = addresses.some(
+    (address) =>
+      address === "0.0.0.0" ||
+      address === "127.0.0.1" ||
+      address === "::ffff:127.0.0.1" ||
+      address === "::ffff:7f00:1",
+  );
+  if (!overlapsBridge) return null;
+  if (url.port) return Number.parseInt(url.port, 10);
+  return url.protocol === "https:" || url.protocol === "wss:" ? 443 : 80;
 }
 
 /**

@@ -22,6 +22,7 @@ import {
 import { AMBIENT_REQUEST_HEADER } from "../src/bridge-script.js";
 import { setSelectedPageId } from "../src/selected-page.js";
 import {
+  assertBridgePortDistinctFromBrowser,
   buildBridgeEarlyExitError,
   callTool,
   CdpError,
@@ -393,6 +394,89 @@ describe("buildBridgeEarlyExitError", () => {
     const err = buildBridgeEarlyExitError("worker-2", 9231, null, "SIGKILL");
 
     expect(err.message).toContain("was killed by SIGKILL");
+  });
+});
+
+describe("bridge/browser port collision", () => {
+  const keys = [
+    "CHROME_DEVTOOLS_AXI_BROWSER_URL",
+    "CHROME_DEVTOOLS_AXI_PORT",
+    "CHROME_DEVTOOLS_AXI_AUTO_CONNECT",
+    "CHROME_DEVTOOLS_AXI_MCP_SERVER_URL",
+    "CHROME_DEVTOOLS_AXI_SESSION",
+    "HOME",
+  ];
+  const saved: Record<string, string | undefined> = {};
+  let tmpHome: string;
+
+  beforeEach(() => {
+    for (const k of keys) saved[k] = process.env[k];
+    tmpHome = mkdtempSync(join(tmpdir(), "axi-port-collision-"));
+    process.env.HOME = tmpHome;
+    for (const k of keys.slice(0, 5)) delete process.env[k];
+  });
+
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("refuses the default bridge port when the browser URL uses it", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9224";
+    await expect(
+      assertBridgePortDistinctFromBrowser("default", 9224),
+    ).rejects.toThrowError(CdpError);
+  });
+
+  it("allows distinct ports and remote browser endpoints", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9222";
+    await expect(
+      assertBridgePortDistinctFromBrowser("default", 9224),
+    ).resolves.toBeUndefined();
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://chrome.example:9224";
+    await expect(
+      assertBridgePortDistinctFromBrowser("default", 9224),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores the browser URL in auto-connect and shared MCP modes", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9224";
+    process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT = "1";
+    await expect(
+      assertBridgePortDistinctFromBrowser("default", 9224),
+    ).resolves.toBeUndefined();
+    delete process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT;
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL =
+      "http://127.0.0.1:9333/mcp";
+    await expect(
+      assertBridgePortDistinctFromBrowser("default", 9224),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ensureBridge refuses an explicit colliding port without spawning", async () => {
+    process.env.CHROME_DEVTOOLS_AXI_SESSION = "collision-worker";
+    process.env.CHROME_DEVTOOLS_AXI_PORT = "9555";
+    process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL = "http://127.0.0.1:9555";
+    let spawned = false;
+    let caught: unknown;
+    try {
+      await ensureBridge(() => {
+        spawned = true;
+        return new EventEmitter() as unknown as SpawnedBridge;
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(spawned).toBe(false);
+    expect(caught).toBeInstanceOf(CdpError);
+    const err = caught as CdpError;
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toContain("9555");
+    expect(err.message).toContain("CHROME_DEVTOOLS_AXI_BROWSER_URL");
+    expect(err.suggestions.join("\n")).toContain("CHROME_DEVTOOLS_AXI_PORT");
   });
 });
 
