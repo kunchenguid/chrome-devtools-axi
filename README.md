@@ -408,6 +408,8 @@ launch and attach settings. Run the shared service on the same host and
 filesystem as AXI, keeping the endpoint loopback-only, so saved artifact paths
 refer to the same local files. Generic MCP stdio clients remain supported; the
 proxy choice above only changes how AXI's bridge reaches the shared service.
+In this mode `newpage` and `open` open new tabs in the background, as they do
+with `CHROME_DEVTOOLS_AXI_BROWSER_URL` below.
 
 Stop any existing bridges for those session names before switching between
 these configurations: a running bridge retains its original transport
@@ -420,6 +422,8 @@ Connect to an existing Chrome instance instead of launching one:
 ```sh
 export CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9222
 ```
+
+In this mode and with `CHROME_DEVTOOLS_AXI_AUTO_CONNECT`, `newpage` and `open` open new tabs in the background, as `newpage --background` does. The browser is usually a visible window that a person or other agents also use, and a foreground tab brings it to the front, taking keyboard focus from whatever app the person was typing in.
 
 `CHROME_DEVTOOLS_AXI_BROWSER_URL` accepts both `http://` or `https://` URLs and `ws://` or `wss://` endpoints:
 

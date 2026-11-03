@@ -2090,6 +2090,88 @@ describe("handleBridgeRequest /call error + roots", () => {
   });
 });
 
+describe("handleBridgeRequest /call new_page in a browser something else started", () => {
+  const ATTACH_ENV = [
+    "CHROME_DEVTOOLS_AXI_BROWSER_URL",
+    "CHROME_DEVTOOLS_AXI_AUTO_CONNECT",
+    "CHROME_DEVTOOLS_AXI_MCP_SERVER_URL",
+  ];
+
+  beforeEach(() => {
+    for (const name of ATTACH_ENV) vi.stubEnv(name, undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function forwardedArgs(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | undefined> {
+    let forwarded: Record<string, unknown> | undefined;
+    const client: BridgeClient = {
+      listTools: async () => ({ tools: [] }),
+      callTool: async (request) => {
+        forwarded = request.arguments;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      close: async () => {},
+    };
+    const { res, captured } = makeResponse();
+    await handleBridgeRequest(
+      client,
+      makeRequest("POST", "/call", {}, JSON.stringify({ name, args })),
+      res,
+    );
+    expect(JSON.parse(captured.body)).toEqual({ result: "ok" });
+    return forwarded;
+  }
+
+  it.each([
+    ["CHROME_DEVTOOLS_AXI_BROWSER_URL", "http://127.0.0.1:9222"],
+    [
+      "CHROME_DEVTOOLS_AXI_BROWSER_URL",
+      "ws://127.0.0.1:9222/devtools/browser/x",
+    ],
+    ["CHROME_DEVTOOLS_AXI_AUTO_CONNECT", "1"],
+    ["CHROME_DEVTOOLS_AXI_MCP_SERVER_URL", "http://127.0.0.1:9333/mcp"],
+  ])(
+    "opens new tabs in the background when the bridge was started with %s=%s",
+    async (name, value) => {
+      vi.stubEnv(name, value);
+      expect(
+        await forwardedArgs("new_page", { url: "https://example.com" }),
+      ).toEqual({ url: "https://example.com", background: true });
+    },
+  );
+
+  it("keeps new tabs in the foreground when the bridge launched the browser", async () => {
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_AUTO_CONNECT", "0");
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", "  ");
+    expect(
+      await forwardedArgs("new_page", { url: "https://example.com" }),
+    ).toEqual({ url: "https://example.com" });
+  });
+
+  it("keeps an explicit foreground request when attached", async () => {
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", "http://127.0.0.1:9222");
+    expect(
+      await forwardedArgs("new_page", {
+        url: "https://example.com",
+        background: false,
+      }),
+    ).toEqual({ url: "https://example.com", background: false });
+  });
+
+  it("leaves other tools' arguments alone", async () => {
+    vi.stubEnv("CHROME_DEVTOOLS_AXI_BROWSER_URL", "http://127.0.0.1:9222");
+    expect(
+      await forwardedArgs("navigate_page", { url: "https://example.com" }),
+    ).toEqual({ url: "https://example.com" });
+  });
+});
+
 describe("createRootsAwareBridgeClient", () => {
   function makeFakeMcpClient() {
     let rootsListHandler: (() => { roots: unknown }) | null = null;

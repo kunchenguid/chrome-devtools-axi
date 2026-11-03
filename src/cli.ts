@@ -377,7 +377,9 @@ args:
   <url>  URL to open (required)
 
 flags:
-  --background  Open in background without bringing to front
+  --background  Open in background without bringing to front (always the case
+                when attached to a running browser with BROWSER_URL,
+                AUTO_CONNECT, or MCP_SERVER_URL)
   --context <name>  Open in a separate browser context with its own cookies and
                     storage; tabs given the same name share one while the
                     bridge runs. Name: 1-64 chars from [A-Za-z0-9._-],
