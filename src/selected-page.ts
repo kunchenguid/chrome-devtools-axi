@@ -126,13 +126,19 @@ export function rememberToolRouting(
   }
 }
 
+export const CONTEXT_NAME = "[A-Za-z0-9._][A-Za-z0-9._-]{0,63}";
 const MCP_PAGES_HEADER = /^## Pages$/;
 const MCP_OTHER_SECTION =
   /^##\s+(Extension Pages|Extension Service Workers|Third-party developer tools|WebMCP tools)$/;
 const GENERIC_SCHEME_SLASH_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 const COLON_ONLY_SCHEME_URL = /^(?:about:|data:|view-source:|blob:)/i;
 const PAGE_ID_LINE = /^(\d+):\s*(.*)$/;
-const MCP_SELECTED_SUFFIX = / \[selected\]$/;
+// MCP writes ` isolatedContext=<name>` after the marker for a tab in a
+// separate context; `newpage --context` only accepts names matching
+// CONTEXT_NAME, so the suffix cannot reach back into a title.
+const MCP_SELECTED_SUFFIX = new RegExp(
+  ` \\[selected\\](?: isolatedContext=${CONTEXT_NAME})?$`,
+);
 // MCP moved its selection off a page that closed; the marker is no longer
 // the created tab.
 const MCP_SELECTION_FALLBACK = /^Note: the previously selected page /;
