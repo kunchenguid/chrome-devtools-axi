@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.47](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.46...chrome-devtools-axi-v0.1.47) (2026-11-03)
+
+
+### Features
+
+* **cli:** add --timeout navigation timeout for open and newpage ([#197](https://github.com/kunchenguid/chrome-devtools-axi/issues/197)) ([ecb14d6](https://github.com/kunchenguid/chrome-devtools-axi/commit/ecb14d688dd78100e53f379726dccc21a57dbf04))
+* **cli:** add newpage --context for separate cookie jars ([#200](https://github.com/kunchenguid/chrome-devtools-axi/issues/200)) ([1dbdac1](https://github.com/kunchenguid/chrome-devtools-axi/commit/1dbdac1ca1122e1d2b76d889bbc8a2dd2eb2dcd7))
+
 ## [0.1.46](https://github.com/kunchenguid/chrome-devtools-axi/compare/chrome-devtools-axi-v0.1.45...chrome-devtools-axi-v0.1.46) (2026-10-28)
 
 
