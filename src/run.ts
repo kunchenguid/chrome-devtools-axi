@@ -117,6 +117,51 @@ export function parseEvalOutput(output: string): unknown {
   return output.trim();
 }
 
+// --- Ref fill ---
+
+/**
+ * evaluate_script payload that fills a text field through the prototype `value`
+ * setter, then sends bubbling input and change events. Returns true when it
+ * filled the element and false for anything it does not handle.
+ *
+ * MCP `fill` assigns through the element's own `value` property. React records
+ * that write in its value tracker, so the following input event looks like no
+ * change and a controlled field never updates its state.
+ */
+function nativeFillFunction(text: string): string {
+  return `(el) => {
+  const textTypes = ['text', 'search', 'url', 'tel', 'email', 'password', 'number'];
+  const fillable = el instanceof HTMLTextAreaElement
+    || (el instanceof HTMLInputElement && textTypes.includes(el.type));
+  if (!fillable || el.matches(':disabled') || el.readOnly) return false;
+  el.focus();
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(text)});
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}`;
+}
+
+/**
+ * Fill the element behind a fresh snapshot uid. Text inputs and textareas take
+ * the native-setter path so controlled React fields follow the value; selects,
+ * checkboxes, contenteditable and read-only or disabled fields keep MCP `fill`.
+ */
+export async function fillRef(
+  callTool: CallTool,
+  uid: string,
+  text: string,
+): Promise<void> {
+  const handled = parseEvalOutput(
+    await callTool("evaluate_script", {
+      function: nativeFillFunction(text),
+      args: [uid],
+    }),
+  );
+  if (handled !== true) await callTool("fill", { uid, value: text });
+}
+
 /** Strip MCP preamble/headers from snapshot text, returning just the accessibility tree. */
 function stripSnapshotHeader(text: string): string {
   const lines = text.split("\n");
@@ -291,10 +336,11 @@ export function createPageHelper(callTool: CallTool): PageHelper {
 
     async fill(refOrSelector: string, text: string): Promise<void> {
       if (isUidRef(refOrSelector)) {
-        await callTool("fill", {
-          uid: await parseUidFresh(refOrSelector, callTool),
-          value: text,
-        });
+        await fillRef(
+          callTool,
+          await parseUidFresh(refOrSelector, callTool),
+          text,
+        );
       } else {
         const sel = JSON.stringify(refOrSelector);
         const val = JSON.stringify(text);

@@ -13,6 +13,7 @@ import {
   parseNavigationTimeoutMs,
 } from "./navigation-timeout.js";
 import {
+  fillRef,
   readStdin,
   runScript,
   waitForDuration,
@@ -324,7 +325,7 @@ script API (available as global \`page\`):
   await page.wait(selector, ms)     Wait for CSS selector with timeout
   await page.click("@uid")          Click an element by fresh ref
   await page.click(selector)        Click via CSS selector
-  await page.fill("@uid", text)     Fill a form field by fresh ref
+  await page.fill("@uid", text)     Fill a form field by fresh ref, including controlled fields
   await page.fill(selector, text)   Fill via CSS selector, including controlled fields
   await page.type(text)             Type at the focused element
   await page.press(key)             Press a keyboard key
@@ -1260,10 +1261,8 @@ async function handleFill(args: string[], full: boolean): Promise<string> {
     ]);
   }
 
-  const snapshot = await callWithSnapshot("fill", {
-    uid: await parseUidFresh(uid),
-    value,
-  });
+  await fillRef(callTool, await parseUidFresh(uid), value);
+  const snapshot = await stampFresh();
   return formatPageOutput(snapshot, "fill", undefined, full);
 }
 
