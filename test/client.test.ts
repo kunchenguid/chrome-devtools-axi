@@ -19,7 +19,10 @@ import {
   PAGE_IDENTITY_CHANGED_ERROR,
   type BridgeClient,
 } from "../src/bridge.js";
-import { AMBIENT_REQUEST_HEADER } from "../src/bridge-script.js";
+import {
+  AMBIENT_REQUEST_HEADER,
+  CHROME_DEVTOOLS_MCP_SPEC,
+} from "../src/bridge-script.js";
 import { setSelectedPageId } from "../src/selected-page.js";
 import {
   buildBridgeEarlyExitError,
@@ -361,7 +364,7 @@ describe("buildBridgeEarlyExitError", () => {
     expect(suggestions).toContain("reachable");
     expect(suggestions).not.toContain("CHROME_DEVTOOLS_AXI_MCP_PATH");
     expect(suggestions).not.toContain("--serverUrl");
-    expect(suggestions).not.toContain("chrome-devtools-mcp@latest");
+    expect(suggestions).not.toContain(CHROME_DEVTOOLS_MCP_SPEC);
   });
 
   it("gives proxy prerequisites for a shared MCP startup failure", () => {
@@ -377,7 +380,7 @@ describe("buildBridgeEarlyExitError", () => {
     expect(suggestions).toContain("--serverUrl");
     expect(suggestions).not.toContain("absolute http(s)");
     expect(suggestions).not.toContain("Chrome failed to launch");
-    expect(suggestions).not.toContain("chrome-devtools-mcp@latest");
+    expect(suggestions).not.toContain(CHROME_DEVTOOLS_MCP_SPEC);
   });
 
   it("points at CHROME_DEVTOOLS_AXI_MCP_PATH when an explicit path is set", () => {
