@@ -514,7 +514,14 @@ async function handleCallRequest(
     writeJson(res, 200, { error: text || `Tool "${payload.name}" failed` });
     return;
   }
-  writeJson(res, 200, { result: text });
+  const identity =
+    payload.name === "new_page" &&
+    result !== null &&
+    typeof result === "object" &&
+    "structuredContent" in result
+      ? { structuredContent: result.structuredContent }
+      : {};
+  writeJson(res, 200, { result: text, ...identity });
 }
 
 export async function handleBridgeRequest(
@@ -686,7 +693,11 @@ export const KEYCHAIN_ISOLATION_CHROME_ARGS = [
 ] as const;
 
 export function buildTransportArgs(): string[] {
-  const args = ["-y", "chrome-devtools-mcp@latest"];
+  const args = [
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--experimentalStructuredContent",
+  ];
 
   const autoConnect = process.env.CHROME_DEVTOOLS_AXI_AUTO_CONNECT === "1";
   const browserUrl = process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;

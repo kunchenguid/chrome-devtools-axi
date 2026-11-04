@@ -6,18 +6,8 @@
  *
  * Survives across short-lived CLI processes the same way the snapshot
  * generation counter does: a file in the active session's state dir.
- * `select_page` writes the caller-supplied id. `new_page` (open / newpage)
- * records the created tab: the one complete row in that tool's own dump that
- * ends in ` [selected]`. chrome-devtools-mcp selects the page it creates,
- * serializes tool calls, and appends that suffix after the ` (url)` wrapper,
- * so a single-line page title cannot put it at the end of a row. The URL is
- * not used: it can change while loading (redirects, query rewrites) and need
- * not be unique (#146, #155, #170). Not a `list_pages` call, and not every
- * `N:` line after `## Pages`. Any dump `createdPageIdFromNewPageDump` rejects
- * clears the session id so the next page-scoped call fails loud until an
- * explicit `select_page`. `close_page` of the selected id also clears it,
- * and so does the bridge when chrome-devtools-mcp reports a browser reconnect
- * that reissues every page id (`didMcpPageIdentityChange` in `src/bridge.ts`).
+ * See README.md#page-management for selection behavior and
+ * `createdPageIdFromNewPageDump` for the legacy text parser's safety rationale.
  */
 
 import {
@@ -100,23 +90,24 @@ export function overlaySessionSelected<
 }
 
 /**
- * Record routing after a successful browser-scoped tool. `[selected]` on
- * `list_pages` is display-only; only `new_page`'s own dump is read for it.
- *
- * `new_page` records the unique complete row MCP marked selected. Otherwise
- * the session id is cleared (do not keep a prior dump guess).
+ * Only new_page can set routing from an MCP response. A malformed structured
+ * identity fails closed instead of falling back to untrusted page text.
  */
 export function rememberToolRouting(
   name: string,
   args: Record<string, unknown>,
   result: string,
+  structuredContent?: unknown,
 ): void {
   if (name === "select_page" && typeof args.pageId === "number") {
     setSelectedPageId(args.pageId);
     return;
   }
   if (name === "new_page") {
-    const created = createdPageIdFromNewPageDump(result);
+    const created =
+      structuredContent === undefined
+        ? createdPageIdFromNewPageDump(result)
+        : createdPageIdFromStructuredContent(result, structuredContent);
     if (created !== null) setSelectedPageId(created);
     else clearSelectedPageId();
     return;
@@ -142,6 +133,47 @@ const MCP_SELECTED_SUFFIX = new RegExp(
 // MCP moved its selection off a page that closed; the marker is no longer
 // the created tab.
 const MCP_SELECTION_FALLBACK = /^Note: the previously selected page /;
+
+function createdPageIdFromStructuredContent(
+  text: string,
+  structuredContent: unknown,
+): number | null {
+  if (
+    !structuredContent ||
+    typeof structuredContent !== "object" ||
+    !("pages" in structuredContent) ||
+    !Array.isArray(structuredContent.pages)
+  ) {
+    return null;
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (MCP_PAGES_HEADER.test(line)) break;
+    if (MCP_SELECTION_FALLBACK.test(line)) return null;
+  }
+  const ids = new Set<number>();
+  let selectedId: number | null = null;
+  for (const page of structuredContent.pages) {
+    if (
+      !page ||
+      typeof page !== "object" ||
+      !Number.isSafeInteger(page.id) ||
+      page.id < 0 ||
+      ids.has(page.id) ||
+      typeof page.url !== "string" ||
+      typeof page.selected !== "boolean"
+    ) {
+      return null;
+    }
+    ids.add(page.id);
+    if (!page.selected) continue;
+    if (selectedId !== null || page.url.startsWith("chrome-extension:")) {
+      return null;
+    }
+    selectedId = page.id;
+  }
+  return selectedId;
+}
 
 function isSchemeUrl(label: string): boolean {
   return (
