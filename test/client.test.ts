@@ -20,7 +20,7 @@ import {
   type BridgeClient,
 } from "../src/bridge.js";
 import { AMBIENT_REQUEST_HEADER } from "../src/bridge-script.js";
-import { setSelectedPageId } from "../src/selected-page.js";
+import { getSelectedPageId, setSelectedPageId } from "../src/selected-page.js";
 import {
   buildBridgeEarlyExitError,
   callTool,
@@ -426,6 +426,86 @@ describe("ensureBridge early-exit fast-fail", () => {
     restore("CHROME_DEVTOOLS_AXI_BRIDGE_TIMEOUT_MS", savedTimeout);
     restore("CHROME_DEVTOOLS_AXI_PORT", savedPort);
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("preserves a live bridge and selection when its deep health probe times out", async () => {
+    const bridgeProcess = spawn(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const fake = await startFakeBridgeServer({
+      shallow: "ok",
+      deep: "ok",
+      deepDelayMs: 6000,
+      session: "early-exit-worker",
+    });
+    try {
+      const pidFile = resolveSessionPidFile();
+      mkdirSync(dirname(pidFile), { recursive: true });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({ pid: bridgeProcess.pid, port: fake.port }),
+      );
+      setSelectedPageId(27);
+      let spawned = false;
+
+      await expect(
+        ensureBridge(() => {
+          spawned = true;
+          throw new Error("Unexpected bridge replacement");
+        }),
+      ).rejects.toMatchObject({ code: "TIMEOUT" });
+
+      expect(spawned).toBe(false);
+      expect(() => process.kill(bridgeProcess.pid!, 0)).not.toThrow();
+      expect(getSelectedPageId()).toBe(27);
+      expect(JSON.parse(readFileSync(pidFile, "utf-8")).pid).toBe(
+        bridgeProcess.pid,
+      );
+    } finally {
+      bridgeProcess.kill("SIGTERM");
+      await waitForProcessExit(bridgeProcess.pid!, 2000);
+      await fake.close();
+    }
+  }, 15_000);
+
+  it("replaces a bridge whose deep probe confirms the target is unavailable", async () => {
+    const bridgeProcess = spawn(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+    ]);
+    const health: FakeBridgeOptions = {
+      shallow: "ok",
+      deep: "error",
+      session: "early-exit-worker",
+    };
+    const fake = await startFakeBridgeServer(health);
+    try {
+      process.env.CHROME_DEVTOOLS_AXI_PORT = String(fake.port);
+      const pidFile = resolveSessionPidFile();
+      mkdirSync(dirname(pidFile), { recursive: true });
+      writeFileSync(
+        pidFile,
+        JSON.stringify({ pid: bridgeProcess.pid, port: fake.port }),
+      );
+      setSelectedPageId(27);
+      let spawned = false;
+
+      const port = await ensureBridge(() => {
+        spawned = true;
+        health.deep = "ok";
+        return new EventEmitter() as unknown as SpawnedBridge;
+      });
+
+      expect(spawned).toBe(true);
+      expect(port).toBe(fake.port);
+      expect(() => process.kill(bridgeProcess.pid!, 0)).toThrow();
+      expect(getSelectedPageId()).toBeNull();
+    } finally {
+      bridgeProcess.kill("SIGTERM");
+      await waitForProcessExit(bridgeProcess.pid!, 2000);
+      await fake.close();
+    }
   });
 
   it("fails fast with a port-collision error when the bridge exits with the EADDRINUSE code", async () => {
