@@ -189,7 +189,7 @@ examples:
   chrome-devtools-axi snapshot
   chrome-devtools-axi snapshot --full`,
 
-  click: `usage: chrome-devtools-axi click @<uid> [--full]
+  click: `usage: chrome-devtools-axi click @<uid> [--double] [--full]
 Click an interactive element by its ref from the snapshot.
 
 args:
@@ -198,10 +198,12 @@ args:
           (older generation) returns a STALE_REF error so you know to re-snapshot.
 
 flags:
-  --full  Show complete snapshot without truncation
+  --double  Double-click, e.g. to put a grid cell into edit mode
+  --full    Show complete snapshot without truncation
 
 examples:
   chrome-devtools-axi click @g1:1
+  chrome-devtools-axi click @g1:7 --double
   chrome-devtools-axi click @g2:12 --full`,
 
   fill: `usage: chrome-devtools-axi fill @<uid> <text> [--full]
@@ -1233,7 +1235,7 @@ async function handleScreenshot(args: string[]): Promise<string> {
 }
 
 async function handleClick(args: string[], full: boolean): Promise<string> {
-  const uid = args[0];
+  const uid = args.find((arg) => arg !== "--double");
   if (!uid) {
     throw new CdpError("Missing element ref", "VALIDATION_ERROR", [
       "Run `chrome-devtools-axi click @<uid>` — get uid from snapshot",
@@ -1242,6 +1244,7 @@ async function handleClick(args: string[], full: boolean): Promise<string> {
 
   const snapshot = await callWithSnapshot("click", {
     uid: await parseUidFresh(uid),
+    ...(args.includes("--double") ? { dblClick: true } : {}),
   });
   return formatPageOutput(snapshot, "click", undefined, full);
 }
@@ -1900,7 +1903,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   open: ["--full", "--timeout"],
   screenshot: ["--uid", "--full-page", "--format"],
   snapshot: ["--full"],
-  click: ["--full"],
+  click: ["--double", "--full"],
   fill: ["--full"],
   type: ["--full"],
   press: ["--full"],

@@ -203,6 +203,10 @@ do not trigger browser actions. To refresh the selected page, use
 Like other snapshot-producing commands, `reload` accepts `--full` for an
 untruncated snapshot.
 
+`click @<uid> --double` sends a double-click, which some widgets need, such as
+a data grid cell that enters edit mode on double-click. Then `type` and `press`
+send real key events to the focused editor.
+
 ### Page Management
 
 | Command           | Description                 |
@@ -298,6 +302,7 @@ are command-specific; the CLI rejects a flag that is not listed by
 | `-v`, `-V`, `--version`     | Show the installed CLI version              |
 | `--check`                   | Check for available updates (update)        |
 | `--full`                    | Show complete output without truncation     |
+| `--double`                  | Double-click (click)                        |
 | `--no-snapshot`             | Omit auto snapshot (newpage/selectpage)     |
 | `--background`              | Open new page in background (newpage)       |
 | `--context <name>`          | Open in a separate context (newpage)        |
