@@ -179,15 +179,18 @@ examples:
   chrome-devtools-axi screenshot ./element.png --uid @g1:3
   chrome-devtools-axi screenshot ./full.png --full-page --format jpeg`,
 
-  snapshot: `usage: chrome-devtools-axi snapshot [--full]
+  snapshot: `usage: chrome-devtools-axi snapshot [--full] [--verbose]
 Capture the current page accessibility snapshot.
 
 flags:
-  --full  Show complete snapshot without truncation
+  --full     Show complete snapshot without truncation
+  --verbose  Include every node, not just interesting ones, e.g. generic
+             divs that custom widgets build without ARIA roles. Much larger.
 
 examples:
   chrome-devtools-axi snapshot
-  chrome-devtools-axi snapshot --full`,
+  chrome-devtools-axi snapshot --full
+  chrome-devtools-axi snapshot --verbose`,
 
   click: `usage: chrome-devtools-axi click @<uid> [--full]
 Click an interactive element by its ref from the snapshot.
@@ -1135,10 +1138,17 @@ export function parseUid(arg: string): string {
   return check.uid;
 }
 
-/** Tag a freshly captured snapshot with a bumped generation marker. */
-async function stampFresh(): Promise<string> {
+/**
+ * Tag a freshly captured snapshot with a bumped generation marker. `verbose`
+ * asks chrome-devtools-mcp for every node instead of only interesting ones.
+ */
+async function stampFresh(verbose = false): Promise<string> {
   return captureFreshSnapshot(callTool, async () =>
-    stripSnapshotHeader(await callTool("take_snapshot")),
+    stripSnapshotHeader(
+      await (verbose
+        ? callTool("take_snapshot", { verbose: true })
+        : callTool("take_snapshot")),
+    ),
   );
 }
 
@@ -1209,9 +1219,15 @@ async function handleOpen(rawArgs: string[], full: boolean): Promise<string> {
   return formatPageOutput(snapshot, "open", url, full);
 }
 
-async function handleSnapshot(full: boolean): Promise<string> {
-  const snapshot = await stampFresh();
-  return formatPageOutput(snapshot, "snapshot", undefined, full);
+async function handleSnapshot(args: string[], full: boolean): Promise<string> {
+  const verbose = args.includes("--verbose");
+  const snapshot = await stampFresh(verbose);
+  return formatPageOutput(
+    snapshot,
+    verbose ? "snapshot --verbose" : "snapshot",
+    undefined,
+    full,
+  );
 }
 
 async function handleScreenshot(args: string[]): Promise<string> {
@@ -1859,7 +1875,7 @@ function validateCommandFlags(
 
 const COMMAND_HANDLERS: Record<string, CommandFn> = {
   open: withFullFlag(handleOpen),
-  snapshot: async (args) => handleSnapshot(splitFullFlag(args).full),
+  snapshot: withFullFlag(handleSnapshot),
   screenshot: withoutFullFlag(handleScreenshot),
   click: withFullFlag(handleClick),
   fill: withFullFlag(handleFill),
@@ -1899,7 +1915,7 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
 const COMMAND_FLAGS: Record<string, readonly string[]> = {
   open: ["--full", "--timeout"],
   screenshot: ["--uid", "--full-page", "--format"],
-  snapshot: ["--full"],
+  snapshot: ["--full", "--verbose"],
   click: ["--full"],
   fill: ["--full"],
   type: ["--full"],
