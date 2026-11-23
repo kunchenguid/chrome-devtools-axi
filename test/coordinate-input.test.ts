@@ -25,7 +25,12 @@ vi.mock("../src/client.js", () => ({
   stopBridge: vi.fn(),
 }));
 
-import { getCommandHelp, main, TOP_HELP } from "../src/cli.js";
+import {
+  getCommandHelp,
+  main,
+  TOP_HELP,
+  VIEWPORT_READ_TIMEOUT_MS,
+} from "../src/cli.js";
 import { CdpError } from "../src/client.js";
 import * as generation from "../src/generation.js";
 import { isCoordinateToolUnavailable, VISION_ENV } from "../src/vision.js";
@@ -130,6 +135,11 @@ describe("click-at", () => {
     {
       argv: ["click-at", "10", "Infinity"],
       error: "Coordinates must be non-negative numbers",
+    },
+    {
+      // 309 nines: matches the decimal spelling but overflows to Infinity.
+      argv: ["click-at", "10", `${"9".repeat(309)}.5`],
+      error: "Coordinates must be finite numbers",
     },
     { argv: ["click-at", "-5", "20"], error: "Unknown flag -5 for `click-at`" },
     {
@@ -289,6 +299,40 @@ describe("screenshot viewport", () => {
 
     expect(decode(output())).toEqual({ screenshot: shot });
     expect(process.exitCode).toBeUndefined();
+  });
+});
+
+describe("screenshot viewport deadline", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reports the saved screenshot when the viewport read never answers", async () => {
+    vi.useFakeTimers();
+    const shot = resolve(process.cwd(), "shot.png");
+    const output = captureStdout();
+    mockBrowser({
+      take_screenshot: () => `Saved screenshot to ${shot}.`,
+      // A page paused in the debugger never runs the script.
+      evaluate_script: () => new Promise<never>(() => {}),
+    });
+
+    let settled = false;
+    const run = main(["screenshot", "./shot.png"]).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(VIEWPORT_READ_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await run;
+
+    expect(decode(output())).toEqual({ screenshot: shot });
+    expect(process.exitCode).toBeUndefined();
+    // The request itself carries the deadline, so its socket closes too.
+    expect(
+      callTool.mock.calls.find(([tool]) => tool === "evaluate_script")?.[2],
+    ).toEqual({ timeoutMs: VIEWPORT_READ_TIMEOUT_MS });
+    expect(VIEWPORT_READ_TIMEOUT_MS).toBeLessThanOrEqual(5000);
   });
 });
 

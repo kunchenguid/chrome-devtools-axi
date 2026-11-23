@@ -731,20 +731,33 @@ function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+/** How long the optional viewport read may hold up a saved screenshot. */
+export const VIEWPORT_READ_TIMEOUT_MS = 3000;
+
 /**
  * Read the selected page's viewport size (CSS pixels) and devicePixelRatio.
  *
  * Best-effort: the screenshot is already saved when this runs, so a page that
- * cannot answer (a navigation in flight, a blocking dialog) omits the
- * coordinate frame rather than turning a written file into a failure.
+ * cannot answer (a navigation in flight, a blocking dialog, a paused debugger)
+ * omits the coordinate frame rather than turning a written file into a
+ * failure or a stall. The deadline both settles the read and closes its
+ * request, so the CLI can exit.
  */
 async function readViewportInfo(): Promise<ViewportInfo | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const parsed: unknown = JSON.parse(
-      parseEvalResult(
-        await callTool("evaluate_script", { function: VIEWPORT_FUNCTION }),
+    const result = await Promise.race([
+      callTool(
+        "evaluate_script",
+        { function: VIEWPORT_FUNCTION },
+        { timeoutMs: VIEWPORT_READ_TIMEOUT_MS },
       ),
-    );
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), VIEWPORT_READ_TIMEOUT_MS);
+      }),
+    ]);
+    if (result === null) return null;
+    const parsed: unknown = JSON.parse(parseEvalResult(result));
     if (typeof parsed !== "object" || parsed === null) return null;
     const { width, height, devicePixelRatio } = parsed as Record<
       string,
@@ -760,6 +773,8 @@ async function readViewportInfo(): Promise<ViewportInfo | null> {
     return { width, height, devicePixelRatio };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -799,11 +814,18 @@ export function parseClickAtArgs(args: string[]): ClickAtArgs {
       [CLICK_AT_USAGE_HINT],
     );
   }
-  return {
-    x: Number(xRaw),
-    y: Number(yRaw),
-    dblClick: args.includes("--double"),
-  };
+  const x = Number(xRaw);
+  const y = Number(yRaw);
+  // An over-long decimal still matches the pattern but converts to Infinity,
+  // which JSON would send as null.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new CdpError(
+      `Coordinates must be finite numbers, got ${xRaw} ${yRaw}`,
+      "VALIDATION_ERROR",
+      [CLICK_AT_USAGE_HINT],
+    );
+  }
+  return { x, y, dblClick: args.includes("--double") };
 }
 
 function coordinateToolsDisabledError(): CdpError {
