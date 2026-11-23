@@ -203,6 +203,11 @@ do not trigger browser actions. To refresh the selected page, use
 Like other snapshot-producing commands, `reload` accepts `--full` for an
 untruncated snapshot.
 
+Some widgets never reach the accessibility tree as anything with a role: a data
+grid built from role-less `div`s, for example. `snapshot --verbose` includes
+every node instead of only interesting ones, so those cells show up as
+`generic` refs that `click` can target. The snapshot is much larger.
+
 ### Page Management
 
 | Command           | Description                 |
@@ -298,6 +303,7 @@ are command-specific; the CLI rejects a flag that is not listed by
 | `-v`, `-V`, `--version`     | Show the installed CLI version              |
 | `--check`                   | Check for available updates (update)        |
 | `--full`                    | Show complete output without truncation     |
+| `--verbose`                 | Include every node (snapshot)               |
 | `--no-snapshot`             | Omit auto snapshot (newpage/selectpage)     |
 | `--background`              | Open new page in background (newpage)       |
 | `--context <name>`          | Open in a separate context (newpage)        |
