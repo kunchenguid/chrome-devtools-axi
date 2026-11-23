@@ -27,6 +27,7 @@ export type PageListEntry = {
  */
 export const PAGE_SCOPED_TOOLS: ReadonlySet<string> = new Set([
   "click",
+  "click_at",
   "drag",
   "emulate",
   "evaluate_script",

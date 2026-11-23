@@ -737,6 +737,7 @@ function resolveToolArgs(
 export async function callTool(
   name: string,
   args: Record<string, unknown> = {},
+  opts: { timeoutMs?: number } = {},
 ): Promise<string> {
   // Owned by this call alone, so a concurrent `run`-script call cannot
   // overwrite or consume this one's reconnect attribution.
@@ -748,7 +749,7 @@ export async function callTool(
     resolved = resolveToolArgs(name, args, notice.pageIdentityChanged);
     const result = await postTool(port, name, resolved, {
       roots: collectRootDirs(name, resolved),
-      timeoutMs: callRequestTimeoutMs(resolved),
+      timeoutMs: opts.timeoutMs ?? callRequestTimeoutMs(resolved),
     });
     rememberToolRouting(name, resolved, result);
     return result;
