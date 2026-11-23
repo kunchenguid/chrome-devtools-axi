@@ -33,6 +33,7 @@ import { parsePagesList } from "./pages.js";
 import { CONTEXT_NAME, overlaySessionSelected } from "./selected-page.js";
 import { resolveOutputPath } from "./paths.js";
 import { VERSION } from "./version.js";
+import { isCoordinateToolUnavailable, VISION_ENV } from "./vision.js";
 import {
   captureFreshSnapshot,
   parseUidFresh as parseUidFreshShared,
@@ -53,10 +54,10 @@ export type MainOptions = {
 };
 
 export const TOP_HELP = `usage: chrome-devtools-axi [command] [args] [flags]
-commands[36]:
-  open <url>, snapshot, screenshot <path>, click @<uid>, fill @<uid> <text>,
-  type <text>, press <key>, scroll <dir>, back, reload, wait <ms|text>, eval <js>,
-  run,
+commands[37]:
+  open <url>, snapshot, screenshot <path>, click @<uid>, click-at <x> <y>,
+  fill @<uid> <text>, type <text>, press <key>, scroll <dir>,
+  back, reload, wait <ms|text>, eval <js>, run,
   hover @<uid>, drag @<from> @<to>, fillform @<uid>=<val>..., dialog <action>,
   upload @<uid> <path>, pages, newpage <url>, selectpage <id>, closepage <id>,
   resize <w> <h>, emulate, console, console-get <id>, network,
@@ -125,6 +126,9 @@ environment:
                                     Default navigation timeout in ms for open and newpage
                                     (positive integer). --timeout wins.
                                     Unset: chrome-devtools-mcp's 10000 ms default.
+  CHROME_DEVTOOLS_AXI_VISION        Set to 1 to start chrome-devtools-mcp with --experimentalVision,
+                                    which enables click-at (coordinate clicks). Read when the
+                                    bridge starts; run 'stop' after changing it.
   CHROME_DEVTOOLS_AXI_IDLE_TIMEOUT_MS
                                     Opt-in: a bridge started with this set stops itself after
                                     this many ms with no commands (min: 1000). Unset or 0: the
@@ -165,7 +169,10 @@ args:
   <path>  File path to save the screenshot (required)
 
 Relative output paths resolve against the directory where you run the CLI.
-Output reports the resolved absolute path.
+Output reports the resolved absolute path, plus the page's viewport size in
+CSS pixels and its devicePixelRatio. Image pixels are CSS pixels times
+devicePixelRatio: for a viewport capture, divide an image point by it to get
+the CSS coordinates click-at takes.
 
 flags:
   --uid @<uid>    Capture a specific element instead of the full viewport.
@@ -203,6 +210,27 @@ flags:
 examples:
   chrome-devtools-axi click @g1:1
   chrome-devtools-axi click @g2:12 --full`,
+
+  "click-at": `usage: chrome-devtools-axi click-at <x> <y> [--double] [--full]
+Click at viewport coordinates with a real mouse event, for targets the
+snapshot has no ref for (canvas, virtualized or role-less grid cells).
+The browser hit-tests the point, so it reaches into iframes too.
+Requires CHROME_DEVTOOLS_AXI_VISION=1 when the bridge starts.
+
+args:
+  <x>  CSS pixels from the left edge of the viewport (required)
+  <y>  CSS pixels from the top edge of the viewport (required)
+
+Take a screenshot to find the point. Its output reports devicePixelRatio:
+divide image pixels by it to get CSS pixels.
+
+flags:
+  --double  Double-click, e.g. to put a grid cell into edit mode
+  --full    Show complete snapshot without truncation
+
+examples:
+  chrome-devtools-axi click-at 300 183
+  chrome-devtools-axi click-at 300 183 --double`,
 
   fill: `usage: chrome-devtools-axi fill @<uid> <text> [--full]
 Fill a form field with text.
@@ -679,8 +707,128 @@ export function parseScreenshotArgs(args: string[]): ScreenshotArgs {
   return { filePath, uid, fullPage, format };
 }
 
-export function formatScreenshotOutput(filePath: string): string {
-  return encode({ screenshot: filePath });
+/** The page's coordinate frame, so an agent can map image pixels to CSS pixels. */
+export interface ViewportInfo {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
+
+export function formatScreenshotOutput(
+  filePath: string,
+  viewport?: ViewportInfo | null,
+): string {
+  return encode(
+    viewport ? { screenshot: filePath, viewport } : { screenshot: filePath },
+  );
+}
+
+// evaluate_script invokes its payload, so this must be a callable.
+const VIEWPORT_FUNCTION =
+  "() => ({ width: innerWidth, height: innerHeight, devicePixelRatio })";
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Read the selected page's viewport size (CSS pixels) and devicePixelRatio.
+ *
+ * Best-effort: the screenshot is already saved when this runs, so a page that
+ * cannot answer (a navigation in flight, a blocking dialog) omits the
+ * coordinate frame rather than turning a written file into a failure.
+ */
+async function readViewportInfo(): Promise<ViewportInfo | null> {
+  try {
+    const parsed: unknown = JSON.parse(
+      parseEvalResult(
+        await callTool("evaluate_script", { function: VIEWPORT_FUNCTION }),
+      ),
+    );
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const { width, height, devicePixelRatio } = parsed as Record<
+      string,
+      unknown
+    >;
+    if (
+      !isPositiveNumber(width) ||
+      !isPositiveNumber(height) ||
+      !isPositiveNumber(devicePixelRatio)
+    ) {
+      return null;
+    }
+    return { width, height, devicePixelRatio };
+  } catch {
+    return null;
+  }
+}
+
+export interface ClickAtArgs {
+  x: number;
+  y: number;
+  dblClick: boolean;
+}
+
+const CLICK_AT_USAGE_HINT =
+  "Run `chrome-devtools-axi click-at 120 80` - x and y are CSS pixels from the viewport's top-left corner";
+
+// Plain decimal CSS pixels. Number() alone would also accept "", "0x10",
+// "1e3" and "Infinity", none of which a caller means as a coordinate.
+const COORDINATE_PATTERN = /^\d+(?:\.\d+)?$/;
+
+/** Parse `click-at <x> <y> [--double]` (after `--full` is removed). */
+export function parseClickAtArgs(args: string[]): ClickAtArgs {
+  const positional = args.filter((arg) => arg !== "--double");
+  if (positional.length < 2) {
+    throw new CdpError("Missing x and/or y coordinate", "VALIDATION_ERROR", [
+      CLICK_AT_USAGE_HINT,
+    ]);
+  }
+  if (positional.length > 2) {
+    throw new CdpError(
+      `Unexpected argument: ${positional[2]}`,
+      "VALIDATION_ERROR",
+      [CLICK_AT_USAGE_HINT],
+    );
+  }
+  const [xRaw, yRaw] = positional;
+  if (!COORDINATE_PATTERN.test(xRaw) || !COORDINATE_PATTERN.test(yRaw)) {
+    throw new CdpError(
+      `Coordinates must be non-negative numbers, got ${xRaw} ${yRaw}`,
+      "VALIDATION_ERROR",
+      [CLICK_AT_USAGE_HINT],
+    );
+  }
+  return {
+    x: Number(xRaw),
+    y: Number(yRaw),
+    dblClick: args.includes("--double"),
+  };
+}
+
+function coordinateToolsDisabledError(): CdpError {
+  const sharedServer = Boolean(
+    process.env.CHROME_DEVTOOLS_AXI_MCP_SERVER_URL?.trim(),
+  );
+  const suggestions = sharedServer
+    ? [
+        "Restart the shared chrome-devtools-mcp service with --experimentalVision=true",
+      ]
+    : process.env[VISION_ENV] === "1"
+      ? [
+          `The running bridge started before ${VISION_ENV}=1 was set. Run \`chrome-devtools-axi stop\`, then retry so the bridge restarts with coordinate tools`,
+        ]
+      : [
+          `Set ${VISION_ENV}=1, run \`chrome-devtools-axi stop\`, then retry so the bridge restarts with coordinate tools`,
+        ];
+  suggestions.push(
+    "Run `chrome-devtools-axi snapshot` to look for a ref to `click` instead",
+  );
+  return new CdpError(
+    "click-at needs chrome-devtools-mcp's coordinate tools, which this browser session did not enable",
+    "VALIDATION_ERROR",
+    suggestions,
+  );
 }
 
 function parseScreenshotOutputPath(result: string): string {
@@ -1229,7 +1377,8 @@ async function handleScreenshot(args: string[]): Promise<string> {
   if (parsed.format) toolArgs.format = parsed.format;
 
   const result = await callTool("take_screenshot", toolArgs);
-  return formatScreenshotOutput(parseScreenshotOutputPath(result));
+  const savedPath = parseScreenshotOutputPath(result);
+  return formatScreenshotOutput(savedPath, await readViewportInfo());
 }
 
 async function handleClick(args: string[], full: boolean): Promise<string> {
@@ -1244,6 +1393,27 @@ async function handleClick(args: string[], full: boolean): Promise<string> {
     uid: await parseUidFresh(uid),
   });
   return formatPageOutput(snapshot, "click", undefined, full);
+}
+
+async function handleClickAt(args: string[], full: boolean): Promise<string> {
+  const { x, y, dblClick } = parseClickAtArgs(args);
+  try {
+    await callTool("click_at", {
+      x,
+      y,
+      ...(dblClick ? { dblClick: true } : {}),
+    });
+  } catch (error) {
+    if (
+      error instanceof CdpError &&
+      isCoordinateToolUnavailable(error.message)
+    ) {
+      throw coordinateToolsDisabledError();
+    }
+    throw error;
+  }
+  const snapshot = await stampFresh();
+  return formatPageOutput(snapshot, "click-at", undefined, full);
 }
 
 async function handleFill(args: string[], full: boolean): Promise<string> {
@@ -1862,6 +2032,7 @@ const COMMAND_HANDLERS: Record<string, CommandFn> = {
   snapshot: async (args) => handleSnapshot(splitFullFlag(args).full),
   screenshot: withoutFullFlag(handleScreenshot),
   click: withFullFlag(handleClick),
+  "click-at": withFullFlag(handleClickAt),
   fill: withFullFlag(handleFill),
   type: withFullFlag(handleType),
   press: withFullFlag(handlePress),
@@ -1901,6 +2072,7 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   screenshot: ["--uid", "--full-page", "--format"],
   snapshot: ["--full"],
   click: ["--full"],
+  "click-at": ["--double", "--full"],
   fill: ["--full"],
   type: ["--full"],
   press: ["--full"],

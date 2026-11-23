@@ -186,6 +186,8 @@ describe("buildTransportArgs", () => {
       process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
     savedEnv.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH =
       process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH;
+    savedEnv.CHROME_DEVTOOLS_AXI_VISION =
+      process.env.CHROME_DEVTOOLS_AXI_VISION;
     delete process.env.CHROME_DEVTOOLS_AXI_HEADED;
     delete process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS;
     delete process.env.CHROME_DEVTOOLS_AXI_BROWSER_URL;
@@ -194,9 +196,16 @@ describe("buildTransportArgs", () => {
     delete process.env.CHROME_DEVTOOLS_AXI_WS_HEADERS;
     delete process.env.CHROME_DEVTOOLS_AXI_CHANNEL;
     delete process.env.CHROME_DEVTOOLS_AXI_EXECUTABLE_PATH;
+    delete process.env.CHROME_DEVTOOLS_AXI_VISION;
   });
 
   afterEach(() => {
+    if (savedEnv.CHROME_DEVTOOLS_AXI_VISION === undefined) {
+      delete process.env.CHROME_DEVTOOLS_AXI_VISION;
+    } else {
+      process.env.CHROME_DEVTOOLS_AXI_VISION =
+        savedEnv.CHROME_DEVTOOLS_AXI_VISION;
+    }
     process.env.CHROME_DEVTOOLS_AXI_HEADED =
       savedEnv.CHROME_DEVTOOLS_AXI_HEADED;
     process.env.CHROME_DEVTOOLS_AXI_CHROME_ARGS =
@@ -526,6 +535,60 @@ describe("buildTransportArgs", () => {
     const args = buildTransportArgs();
     expect(args).toContain("--browserUrl=http://127.0.0.1:9222");
     expect(args.some((a) => a.startsWith("--wsHeaders="))).toBe(false);
+  });
+
+  const VISION_MODES: Array<{ mode: string; env: Record<string, string> }> = [
+    { mode: "default isolated launch", env: {} },
+    {
+      mode: "user data dir launch",
+      env: { CHROME_DEVTOOLS_AXI_USER_DATA_DIR: "/tmp/profile" },
+    },
+    { mode: "auto connect", env: { CHROME_DEVTOOLS_AXI_AUTO_CONNECT: "1" } },
+    {
+      mode: "browser URL",
+      env: { CHROME_DEVTOOLS_AXI_BROWSER_URL: "http://127.0.0.1:9222" },
+    },
+    {
+      mode: "ws endpoint",
+      env: { CHROME_DEVTOOLS_AXI_BROWSER_URL: "ws://127.0.0.1:9222/devtools" },
+    },
+  ];
+
+  it.each(
+    VISION_MODES.flatMap(({ mode, env }) =>
+      [
+        { vision: undefined, enabled: false },
+        { vision: "1", enabled: true },
+        { vision: "0", enabled: false },
+        { vision: "true", enabled: false },
+        { vision: "", enabled: false },
+      ].map((entry) => ({ mode, env, ...entry })),
+    ),
+  )(
+    "passes --experimentalVision=true in $mode only when CHROME_DEVTOOLS_AXI_VISION=1 (got $vision)",
+    ({ env, vision, enabled }) => {
+      for (const [key, value] of Object.entries(env)) process.env[key] = value;
+      if (vision !== undefined) process.env.CHROME_DEVTOOLS_AXI_VISION = vision;
+
+      const args = buildTransportArgs();
+
+      expect(args.filter((arg) => arg.includes("experimentalVision"))).toEqual(
+        enabled ? ["--experimentalVision=true"] : [],
+      );
+    },
+  );
+
+  it("appends the vision flag without disturbing the launch args", () => {
+    process.env.CHROME_DEVTOOLS_AXI_VISION = "1";
+    expect(buildTransportArgs()).toEqual([
+      "-y",
+      "chrome-devtools-mcp@latest",
+      "--isolated",
+      "--headless",
+      "--chrome-arg=--use-mock-keychain",
+      "--chrome-arg=--password-store=basic",
+      "--experimentalVision=true",
+    ]);
   });
 });
 

@@ -167,7 +167,7 @@ In URL-only shared mode, the bridge uses Streamable HTTP directly instead:
 | ----------------- | -------------------------------------------- |
 | `open <url>`      | Navigate to URL and snapshot                 |
 | `snapshot`        | Capture current page state                   |
-| `screenshot <p>`  | Save a screenshot to a file                  |
+| `screenshot <p>`  | Save a screenshot and report its viewport    |
 | `scroll <dir>`    | Scroll: up, down, top, bottom                |
 | `back`            | Navigate back                                |
 | `reload`          | Reload the selected page and snapshot        |
@@ -187,6 +187,7 @@ chrome-devtools-axi eval "() => { const rows = [...document.querySelectorAll('tr
 | Command                    | Description                    |
 | -------------------------- | ------------------------------ |
 | `click @<uid>`             | Click an element by ref        |
+| `click-at <x> <y>`         | Click at viewport coordinates  |
 | `fill @<uid> <text>`       | Fill a form field              |
 | `type <text>`              | Type text at current focus     |
 | `press <key>`              | Press a keyboard key           |
@@ -202,6 +203,25 @@ do not trigger browser actions. To refresh the selected page, use
 `chrome-devtools-axi reload` (or `chrome-devtools-axi eval '() => location.reload()'`).
 Like other snapshot-producing commands, `reload` accepts `--full` for an
 untruncated snapshot.
+
+Some widgets never reach the accessibility tree as anything clickable: a data
+grid built from role-less `div`s, a virtualized list, a canvas. `click-at <x> <y>`
+clicks at viewport coordinates with a real mouse event, which the browser
+hit-tests through iframes, including cross-site ones. `click-at --double` sends
+a double-click, which many grids need to put a cell into edit mode; then `type`
+and `press` send real key events to the editor.
+
+```sh
+export CHROME_DEVTOOLS_AXI_VISION=1   # see Configuration > Coordinate tools
+chrome-devtools-axi screenshot ./page.png
+chrome-devtools-axi click-at 300 183 --double
+chrome-devtools-axi type "See [Docs](https://example.com)"
+chrome-devtools-axi press Enter
+```
+
+`click-at` takes CSS pixels from the viewport's top-left corner. `screenshot`
+reports the viewport's CSS size and `devicePixelRatio`; image pixels are CSS
+pixels times that ratio, so divide a point in a viewport screenshot by it.
 
 ### Page Management
 
@@ -298,6 +318,7 @@ are command-specific; the CLI rejects a flag that is not listed by
 | `-v`, `-V`, `--version`     | Show the installed CLI version              |
 | `--check`                   | Check for available updates (update)        |
 | `--full`                    | Show complete output without truncation     |
+| `--double`                  | Double-click (click-at)                     |
 | `--no-snapshot`             | Omit auto snapshot (newpage/selectpage)     |
 | `--background`              | Open new page in background (newpage)       |
 | `--context <name>`          | Open in a separate context (newpage)        |
@@ -489,6 +510,23 @@ State is stored in `~/.chrome-devtools-axi/` (named sessions nest under `session
 | --------------------- | ------------------------------------- |
 | `bridge.pid`          | PID and port of the running bridge    |
 | `snapshot-generation` | Counter used to detect stale uid refs |
+
+### Coordinate tools
+
+chrome-devtools-mcp keeps its coordinate tools, such as `click_at`, behind its
+`--experimentalVision` flag. Set `CHROME_DEVTOOLS_AXI_VISION=1` to have the
+bridge pass `--experimentalVision=true` and enable `click-at`:
+
+```sh
+export CHROME_DEVTOOLS_AXI_VISION=1
+chrome-devtools-axi stop   # a running bridge keeps the flags it started with
+chrome-devtools-axi click-at 300 183
+```
+
+It applies in every local launch and attach mode. A shared MCP service
+(`CHROME_DEVTOOLS_AXI_MCP_SERVER_URL`) owns its own flags, so start that service
+with `--experimentalVision=true` instead. Without the flag, `click-at` fails and
+says how to enable it.
 
 ### Navigation timeout
 

@@ -57,6 +57,7 @@ import {
   resolveBridgeScript,
 } from "./bridge-script.js";
 import { mcpRequestTimeoutMs } from "./navigation-timeout.js";
+import { VISION_ENV } from "./vision.js";
 import {
   createIdleTracker,
   IDLE_TIMEOUT_ENV,
@@ -776,6 +777,13 @@ export function buildTransportArgs(): string[] {
     for (const arg of extraChromeArgs.trim().split(/\s+/)) {
       args.push(`--chrome-arg=${arg}`);
     }
+  }
+
+  // chrome-devtools-mcp registers its coordinate tools (click_at) only behind
+  // --experimentalVision. It is a server feature flag, not a browser launch
+  // option, so it applies in every local launch and attach mode.
+  if (process.env[VISION_ENV] === "1") {
+    args.push("--experimentalVision=true");
   }
 
   return args;

@@ -822,6 +822,7 @@ describe("needsPageId", () => {
     expect(needsPageId("evaluate_script", { function: "() => 1" })).toBe(true);
     expect(needsPageId("take_snapshot")).toBe(true);
     expect(needsPageId("click", { uid: "1" })).toBe(true);
+    expect(needsPageId("click_at", { x: 10, y: 20 })).toBe(true);
     expect(needsPageId("fill", { uid: "1", value: "x" })).toBe(true);
   });
 
